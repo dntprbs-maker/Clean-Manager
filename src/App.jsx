@@ -1,5 +1,5 @@
 /**
- * 크린드림 캘린더 — 네이버 캘린더 완전 재현
+ * 클린메니저 — 네이버 캘린더 완전 재현
  * 3단계 스와이프 모드:
  *   MODE 0 (full)  → 월간 그리드 전체 (이벤트 텍스트 바 표시)
  *   MODE 1 (half)  → 상단 도트 그리드 + 하단 시간표 시트
@@ -27,7 +27,7 @@ const CALS = [
   { id:"manus",   label:"마누스",      color:"#4285F4", checked:true  },
   { id:"outer",   label:"청소 외주",   color:"#0F9D58", checked:true  },
   { id:"cancel",  label:"취소,변경",   color:"#607D8B", checked:true  },
-  { id:"cr",      label:"크린드림춘계",color:"#4285F4", checked:true  },
+  { id:"cr",      label:"클린메니저춘계",color:"#4285F4", checked:true  },
   { id:"uwork",   label:"우용준 일",   color:"#EA4335", checked:true  },
   { id:"popmart", label:"팝마트",      color:"#9C27B0", checked:true  },
   { id:"nabi",    label:"나비엠알",    color:"#9C27B0", checked:true  },
@@ -245,7 +245,7 @@ const makeSamples = () => {
     {id:uid(),title:"오전 은평",calId:"clean0",  start:`${y}-${m}-13`,end:`${y}-${m}-13`,allDay:false,startTime:"09:00",endTime:"11:00",place:"은평",description:"",repeat:"none"},
     {id:uid(),title:"전일 조민",calId:"lh",      start:`${y}-${m}-13`,end:`${y}-${m}-13`,allDay:true, startTime:"",endTime:"",place:"",description:"",repeat:"none"},
     {id:uid(),title:"청소119",calId:"clean0",    start:`${y}-${m}-14`,end:`${y}-${m}-14`,allDay:false,startTime:"09:00",endTime:"11:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"크린드림 춘계 아유회",calId:"cr",start:`${y}-${m}-16`,end:`${y}-${m}-17`,allDay:true,startTime:"",endTime:"",place:"",description:"",repeat:"none"},
+    {id:uid(),title:"클린메니저 춘계 아유회",calId:"cr",start:`${y}-${m}-16`,end:`${y}-${m}-17`,allDay:true,startTime:"",endTime:"",place:"",description:"",repeat:"none"},
     {id:uid(),title:"소공동 정",calId:"regular", start:`${y}-${m}-16`,end:`${y}-${m}-16`,allDay:false,startTime:"17:00",endTime:"19:00",place:"",description:"",repeat:"none"},
     {id:uid(),title:"오후 중화",calId:"clean0",  start:`${y}-${m}-17`,end:`${y}-${m}-17`,allDay:false,startTime:"14:00",endTime:"16:00",place:"중화",description:"",repeat:"none"},
     {id:uid(),title:"인천 서구",calId:"clean0",  start:`${y}-${m}-17`,end:`${y}-${m}-17`,allDay:false,startTime:"10:00",endTime:"12:00",place:"인천",description:"",repeat:"none"},
