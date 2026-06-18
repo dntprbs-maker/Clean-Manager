@@ -13,7 +13,8 @@ import {
 import {
   Search, Plus, X, MapPin, Link2, RotateCcw, Clock,
   Calendar, AlignLeft, ChevronDown, ChevronLeft,
-  ChevronRight, Menu, Settings, User, Edit3, Trash2
+  ChevronRight, Menu, Settings, User, Edit3, Trash2,
+  PieChart, Bell, History, ExternalLink, Activity
 } from "lucide-react";
 
 // ── 캘린더 목록 ───────────────────────────────────────────────
@@ -321,9 +322,35 @@ function Provider({ children }) {
   const [currentScreen, setCurrentScreen] = useState("calendar"); // "calendar" | "employees"
   const [empModal, setEmpModal] = useState({ open: false, editId: null });
 
-  const addEvent    = useCallback(ev=>setEvents(p=>[...p,{...ev,id:uid()}]),[]);
-  const updateEvent = useCallback(ev=>setEvents(p=>p.map(e=>e.id===ev.id?ev:e)),[]);
-  const deleteEvent = useCallback(id=>setEvents(p=>p.filter(e=>e.id!==id)),[]);
+  // 부가 기능 상태
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [notices, setNotices] = useState([
+    { id: "n1", title: "이번 주말 작업 시 안전화 필수 착용", author: "김사장", date: "2026-06-18" }
+  ]);
+  const [links, setLinks] = useState([]); // 처음에는 빈 목록
+
+  const addLog = useCallback((action, detail) => {
+    setActivityLogs(p => [{ id: uid(), time: new Date().toISOString(), user: currentUser, action, detail }, ...p].slice(0, 100));
+  }, [currentUser]);
+
+  const addEvent    = useCallback(ev => {
+    setEvents(p => [...p, { ...ev, id: uid() }]);
+    addLog("등록", `'${ev.title}' 일정을 등록했습니다.`);
+  }, [addLog]);
+  
+  const updateEvent = useCallback(ev => {
+    setEvents(p => p.map(e => e.id === ev.id ? ev : e));
+    addLog("수정", `'${ev.title}' 일정을 수정했습니다.`);
+  }, [addLog]);
+  
+  const deleteEvent = useCallback(id => {
+    setEvents(p => {
+      const target = p.find(e => e.id === id);
+      if (target) addLog("삭제", `'${target.title}' 일정을 삭제했습니다.`);
+      return p.filter(e => e.id !== id);
+    });
+  }, [addLog]);
+  
   const openModal   = useCallback((date=null,editId=null)=>setModal({open:true,date,editId}),[]);
   const closeModal  = useCallback(()=>setModal({open:false,date:null,editId:null}),[]);
   const toggleCal   = useCallback(id=>setCals(p=>p.map(c=>c.id===id?{...c,checked:!c.checked}:c)),[]);
@@ -363,6 +390,9 @@ function Provider({ children }) {
       currentUser,setCurrentUser,
       currentScreen,setCurrentScreen,
       empModal,setEmpModal,
+      activityLogs,setActivityLogs,
+      notices,setNotices,
+      links,setLinks,
     }}>
       {children}
     </Ctx.Provider>
@@ -1295,8 +1325,34 @@ function SideDrawer() {
           </div>
         </div>
 
-        {/* 캘린더 목록 대신 하단 여백 추가 */}
-        <div className="flex-1 bg-white"></div>
+        {/* 부가 기능 메뉴 */}
+        <div className="flex-1 overflow-y-auto bg-gray-50 py-3">
+          <div className="px-4 pb-2 text-xs font-bold text-gray-400">부가 기능</div>
+          <button 
+            onClick={() => { setCurrentScreen("dashboard"); setDrawer(false); }}
+            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+            <PieChart size={20} className="text-blue-500" />
+            <span className="text-sm font-medium text-gray-700 flex-1 text-left">일정 요약 (대시보드)</span>
+          </button>
+          <button 
+            onClick={() => { setCurrentScreen("notice"); setDrawer(false); }}
+            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+            <Bell size={20} className="text-orange-500" />
+            <span className="text-sm font-medium text-gray-700 flex-1 text-left">팀 공지사항</span>
+          </button>
+          <button 
+            onClick={() => { setCurrentScreen("activity_log"); setDrawer(false); }}
+            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+            <History size={20} className="text-green-500" />
+            <span className="text-sm font-medium text-gray-700 flex-1 text-left">최근 작업 내역</span>
+          </button>
+          <button 
+            onClick={() => { setCurrentScreen("links"); setDrawer(false); }}
+            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+            <ExternalLink size={20} className="text-purple-500" />
+            <span className="text-sm font-medium text-gray-700 flex-1 text-left">자주 쓰는 외부 링크</span>
+          </button>
+        </div>
       </div>
     </>
   );
@@ -1848,20 +1904,192 @@ function EmployeeFormModal() {
   );
 }
 
+// ── 대시보드 화면 ───────────────────────────────────────────────
+function DashboardScreen() {
+  const { visibleEvents, setCurrentScreen } = useC();
+  const today = new Date();
+  const todayStr = fmtDate(today);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  const tmrwStr = fmtDate(tomorrow);
+
+  const todayEvs = visibleEvents.filter(e => e.start <= todayStr && (!e.end || e.end >= todayStr));
+  const tmrwEvs = visibleEvents.filter(e => e.start <= tmrwStr && (!e.end || e.end >= tmrwStr));
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col p-5 gap-5 relative">
+      <div className="flex items-center gap-3 mb-2">
+        <button onClick={() => setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
+          <ChevronLeft size={24} className="text-gray-700"/>
+        </button>
+        <h2 className="text-xl font-bold text-gray-900">일정 요약</h2>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col items-center justify-center">
+          <span className="text-gray-500 text-sm font-medium mb-1">오늘 일정</span>
+          <span className="text-3xl font-bold text-blue-600">{todayEvs.length}건</span>
+        </div>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col items-center justify-center">
+          <span className="text-gray-500 text-sm font-medium mb-1">내일 일정</span>
+          <span className="text-3xl font-bold text-indigo-600">{tmrwEvs.length}건</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 공지사항 화면 ───────────────────────────────────────────────
+function NoticeScreen() {
+  const { notices, currentUser, setCurrentScreen } = useC();
+  return (
+    <div className="flex-1 overflow-y-auto bg-white flex flex-col p-5">
+      <div className="flex items-center gap-3 mb-5">
+        <button onClick={() => setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+          <ChevronLeft size={24} className="text-gray-700"/>
+        </button>
+        <h2 className="text-xl font-bold text-gray-900 flex-1">팀 공지사항</h2>
+        {["사장", "관리팀"].includes(currentUser.team) && (
+          <button className="text-sm font-bold text-blue-600 px-3 py-1.5 rounded-full hover:bg-blue-50">
+            새 공지
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-4">
+        {notices.map(n => (
+          <div key={n.id} className="p-4 rounded-xl bg-gray-50 border border-gray-100">
+            <h3 className="font-bold text-gray-900 text-base mb-1">{n.title}</h3>
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              <span>{n.author}</span>
+              <span>•</span>
+              <span>{n.date}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── 최근 작업 내역 화면 ───────────────────────────────────────────────
+function ActivityLogScreen() {
+  const { activityLogs, setCurrentScreen } = useC();
+  return (
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col p-5">
+      <div className="flex items-center gap-3 mb-5">
+        <button onClick={() => setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
+          <ChevronLeft size={24} className="text-gray-700"/>
+        </button>
+        <h2 className="text-xl font-bold text-gray-900">최근 작업 내역</h2>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+        {activityLogs.length === 0 ? (
+          <div className="py-10 text-center text-gray-400 text-sm">최근 작업 내역이 없습니다.</div>
+        ) : (
+          <div className="flex flex-col relative before:absolute before:inset-y-0 before:left-[11px] before:w-px before:bg-gray-200">
+            {activityLogs.map((log, i) => (
+              <div key={log.id} className="relative flex gap-4 py-3">
+                <div className="w-[23px] h-[23px] rounded-full bg-white border-4 border-gray-100 shrink-0 z-10 flex items-center justify-center">
+                  <div className={`w-2 h-2 rounded-full ${
+                    log.action==="등록" ? "bg-green-500" :
+                    log.action==="수정" ? "bg-blue-500" : "bg-red-500"
+                  }`}/>
+                </div>
+                <div className="flex flex-col pb-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm text-gray-900">{log.user.name}</span>
+                    <span className="text-[11px] text-gray-400 font-medium bg-gray-100 px-1.5 py-0.5 rounded">{log.user.team}</span>
+                  </div>
+                  <span className="text-sm text-gray-600 mt-1 leading-snug">{log.detail}</span>
+                  <span className="text-[11px] text-gray-400 mt-1">{new Date(log.time).toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'})}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── 외부 링크 화면 ───────────────────────────────────────────────
+function ExternalLinksScreen() {
+  const { links, setLinks, setCurrentScreen } = useC();
+  const [adding, setAdding] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newUrl, setNewUrl] = useState("");
+
+  const handleAdd = () => {
+    if(!newTitle.trim() || !newUrl.trim()) return;
+    setLinks(p => [...p, { id: uid(), title: newTitle, url: newUrl.startsWith('http') ? newUrl : `https://${newUrl}` }]);
+    setNewTitle("");
+    setNewUrl("");
+    setAdding(false);
+  };
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col p-5">
+      <div className="flex items-center gap-3 mb-5">
+        <button onClick={() => setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
+          <ChevronLeft size={24} className="text-gray-700"/>
+        </button>
+        <h2 className="text-xl font-bold text-gray-900 flex-1">외부 링크</h2>
+        <button onClick={() => setAdding(true)} className="p-2 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200">
+          <Plus size={20}/>
+        </button>
+      </div>
+
+      {adding && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4 flex flex-col gap-3">
+          <input type="text" placeholder="링크 이름 (예: 네이버 지도)" value={newTitle} onChange={e=>setNewTitle(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 transition-colors"/>
+          <input type="text" placeholder="URL 주소 (예: map.naver.com)" value={newUrl} onChange={e=>setNewUrl(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 transition-colors"/>
+          <div className="flex gap-2 justify-end mt-1">
+            <button onClick={()=>setAdding(false)} className="px-4 py-2 text-sm font-bold text-gray-500 hover:bg-gray-100 rounded-lg">취소</button>
+            <button onClick={handleAdd} className="px-4 py-2 text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 rounded-lg">추가</button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-3">
+        {links.length === 0 && !adding ? (
+          <div className="py-10 text-center text-gray-400 text-sm">등록된 외부 링크가 없습니다.</div>
+        ) : (
+          links.map(lk => (
+            <a key={lk.id} href={lk.url} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-4 bg-white rounded-2xl shadow-sm border border-gray-100 hover:border-blue-200 transition-colors group">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center shrink-0">
+                  <Link2 size={20} className="text-purple-600"/>
+                </div>
+                <span className="font-bold text-gray-800">{lk.title}</span>
+              </div>
+              <ChevronRight size={20} className="text-gray-300 group-hover:text-blue-500 transition-colors"/>
+            </a>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AppInner() {
   const { currentScreen } = useC();
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none">
       <style>{ANIM_CSS}</style>
       <TopHeader/>
-      {currentScreen === "calendar" ? (
+      {currentScreen === "calendar" && (
         <>
           <CalendarView/>
           <FloatingButtons/>
         </>
-      ) : (
-        <EmployeeListScreen/>
       )}
+      {currentScreen === "employees" && <EmployeeListScreen/>}
+      {currentScreen === "dashboard" && <DashboardScreen/>}
+      {currentScreen === "notice" && <NoticeScreen/>}
+      {currentScreen === "activity_log" && <ActivityLogScreen/>}
+      {currentScreen === "links" && <ExternalLinksScreen/>}
       <SideDrawer/>
       <DetailSheet/>
       <EventModal/>
