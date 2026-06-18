@@ -1313,26 +1313,34 @@ function SideDrawer() {
               {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.team})</option>)}
             </select>
           </div>
-          <div className="flex gap-2 mt-3">
-            <button onClick={()=>{setDrawer(false); setCurrentScreen("calendar");}} className="flex-1 py-2 rounded-xl border border-gray-200 text-xs text-gray-600 flex items-center justify-center gap-1 hover:bg-gray-50">
-              <Calendar size={12}/> 캘린더
+          <div className="flex mt-3">
+            <button onClick={()=>{setDrawer(false); setCurrentScreen("calendar");}} className="w-full py-2 rounded-xl border border-gray-200 text-xs text-gray-800 font-bold bg-white shadow-sm flex items-center justify-center gap-1 hover:bg-gray-50">
+              <Calendar size={14}/> 캘린더 바로가기
             </button>
-            {(currentUser.team === "사장" || currentUser.team === "관리팀") && (
-              <button onClick={()=>{setDrawer(false); setCurrentScreen("employees");}} className="flex-1 py-2 rounded-xl border border-blue-200 bg-blue-50 text-xs text-blue-700 flex items-center justify-center gap-1 font-bold">
-                <User size={12}/> 직원 관리
-              </button>
-            )}
           </div>
         </div>
 
-        {/* 부가 기능 메뉴 */}
+        {/* 전체 메뉴 */}
         <div className="flex-1 overflow-y-auto bg-gray-50 py-3">
-          <div className="px-4 pb-2 text-xs font-bold text-gray-400">부가 기능</div>
+          {(currentUser.team === "사장" || currentUser.team === "관리팀") && (
+            <button 
+              onClick={() => { setCurrentScreen("employees"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <User size={20} className="text-blue-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">직원 관리</span>
+            </button>
+          )}
+          <button 
+            onClick={() => { setCurrentScreen("team_schedule"); setDrawer(false); }}
+            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+            <Calendar size={20} className="text-indigo-500" />
+            <span className="text-sm font-medium text-gray-700 flex-1 text-left">팀별 일정</span>
+          </button>
           <button 
             onClick={() => { setCurrentScreen("dashboard"); setDrawer(false); }}
             className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
             <PieChart size={20} className="text-blue-500" />
-            <span className="text-sm font-medium text-gray-700 flex-1 text-left">일정 요약 (대시보드)</span>
+            <span className="text-sm font-medium text-gray-700 flex-1 text-left">일정 요약</span>
           </button>
           <button 
             onClick={() => { setCurrentScreen("notice"); setDrawer(false); }}
@@ -1904,6 +1912,47 @@ function EmployeeFormModal() {
   );
 }
 
+}
+
+// ── 팀별 일정 화면 ───────────────────────────────────────────────
+function TeamScheduleScreen() {
+  const { visibleEvents, setCurrentScreen } = useC();
+  // 팀별 일정 개수 계산
+  const teamStats = {};
+  TEAMS.forEach(t => teamStats[t] = 0);
+  visibleEvents.forEach(e => {
+    const cal = calById(e.calId);
+    TEAMS.forEach(t => {
+      const keyword = t.replace("팀", "");
+      if (cal.label.includes(keyword)) teamStats[t]++;
+    });
+  });
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col p-5 gap-5 relative">
+      <div className="flex items-center gap-3 mb-2">
+        <button onClick={() => setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
+          <ChevronLeft size={24} className="text-gray-700"/>
+        </button>
+        <h2 className="text-xl font-bold text-gray-900">팀별 일정 현황</h2>
+      </div>
+      <div className="flex flex-col gap-3">
+        {TEAMS.map(team => (
+          <div key={team} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex items-center justify-between hover:border-blue-200 transition-colors cursor-pointer">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center shrink-0">
+                <User size={20} className="text-indigo-600"/>
+              </div>
+              <span className="font-bold text-gray-800">{team}</span>
+            </div>
+            <span className="text-sm font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded-full">{teamStats[team]}건</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── 대시보드 화면 ───────────────────────────────────────────────
 function DashboardScreen() {
   const { visibleEvents, setCurrentScreen } = useC();
@@ -2086,6 +2135,7 @@ function AppInner() {
         </>
       )}
       {currentScreen === "employees" && <EmployeeListScreen/>}
+      {currentScreen === "team_schedule" && <TeamScheduleScreen/>}
       {currentScreen === "dashboard" && <DashboardScreen/>}
       {currentScreen === "notice" && <NoticeScreen/>}
       {currentScreen === "activity_log" && <ActivityLogScreen/>}
