@@ -1908,10 +1908,10 @@ function EmployeeFormModal() {
 function DashboardScreen() {
   const { visibleEvents, setCurrentScreen } = useC();
   const today = new Date();
-  const todayStr = fmtDate(today);
+  const todayStr = fmt(today);
   const tomorrow = new Date(today);
   tomorrow.setDate(today.getDate() + 1);
-  const tmrwStr = fmtDate(tomorrow);
+  const tmrwStr = fmt(tomorrow);
 
   const todayEvs = visibleEvents.filter(e => e.start <= todayStr && (!e.end || e.end >= todayStr));
   const tmrwEvs = visibleEvents.filter(e => e.start <= tmrwStr && (!e.end || e.end >= tmrwStr));
