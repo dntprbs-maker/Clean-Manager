@@ -34,7 +34,7 @@ const CALS = [
 ];
 
 // ── 직원 관리 ───────────────────────────────────────────────
-const TEAMS = ["사장", "관리팀", "영업팀", "입주청소팀", "정기청소팀", "에어컨청소팀"];
+const INIT_TEAMS = ["사장", "관리팀", "영업팀", "입주청소팀", "정기청소팀", "에어컨청소팀"];
 const ROLES = ["최고관리자", "팀장", "팀원"];
 const INIT_USERS = [
   { id: "u1", name: "김사장", phone: "010-0000-0000", team: "사장", role: "최고관리자" },
@@ -317,6 +317,8 @@ function Provider({ children }) {
   const [sheetMode,setSheetMode] = useState(1); // 기본: 도트그리드+시트
 
   // 직원 관리 상태
+  const [teams, setTeams] = useState(INIT_TEAMS);
+  const [teamModal, setTeamModal] = useState(false);
   const [users, setUsers] = useState(INIT_USERS);
   const [currentUser, setCurrentUser] = useState(INIT_USERS[0]); 
   const [currentScreen, setCurrentScreen] = useState("calendar"); // "calendar" | "employees"
@@ -386,6 +388,7 @@ function Provider({ children }) {
       searchOpen,setSearchOpen,
       searchQuery,setSearchQuery,
       sheetMode,setSheetMode,
+      teams,setTeams,teamModal,setTeamModal,
       users,setUsers,
       currentUser,setCurrentUser,
       currentScreen,setCurrentScreen,
@@ -1794,17 +1797,25 @@ export default function App() {
 
 // ── 직원 관리 메인 화면 ───────────────────────────────────────────────
 function EmployeeListScreen() {
-  const { users, setEmpModal } = useC();
+  const { users, setEmpModal, teams, setTeamModal } = useC();
   const [filter, setFilter] = useState("전체");
 
   const filtered = filter === "전체" ? users : users.filter(u => u.team === filter);
 
   return (
     <div className="flex-1 bg-gray-50 flex flex-col relative overflow-hidden">
+      {/* 상단 버튼 영역 (헤더) */}
+      <div className="bg-white px-4 py-3 border-b border-gray-100 flex items-center justify-between z-10 shrink-0">
+        <h2 className="text-xl font-bold text-gray-900">직원 관리</h2>
+        <button onClick={() => setTeamModal(true)} className="px-3 py-1.5 text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">
+          팀 관리
+        </button>
+      </div>
+
       {/* 필터 영역: 스크롤 안 되고 상단에 고정 */}
       <div className="px-4 py-3 bg-white border-b border-gray-100 flex gap-2 overflow-x-auto whitespace-nowrap hide-scrollbar shrink-0 z-10 shadow-sm relative">
         <button onClick={()=>setFilter("전체")} className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-colors ${filter==="전체" ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-500 border-gray-200"}`}>전체</button>
-        {TEAMS.map(t => (
+        {teams.map(t => (
           <button key={t} onClick={()=>setFilter(t)} className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-colors ${filter===t ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-500 border-gray-200"}`}>{t}</button>
         ))}
       </div>
@@ -1837,7 +1848,7 @@ function EmployeeListScreen() {
 
 // ── 직원 등록/수정 모달 ───────────────────────────────────────────────
 function EmployeeFormModal() {
-  const { empModal, setEmpModal, users, setUsers } = useC();
+  const { empModal, setEmpModal, users, setUsers, activityLogs, setActivityLogs, teams } = useC();
   const [form, setForm] = useState({ name: "", phone: "", team: "입주청소팀", role: "팀원" });
 
   useEffect(() => {
@@ -1889,7 +1900,7 @@ function EmployeeFormModal() {
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1">소속 팀</label>
             <select value={form.team} onChange={e=>setForm({...form,team:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800">
-              {TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
+              {teams.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div>
@@ -1914,15 +1925,83 @@ function EmployeeFormModal() {
 
 }
 
+// ── 팀 관리 모달 ───────────────────────────────────────────────
+function TeamManagementModal() {
+  const { teamModal, setTeamModal, teams, setTeams, users, setUsers } = useC();
+  const [newTeam, setNewTeam] = useState("");
+
+  if (!teamModal) return null;
+
+  const close = () => setTeamModal(false);
+
+  const handleAdd = () => {
+    if (!newTeam.trim()) return;
+    if (teams.includes(newTeam.trim())) {
+      alert("이미 존재하는 팀입니다.");
+      return;
+    }
+    setTeams([...teams, newTeam.trim()]);
+    setNewTeam("");
+  };
+
+  const handleDelete = (targetTeam) => {
+    if (window.confirm("삭제하는 팀의 팀장,팀원은 소속이 미정으로 변경됩니다.")) {
+      setUsers(users.map(u => u.team === targetTeam ? { ...u, team: "미정" } : u));
+      setTeams(teams.filter(t => t !== targetTeam));
+    }
+  };
+
+  return (
+    <div className="absolute inset-0 z-[70] flex flex-col justify-end">
+      <div className="absolute inset-0 bg-black/40" onClick={close} />
+      <div className="relative bg-white rounded-t-3xl h-[85vh] flex flex-col shadow-2xl">
+        <div className="flex items-center justify-between p-5 border-b border-gray-100">
+          <h2 className="text-xl font-bold text-gray-900">팀 관리</h2>
+          <button onClick={close} className="p-2 -mr-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100">
+            <X size={24}/>
+          </button>
+        </div>
+
+        <div className="p-5 flex gap-2 border-b border-gray-50">
+          <input 
+            type="text" 
+            placeholder="새 팀 이름 (예: 특수청소팀)" 
+            value={newTeam} 
+            onChange={e => setNewTeam(e.target.value)}
+            className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-sm outline-none focus:border-blue-500 transition-colors"
+          />
+          <button onClick={handleAdd} className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors">
+            추가
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-3 bg-gray-50">
+          {teams.map(t => (
+            <div key={t} className="flex items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+              <span className="font-bold text-gray-800">{t}</span>
+              <button onClick={() => handleDelete(t)} className="text-gray-400 hover:text-red-500 transition-colors p-2 -mr-2 rounded-full hover:bg-red-50">
+                <Trash2 size={18}/>
+              </button>
+            </div>
+          ))}
+          {teams.length === 0 && (
+            <div className="py-10 text-center text-gray-400 text-sm">등록된 팀이 없습니다.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── 팀별 일정 화면 ───────────────────────────────────────────────
 function TeamScheduleScreen() {
-  const { visibleEvents, setCurrentScreen } = useC();
+  const { visibleEvents, setCurrentScreen, teams } = useC();
   // 팀별 일정 개수 계산
   const teamStats = {};
-  TEAMS.forEach(t => teamStats[t] = 0);
+  teams.forEach(t => teamStats[t] = 0);
   visibleEvents.forEach(e => {
     const cal = calById(e.calId);
-    TEAMS.forEach(t => {
+    teams.forEach(t => {
       const keyword = t.replace("팀", "");
       if (cal.label.includes(keyword)) teamStats[t]++;
     });
@@ -1937,7 +2016,7 @@ function TeamScheduleScreen() {
         <h2 className="text-xl font-bold text-gray-900">팀별 일정 현황</h2>
       </div>
       <div className="flex flex-col gap-3">
-        {TEAMS.map(team => (
+        {teams.map(team => (
           <div key={team} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex items-center justify-between hover:border-blue-200 transition-colors cursor-pointer">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center shrink-0">
@@ -1945,7 +2024,7 @@ function TeamScheduleScreen() {
               </div>
               <span className="font-bold text-gray-800">{team}</span>
             </div>
-            <span className="text-sm font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded-full">{teamStats[team]}건</span>
+            <span className="text-sm font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded-full">{teamStats[team] || 0}건</span>
           </div>
         ))}
       </div>
@@ -2145,6 +2224,7 @@ function AppInner() {
       <EventModal/>
       <SearchModal/>
       <EmployeeFormModal/>
+      <TeamManagementModal/>
     </div>
   );
 }
