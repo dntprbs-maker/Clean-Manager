@@ -1077,24 +1077,14 @@ function DetailSheet() {
 
   return (
     <div
-      className="absolute inset-0 z-50 flex flex-col justify-end"
+      className="absolute inset-0 z-[60] flex flex-col bg-white"
       style={{
-        background: vis ? "rgba(0,0,0,0.32)" : "transparent",
-        backdropFilter: vis ? "blur(2px)" : "none",
-        transition: "background 0.3s ease, backdrop-filter 0.3s ease",
+        transform: vis ? "translateY(0)" : "translateY(100%)",
+        transition: "transform 0.32s cubic-bezier(0.32,0.72,0,1)",
         pointerEvents: vis ? "auto" : "none",
       }}
-      onClick={close}>
-      <div
-        style={{
-          transform: vis ? "translateY(0)" : "translateY(100%)",
-          transition: "transform 0.32s cubic-bezier(0.32,0.72,0,1)",
-        }}
-        className="bg-white rounded-t-3xl shadow-2xl"
-        onClick={e=>e.stopPropagation()}>
-        <div className="flex justify-center pt-3 pb-1">
-          <div className="w-9 h-[3px] bg-gray-200 rounded-full"/>
-        </div>
+      onClick={e=>e.stopPropagation()}>
+
         
         {/* 네이버 스타일 헤더 */}
         <div className="flex items-center justify-between px-2 py-1 border-b border-gray-100">
@@ -1167,7 +1157,6 @@ function DetailSheet() {
             </div>
           )}
         </div>
-      </div>
     </div>
   );
 }
@@ -1306,32 +1295,8 @@ function SideDrawer() {
           </div>
         </div>
 
-        {/* 내 캘린더 타이틀 */}
-        <div className="flex items-center justify-between px-4 py-3">
-          <span className="font-bold text-base">내 캘린더</span>
-          <button className="p-1 rounded-full hover:bg-gray-100">
-            <Plus size={18} className="text-gray-500"/>
-          </button>
-        </div>
-
-        {/* 캘린더 목록 */}
-        <div className="flex-1 overflow-y-auto">
-          {cals.map(cal => (
-            <div key={cal.id} onClick={() => toggleCal(cal.id)}
-              className="flex items-center gap-3 px-4 py-3 active:bg-gray-50 cursor-pointer">
-              <div className="w-5 h-5 rounded flex items-center justify-center border-2 shrink-0 transition-colors"
-                style={cal.checked
-                  ? {backgroundColor:cal.color, borderColor:cal.color}
-                  : {borderColor:"#d1d5db"}}>
-                {cal.checked && <span className="text-white text-xs font-bold">✓</span>}
-              </div>
-              <span className={`text-sm flex-1 ${cal.checked ? "text-gray-800" : "text-gray-400"}`}>
-                {cal.label}
-              </span>
-              <User size={13} className="text-gray-300"/>
-            </div>
-          ))}
-        </div>
+        {/* 캘린더 목록 대신 하단 여백 추가 */}
+        <div className="flex-1 bg-white"></div>
       </div>
     </>
   );
