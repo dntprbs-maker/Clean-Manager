@@ -21,11 +21,6 @@ const CALS = [
   { id:"friends", label:"더친구들",    color:"#4285F4", checked:true  },
   { id:"lh",      label:"전일 LH",     color:"#0F9D58", checked:true  },
   { id:"elec",    label:"전국동시",    color:"#EA4335", checked:true  },
-  { id:"google",  label:"구글 안티",   color:"#FF6D00", checked:true  },
-  { id:"regular", label:"정기청소",    color:"#9C27B0", checked:true  },
-  { id:"review",  label:"리버뷰 정",   color:"#9C27B0", checked:true  },
-  { id:"sk",      label:"SK 쉴더",     color:"#607D8B", checked:true  },
-  { id:"netlify", label:"Netlify",     color:"#4285F4", checked:true  },
   { id:"clean0",  label:"청소 0팀",    color:"#F4B400", checked:true  },
   { id:"import",  label:"중요한약속",  color:"#EA4335", checked:true  },
   { id:"manus",   label:"마누스",      color:"#4285F4", checked:true  },
@@ -35,6 +30,18 @@ const CALS = [
   { id:"uwork",   label:"우용준 일",   color:"#EA4335", checked:true  },
   { id:"popmart", label:"팝마트",      color:"#9C27B0", checked:true  },
   { id:"nabi",    label:"나비엠알",    color:"#9C27B0", checked:true  },
+];
+
+// ── 직원 관리 ───────────────────────────────────────────────
+const TEAMS = ["사장", "관리팀", "영업팀", "입주청소팀", "정기청소팀", "에어컨청소팀"];
+const ROLES = ["최고관리자", "팀장", "팀원"];
+const INIT_USERS = [
+  { id: "u1", name: "김사장", phone: "010-0000-0000", team: "사장", role: "최고관리자" },
+  { id: "u2", name: "이관리", phone: "010-1111-1111", team: "관리팀", role: "팀장" },
+  { id: "u3", name: "박영업", phone: "010-2222-2222", team: "영업팀", role: "팀장" },
+  { id: "u4", name: "최입주", phone: "010-3333-3333", team: "입주청소팀", role: "팀장" },
+  { id: "u5", name: "정팀원", phone: "010-4444-4444", team: "입주청소팀", role: "팀원" },
+  { id: "u6", name: "강정기", phone: "010-5555-5555", team: "정기청소팀", role: "팀장" },
 ];
 
 const HOLIDAYS = {
@@ -85,10 +92,23 @@ function parseEventText(text) {
     result.end   = yr + "-" + mo + "-" + dy;
   }
 
-  // 시간: "오전 9시" / "오후 2시30분" / "오전" / "오후"
-  const hasAM = text.includes("오전");
-  const hasPM = text.includes("오후");
-  const tm = text.match(/(오전|오후)\s*(\d{1,2})시?(?:\s*(\d{2})분?)?/);
+  // 시간: "오전 9시" / "오후 2시30분" / "오전" / "오후" / "종일" / "14시"
+  let hasAM = text.includes("오전");
+  let hasPM = text.includes("오후");
+  const hasAllDay = text.includes("종일");
+  
+  let tm = text.match(/(오전|오후)\s*(\d{1,2})시?(?:\s*(\d{2})분?)?/);
+  if (!tm) {
+    const tm2 = text.match(/(\d{1,2})시(?:\s*(\d{2})분?)?/);
+    if (tm2) {
+      let h = parseInt(tm2[1]);
+      if (h < 12) hasAM = true;
+      else hasPM = true;
+      let ap = h < 12 ? "오전" : "오후";
+      let displayH = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+      tm = [tm2[0], ap, displayH, tm2[2]];
+    }
+  }
   if (tm) {
     const ap = tm[1]; let h = parseInt(tm[2]); const mi = tm[3]?parseInt(tm[3]):0;
     if (ap==="오후" && h<12) h+=12;
@@ -100,22 +120,33 @@ function parseEventText(text) {
     result.startTime="09:00"; result.endTime="11:00"; result.allDay=false;
   } else if (hasPM) {
     result.startTime="14:00"; result.endTime="16:00"; result.allDay=false;
-  } else {
+  } else if (hasAllDay) {
     result.allDay=true;
+  } else {
+    result.allDay=false;
   }
 
-  // 장소: 주소 패턴 줄
+  // 장소: 주소 패턴 줄 (설명글이 섞이지 않도록 첫 번째 주소만 정확히 캐치)
   const lines = text.split("\n");
   const pl = [];
-  lines.forEach(function(line) {
-    const l = line.trim();
-    if (!l) return;
-    const isAddr =
-      /(서울|부산|인천|대구|대전|광주|수원|경기)/.test(l) ||
-      /[가-힣]+(로|길|동|구)\s*\d/.test(l) ||
-      /\d+층/.test(l) || /\d+호/.test(l);
-    if (isAddr) pl.push(l);
-  });
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i].trim();
+    if (!l) continue;
+    const isAddr = 
+      /(서울|부산|인천|대구|대전|광주|울산|세종|제주|경기|강원|충북|충남|전북|전남|경북|경남)/.test(l) ||
+      /[가-힣]+(로|길|동|구|읍|면)\s*\d/.test(l);
+      
+    if (isAddr) {
+      // 주소로 보이는 첫 번째 줄 추가
+      pl.push(l);
+      // 바로 다음 줄이 짧은 상세 주소(예: "2층 201호")일 경우 같이 붙여줌
+      const next = lines[i+1]?.trim();
+      if (next && next.length < 20 && (/\d+층/.test(next) || /\d+호/.test(next))) {
+        pl.push(next);
+      }
+      break; // 주소 덩어리를 찾았으면 즉시 중단 (긴 설명글 방지)
+    }
+  }
   result.place = pl.join(" ");
 
   // 전화번호 + 이름
@@ -134,15 +165,23 @@ function parseEventText(text) {
   const pw = text.match(/(비밀번호|비번)\s*[:：]?\s*([0-9*#!@]+)/);
   const password = pw ? pw[2] : "";
 
-  // 제목 자동 생성
+  // 제목 자동 생성 (시간 -> 지역 -> 면적/방개수)
   const tp = [];
-  if (hasAM) tp.push("오전");
+  if (hasAllDay) tp.push("종일");
+  else if (hasAM) tp.push("오전");
   else if (hasPM) tp.push("오후");
+
   if (result.place) {
-    const dg = result.place.match(/([가-힣]+(로|길|동))/);
+    const dg = result.place.match(/([가-힣]+(구|동|로|길))/);
     if (dg) tp.push(dg[1]);
   }
-  if (phones.length>0 && phones[0].name) tp.push(phones[0].name);
+
+  const roomMatch = text.match(/([가-힣]*방\s*\d+개|원룸|투룸|쓰리룸|포룸|\d+평)/);
+  if (roomMatch) {
+    tp.push(roomMatch[1]);
+  } else if (phones.length>0 && phones[0].name) {
+    tp.push(phones[0].name); // 방 정보가 없으면 담당자 이름으로 대체
+  }
   result.title = tp.join(" ");
 
   // 연락처 필드 별도 저장
@@ -264,12 +303,23 @@ function Provider({ children }) {
   const [events,setEvents]     = useState(() => loadFromStorage(LS_KEY_EVENTS, makeSamples()));
   const [cals,setCals]         = useState(() => loadFromStorage(LS_KEY_CALS, CALS));
   const [modal,setModal]       = useState({open:false,date:null,editId:null});
-  const [current,setCurrent]   = useState(new Date(2026,5,1));
-  const [selDate,setSelDate]   = useState("2026-06-15");
+  const [current,setCurrent]   = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const [selDate,setSelDate]   = useState(() => fmt(new Date()));
   const [detEv,setDetEv]       = useState(null);
   const [drawer,setDrawer]     = useState(false);
+  const [searchOpen,setSearchOpen] = useState(false);
+  const [searchQuery,setSearchQuery] = useState("");
   // 0=full month bar, 1=half dot+sheet, 2=list only
   const [sheetMode,setSheetMode] = useState(1); // 기본: 도트그리드+시트
+
+  // 직원 관리 상태
+  const [users, setUsers] = useState(INIT_USERS);
+  const [currentUser, setCurrentUser] = useState(INIT_USERS[0]); 
+  const [currentScreen, setCurrentScreen] = useState("calendar"); // "calendar" | "employees"
+  const [empModal, setEmpModal] = useState({ open: false, editId: null });
 
   const addEvent    = useCallback(ev=>setEvents(p=>[...p,{...ev,id:uid()}]),[]);
   const updateEvent = useCallback(ev=>setEvents(p=>p.map(e=>e.id===ev.id?ev:e)),[]);
@@ -284,7 +334,18 @@ function Provider({ children }) {
   useEffect(()=>{ saveToStorage(LS_KEY_CALS, cals); }, [cals]);
 
   const checkedIds     = useMemo(()=>new Set(cals.filter(c=>c.checked).map(c=>c.id)),[cals]);
-  const visibleEvents  = useMemo(()=>events.filter(e=>checkedIds.has(e.calId)),[events,checkedIds]);
+  const visibleEvents  = useMemo(()=>{
+    let evs = events.filter(e=>checkedIds.has(e.calId));
+    // 청소팀 권한 체크: 사장/관리/영업팀이 아니면, 본인 팀과 관련된 캘린더만 열람 가능하도록 제한
+    if (!["사장", "관리팀", "영업팀"].includes(currentUser.team)) {
+      const myTeamKeyword = currentUser.team.replace("팀", ""); // 예: "정기청소"
+      evs = evs.filter(e => {
+        const cal = CALS.find(c=>c.id===e.calId);
+        return cal && cal.label.includes(myTeamKeyword);
+      });
+    }
+    return evs;
+  }, [events, checkedIds, currentUser.team]);
 
   return (
     <Ctx.Provider value={{
@@ -295,7 +356,13 @@ function Provider({ children }) {
       selDate,setSelDate,
       detEv,setDetEv,
       drawer,setDrawer,
+      searchOpen,setSearchOpen,
+      searchQuery,setSearchQuery,
       sheetMode,setSheetMode,
+      users,setUsers,
+      currentUser,setCurrentUser,
+      currentScreen,setCurrentScreen,
+      empModal,setEmpModal,
     }}>
       {children}
     </Ctx.Provider>
@@ -367,7 +434,7 @@ function FullMonthCell({ ds, isCm, items, onDate, onEvt }) {
   const d=pd(ds), dow=d.getDay();
   const isHol=!!HOLIDAYS[ds], isSun=dow===0, isSat=dow===6;
   let nc="text-gray-800";
-  if(!isCm)             nc="text-gray-350";
+  if(!isCm)             nc="text-gray-400";
   else if(isSun||isHol) nc="text-red-500";
   else if(isSat)        nc="text-blue-500";
   const vis=items.slice(0,MAX_BARS_FULL), ov=items.length-MAX_BARS_FULL;
@@ -384,6 +451,7 @@ function FullMonthCell({ ds, isCm, items, onDate, onEvt }) {
         transform: pressed ? "scale(0.93)" : "scale(1)",
         transition: "transform 0.12s cubic-bezier(.36,.07,.19,.97)",
         backgroundColor: pressed ? "#f0f4ff" : "transparent",
+        opacity: isCm ? 1 : 0.35
       }}
       className="min-h-[100px] pt-1 pb-1 border-b border-r border-gray-100 cursor-pointer">
       {/* 날짜 */}
@@ -412,7 +480,7 @@ function DotCell({ ds, isCm, dots, onDate, selDate }) {
   return (
     <button onClick={()=>onDate(ds)}
       className="flex flex-col items-center justify-start pt-1"
-      style={{minHeight:"46px"}}>
+      style={{minHeight:"46px", opacity: isCm ? 1 : 0.35}}>
       {/* 날짜 숫자 */}
       <span style={{
         width:28, height:28,
@@ -451,8 +519,11 @@ function useDates(current) {
     const first=new Date(y,m,1), last=new Date(y,m+1,0), dow=first.getDay(), ds=[];
     for(let i=dow-1;i>=0;i--) ds.push({s:fmt(new Date(y,m,-i)),cm:false});
     for(let d=1;d<=last.getDate();d++) ds.push({s:fmt(new Date(y,m,d)),cm:true});
-    const r=42-ds.length;
-    for(let d=1;d<=r;d++) ds.push({s:fmt(new Date(y,m+1,d)),cm:false});
+    const remainder = ds.length % 7;
+    if (remainder > 0) {
+      const daysToAdd = 7 - remainder;
+      for(let d=1;d<=daysToAdd;d++) ds.push({s:fmt(new Date(y,m+1,d)),cm:false});
+    }
     const weeks=[];
     for(let i=0;i<ds.length;i+=7) weeks.push(ds.slice(i,i+7));
     return weeks;
@@ -593,20 +664,20 @@ function ScheduleList({ selDate, compact=false }) {
 //   수직각도 > 55도 → 상하로 판정
 //   → 대각선 스와이프에서 좌우/상하 혼용 완전 차단
 function useSwipe({ onUp, onDown, onLeft, onRight,
-                    hThreshold=40, vThreshold=40 }) {
+                    hThreshold=30, vThreshold=30 }) {
   const sx    = useRef(null);
   const sy    = useRef(null);
-  const fired = useRef(false); // 한 터치당 딱 한 번만 실행
+  const fired = useRef(false);
 
   const judge = (dx, dy) => {
-    if (fired.current) return; // 이미 실행됐으면 무시
+    if (fired.current) return;
     const adx = Math.abs(dx), ady = Math.abs(dy);
     if (adx < hThreshold && ady < vThreshold) return;
     const angle = Math.atan2(ady, adx) * 180 / Math.PI;
-    if (angle < 35 && adx >= hThreshold) {
+    if (angle < 40 && adx >= hThreshold) {
       fired.current = true;
       if (dx > 0) onRight?.(); else onLeft?.();
-    } else if (angle > 55 && ady >= vThreshold) {
+    } else if (angle > 50 && ady >= vThreshold) {
       fired.current = true;
       if (dy > 0) onDown?.(); else onUp?.();
     }
@@ -616,10 +687,9 @@ function useSwipe({ onUp, onDown, onLeft, onRight,
     onTouchStart: e => {
       sx.current    = e.touches[0].clientX;
       sy.current    = e.touches[0].clientY;
-      fired.current = false; // 새 터치 시작 → 잠금 해제
+      fired.current = false;
     },
     onTouchMove: e => {
-      // Move 중에도 threshold 넘으면 즉시 실행 (더 빠른 반응)
       if (sx.current === null || fired.current) return;
       const dx = e.touches[0].clientX - sx.current;
       const dy = e.touches[0].clientY - sy.current;
@@ -632,13 +702,25 @@ function useSwipe({ onUp, onDown, onLeft, onRight,
       judge(dx, dy);
       sx.current = null; sy.current = null; fired.current = false;
     },
+    onTouchCancel: () => {
+      sx.current = null; sy.current = null; fired.current = false;
+    },
     onMouseDown: e => {
       sx.current = e.clientX; sy.current = e.clientY; fired.current = false;
-    },
-    onMouseUp: e => {
-      if (sx.current === null) return;
-      judge(e.clientX - sx.current, e.clientY - sy.current);
-      sx.current = null; sy.current = null; fired.current = false;
+      const handleMouseMove = ev => {
+        if (sx.current === null || fired.current) return;
+        judge(ev.clientX - sx.current, ev.clientY - sy.current);
+      };
+      const handleMouseUp = ev => {
+        if (sx.current !== null && !fired.current) {
+          judge(ev.clientX - sx.current, ev.clientY - sy.current);
+        }
+        sx.current = null; sy.current = null; fired.current = false;
+        window.removeEventListener("mousemove", handleMouseMove);
+        window.removeEventListener("mouseup", handleMouseUp);
+      };
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
     },
   };
 }
@@ -688,40 +770,31 @@ const ANIM_CSS = `
   }
 `;
 
-// ── 슬라이드 래퍼 (월 그리드 좌우 전환 전용) ───────────────────
-// 핵심: mountedKey ref 로 최초 마운트와 실제 월 이동을 구분
-//       최초 마운트(모드 전환 포함) → 애니메이션 없이 바로 표시
-//       slideKey 증가(월 이동) → 좌우 슬라이드 실행
 function SlideTransition({ children, slideKey, direction }) {
   const ref        = useRef(null);
-  const mountedKey = useRef(slideKey); // 마운트 시점의 slideKey 기억
+  const mountedKey = useRef(slideKey);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
 
-    // 마운트 직후(모드 전환) → slideKey 가 mountedKey 와 같음 → 애니 없이 표시
     if (slideKey === mountedKey.current) {
       el.style.transform = "translateX(0)";
-      el.style.opacity   = "1";
       return;
     }
 
-    // 월 이동 → slideKey 증가 → 방향에 따라 슬라이드
     const startX = direction === "left" ? "100%" : "-100%";
     el.style.transition = "none";
     el.style.transform  = `translateX(${startX})`;
-    el.style.opacity    = "0.6";
 
     const raf = requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        el.style.transition = "transform 0.28s cubic-bezier(0.25,0.46,0.45,0.94), opacity 0.15s ease";
+        el.style.transition = "transform 0.28s cubic-bezier(0.25,0.46,0.45,0.94)";
         el.style.transform  = "translateX(0)";
-        el.style.opacity    = "1";
       });
     });
     return () => cancelAnimationFrame(raf);
-  }, [slideKey]);
+  }, [slideKey, direction]);
 
   return (
     <div ref={ref}
@@ -732,45 +805,37 @@ function SlideTransition({ children, slideKey, direction }) {
   );
 }
 
-// ── 날짜 목록 좌우 전환 래퍼 ────────────────────────────────────
-// 핵심:
-//   mountedKey → 마운트 시점 listKey 기억
-//   마운트 직후(모드 전환) → listKey 동일 → 애니 없이 바로 표시
-//   날짜 이동(listKey 증가) → 좌우 슬라이드 실행
 function ListTransition({ children, direction, listKey }) {
   const ref        = useRef(null);
-  const mountedKey = useRef(listKey); // 마운트 시점 listKey 기억
+  const mountedKey = useRef(listKey);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
 
-    // 모드 전환(첫 마운트) → 애니메이션 없이 바로 표시
     if (listKey === mountedKey.current) {
       el.style.transform  = "translateX(0)";
-      el.style.visibility = "visible";
       return;
     }
 
-    // 날짜 이동 → 좌우 슬라이드
-    const startX = direction === "left" ? 48 : -48;
+    const startX = direction === "left" ? "100%" : "-100%";
     el.style.transition = "none";
-    el.style.transform  = `translateX(${startX}px)`;
-    el.style.visibility = "hidden";
+    el.style.transform  = `translateX(${startX})`;
 
     const raf = requestAnimationFrame(() => {
-      el.style.visibility = "visible";
-      el.style.transition = "transform 0.26s cubic-bezier(0.25,0.46,0.45,0.94)";
-      el.style.transform  = "translateX(0)";
+      requestAnimationFrame(() => {
+        el.style.transition = "transform 0.26s cubic-bezier(0.25,0.46,0.45,0.94)";
+        el.style.transform  = "translateX(0)";
+      });
     });
 
     return () => cancelAnimationFrame(raf);
-  }, [listKey]);
+  }, [listKey, direction]);
 
   return (
     <div
       ref={ref}
-      style={{ backgroundColor:"#fff", willChange:"transform", visibility:"hidden" }}
+      style={{ backgroundColor:"#fff", willChange:"transform" }}
       className="flex flex-col flex-1 overflow-hidden"
     >
       {children}
@@ -862,25 +927,23 @@ function CalendarView() {
   };
 
   // ── 그리드용 스와이프
-  // 각도 기반 판별로 좌우(월이동)/상하(모드전환) 정확히 분리
   const gridSwipe = useSwipe({
     onLeft:  goNextMonth,
     onRight: goPrevMonth,
-    onUp:    () => setSheetMode(m => Math.min(m+1, 2)),  // 위로 → 일정 더 보기
-    onDown:  () => setSheetMode(m => Math.max(m-1, 0)),  // 아래로 → 달력 더 보기
-    hThreshold: 50,
-    vThreshold: 50,
+    onUp:    () => setSheetMode(m => m < 2 ? m + 1 : m),
+    onDown:  () => setSheetMode(m => m > 0 ? m - 1 : m),
+    hThreshold: 30,
+    vThreshold: 30,
   });
 
   // ── 시간표용 스와이프
-  // 각도 기반으로 좌우(날이동)/상하(모드전환) 정확히 분리
   const listSwipe = useSwipe({
     onLeft:  goNextDay,
     onRight: goPrevDay,
-    onUp:    () => sheetMode < 2 && setSheetMode(sheetMode + 1), // 위로 → 일정 더 보기
-    onDown:  () => sheetMode > 0 && setSheetMode(sheetMode - 1), // 아래로 → 달력 더 보기
-    hThreshold: 50,
-    vThreshold: 50,
+    onUp:    () => setSheetMode(m => m < 2 ? m + 1 : m),
+    onDown:  () => setSheetMode(m => m > 0 ? m - 1 : m),
+    hThreshold: 30,
+    vThreshold: 30,
   });
 
   return (
@@ -891,7 +954,7 @@ function CalendarView() {
         <div
           key="mode0"
           className="flex-1 overflow-y-auto bg-white"
-          style={{animation:"slideInFromTop 0.28s cubic-bezier(0.25,0.46,0.45,0.94) both"}}
+          style={{animation:"slideInFromTop 0.28s cubic-bezier(0.25,0.46,0.45,0.94) both", touchAction:"none"}}
           {...gridSwipe}>
           {/* 요일 헤더 */}
           <div className="grid grid-cols-7 border-b border-gray-100">
@@ -926,7 +989,7 @@ function CalendarView() {
           style={{animation:"slideInFromBottom 0.28s cubic-bezier(0.25,0.46,0.45,0.94) both"}}
           className="flex flex-col flex-1 overflow-hidden">
           {/* 도트 그리드 */}
-          <div className="bg-white border-b border-gray-100" {...gridSwipe}>
+          <div className="bg-white border-b border-gray-100 shrink-0" style={{touchAction:"none"}} {...gridSwipe}>
             <div className="grid grid-cols-7 pt-0.5">
               {WD.map((w,i) => (
                 <div key={w} className={`text-center text-[11px] font-semibold py-0.5
@@ -1014,7 +1077,7 @@ function DetailSheet() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col justify-end"
+      className="absolute inset-0 z-50 flex flex-col justify-end"
       style={{
         background: vis ? "rgba(0,0,0,0.32)" : "transparent",
         backdropFilter: vis ? "blur(2px)" : "none",
@@ -1032,31 +1095,77 @@ function DetailSheet() {
         <div className="flex justify-center pt-3 pb-1">
           <div className="w-9 h-[3px] bg-gray-200 rounded-full"/>
         </div>
-        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-50">
-          <span className="text-sm font-semibold" style={{color:cal.color}}>{cal.label}</span>
+        
+        {/* 네이버 스타일 헤더 */}
+        <div className="flex items-center justify-between px-2 py-1 border-b border-gray-100">
+          <div className="flex gap-1">
+            <button onClick={close} className="p-2 rounded-full hover:bg-gray-100"><X size={22} className="text-gray-700"/></button>
+          </div>
+          <span className="text-base font-bold text-gray-800">일정</span>
           <div className="flex gap-1">
             <button onClick={()=>{close();setTimeout(()=>openModal(null,detEv.id),300);}}
-              className="p-2 rounded-full hover:bg-gray-100"><Edit3 size={17} className="text-gray-500"/></button>
+              className="p-2 rounded-full hover:bg-gray-100"><Edit3 size={19} className="text-gray-600"/></button>
             <button onClick={()=>{deleteEvent(detEv.id);close();}}
-              className="p-2 rounded-full hover:bg-gray-100"><Trash2 size={17} className="text-gray-500"/></button>
-            <button onClick={close}
-              className="p-2 rounded-full hover:bg-gray-100"><X size={17} className="text-gray-500"/></button>
+              className="p-2 rounded-full hover:bg-gray-100"><Trash2 size={19} className="text-gray-600"/></button>
           </div>
         </div>
-        <div className="px-5 pt-4 pb-8 space-y-3">
-          <div className="flex gap-3 items-start">
-            <div className="w-1 rounded-full shrink-0 mt-1" style={{background:cal.color,minHeight:"40px"}}/>
-            <div>
-              <h2 className="text-lg font-bold text-gray-900">{detEv.title}</h2>
-              <p className="text-sm text-gray-400 mt-0.5">
-                {detEv.start}{detEv.end&&detEv.end!==detEv.start?` ~ ${detEv.end}`:""}
-                {!detEv.allDay&&detEv.startTime&&` · ${fmtTime(detEv.startTime)} ~ ${fmtTime(detEv.endTime)}`}
-                {detEv.allDay&&" · 종일"}
-              </p>
+
+        <div className="flex-1 overflow-y-auto pb-10 max-h-[80vh]">
+          {/* 담당팀 */}
+          <div className="flex items-center px-5 py-4 border-b border-gray-50 gap-1">
+            <span style={{color:cal.color}} className="font-semibold text-[15px]">{cal.label}</span>
+            <User size={14} className="text-gray-400 ml-0.5"/>
+          </div>
+
+          {/* 제목 */}
+          <div className="flex items-start px-5 py-5 border-b border-gray-100 gap-3">
+            <div className="w-4 h-4 rounded-full shrink-0 mt-1 shadow-sm" style={{backgroundColor:cal.color}}/>
+            <h2 className="text-xl font-bold text-gray-900 leading-snug">{detEv.title}</h2>
+          </div>
+
+          {/* 시간 */}
+          <div className="flex items-start px-5 py-5 border-b border-gray-100 gap-4">
+            <Clock size={20} className="text-gray-400 shrink-0 mt-0.5"/>
+            <div className="flex-1">
+              {detEv.allDay && <div className="text-[15px] font-semibold text-gray-800 mb-1">종일</div>}
+              <div className="text-[15px] text-gray-800 leading-relaxed">
+                {detEv.start}
+                {detEv.end && detEv.end !== detEv.start ? ` ~ ${detEv.end}` : ""}
+                {!detEv.allDay && <br/>}
+                {!detEv.allDay && detEv.startTime && <span className="font-medium text-gray-900">{fmtTime(detEv.startTime)} ~ {fmtTime(detEv.endTime)}</span>}
+              </div>
             </div>
           </div>
-          {detEv.place&&<div className="flex gap-3 items-center text-sm text-gray-500 pl-4"><MapPin size={14} className="text-gray-400"/>{detEv.place}</div>}
-          {detEv.description&&<div className="flex gap-3 items-start text-sm text-gray-500 pl-4"><AlignLeft size={14} className="shrink-0 mt-0.5"/>{detEv.description}</div>}
+
+          {/* 장소 */}
+          {detEv.place && (
+            <div className="flex items-start px-5 py-5 border-b border-gray-100 gap-4">
+              <MapPin size={20} className="text-gray-400 shrink-0 mt-0.5"/>
+              <a href={`https://map.naver.com/v5/search/${encodeURIComponent(detEv.place)}`} target="_blank" rel="noopener noreferrer" className="flex-1 text-[15px] text-gray-800 hover:underline leading-relaxed">
+                {detEv.place}
+              </a>
+            </div>
+          )}
+
+          {/* 연락처 */}
+          {detEv.contact && (
+            <div className="flex items-start px-5 py-5 border-b border-gray-100 gap-4">
+              <span className="text-gray-400 shrink-0 text-lg">📞</span>
+              <a href={`tel:${detEv.contact.replace(/[^0-9]/g, '')}`} className="flex-1 text-[15px] text-green-600 font-bold hover:underline">
+                {detEv.contact}
+              </a>
+            </div>
+          )}
+
+          {/* 메모 */}
+          {detEv.description && (
+            <div className="flex items-start px-5 py-5 gap-4">
+              <AlignLeft size={20} className="text-gray-400 shrink-0 mt-0.5"/>
+              <div className="flex-1 text-[15px] text-gray-800 whitespace-pre-wrap leading-relaxed">
+                {detEv.description}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1065,7 +1174,7 @@ function DetailSheet() {
 
 // ── 사이드 드로어 (스와이프 열기/닫기 지원) ───────────────────────
 function SideDrawer() {
-  const { drawer, setDrawer, cals, toggleCal } = useC();
+  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, setCurrentScreen, users } = useC();
 
   // 드래그 상태
   const startX   = useRef(null);
@@ -1140,7 +1249,7 @@ function SideDrawer() {
     <>
       {/* 배경 오버레이 — 탭해서 닫기 */}
       <div
-        className="fixed inset-0 z-40 transition-opacity duration-300"
+        className="absolute inset-0 z-40 transition-opacity duration-300"
         style={{
           background: "rgba(0,0,0,0.35)",
           opacity: drawer ? 1 : 0,
@@ -1152,7 +1261,7 @@ function SideDrawer() {
       {/* 엣지 스와이프 감지 영역 (드로어 닫혀있을 때 왼쪽 20px) */}
       {!drawer && (
         <div
-          className="fixed top-0 left-0 h-full z-50"
+          className="absolute top-0 left-0 h-full z-50"
           style={{ width: 20, touchAction: "none" }}
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
@@ -1163,7 +1272,7 @@ function SideDrawer() {
       {/* 드로어 패널 */}
       <div
         ref={panelRef}
-        className="fixed top-0 left-0 h-full bg-white z-50 shadow-2xl flex flex-col"
+        className="absolute top-0 left-0 h-full bg-white z-50 shadow-2xl flex flex-col"
         style={{
           width: DRAWER_W,
           transform: `translateX(-${DRAWER_W}px)`,
@@ -1175,17 +1284,25 @@ function SideDrawer() {
       >
         {/* 프로필 헤더 */}
         <div className="px-4 pt-12 pb-4 border-b border-gray-100">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-xl border border-blue-100">🏠</div>
-            <div><p className="font-bold text-base">우세균</p><p className="text-xs text-gray-400">dntprbs</p></div>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-xl border border-blue-100">🏠</div>
+              <div><p className="font-bold text-base">{currentUser.name}</p><p className="text-xs text-gray-500">{currentUser.team} · {currentUser.role}</p></div>
+            </div>
+            {/* 테스트용 계정 전환 (디버깅) */}
+            <select className="text-[10px] border border-gray-200 text-gray-500 p-1 rounded outline-none" onChange={e => setCurrentUser(users.find(u=>u.id===e.target.value))} value={currentUser.id}>
+              {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.team})</option>)}
+            </select>
           </div>
           <div className="flex gap-2 mt-3">
-            <button className="flex-1 py-2 rounded-xl border border-gray-200 text-xs text-gray-600 flex items-center justify-center gap-1">
-              <Calendar size={12}/> 캘린더 설정
+            <button onClick={()=>{setDrawer(false); setCurrentScreen("calendar");}} className="flex-1 py-2 rounded-xl border border-gray-200 text-xs text-gray-600 flex items-center justify-center gap-1 hover:bg-gray-50">
+              <Calendar size={12}/> 캘린더
             </button>
-            <button className="flex-1 py-2 rounded-xl border border-gray-200 text-xs text-gray-600 flex items-center justify-center gap-1">
-              <Settings size={12}/> 앱 설정
-            </button>
+            {(currentUser.team === "사장" || currentUser.team === "관리팀") && (
+              <button onClick={()=>{setDrawer(false); setCurrentScreen("employees");}} className="flex-1 py-2 rounded-xl border border-blue-200 bg-blue-50 text-xs text-blue-700 flex items-center justify-center gap-1 font-bold">
+                <User size={12}/> 직원 관리
+              </button>
+            )}
           </div>
         </div>
 
@@ -1272,7 +1389,7 @@ function EventModal() {
         opacity:   anim ? 1 : 0,
         transition: "transform 0.35s cubic-bezier(0.32,0.72,0,1), opacity 0.35s ease",
       }}
-      className="fixed inset-0 z-50 bg-white flex flex-col">
+      className="absolute inset-0 z-50 bg-white flex flex-col">
       {/* ═══ STEP 1: 텍스트 입력 단계 ═══ */}
       {step === "paste" ? (
         <>
@@ -1330,12 +1447,14 @@ function EventModal() {
       {/* ── 새 디자인 폼 (네이버 스타일) ───────────────────────── */}
       <div className="flex-1 overflow-y-auto bg-white">
 
-        {/* 캘린더(담당팀) 선택 — 맨 위 네이버처럼 */}
-        <div className="px-4 py-3 border-b border-gray-100">
+        {/* 캘린더(담당팀) 선택 — 맨 위 */}
+        <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-100 bg-gray-50/50">
+          <User size={18} className="text-gray-400 shrink-0"/>
+          <span className="text-sm font-semibold text-gray-700 shrink-0">담당팀</span>
           <select
             value={form.calId}
             onChange={e=>set("calId",e.target.value)}
-            className="text-sm font-semibold outline-none bg-transparent"
+            className="flex-1 text-sm font-bold outline-none bg-transparent text-right"
             style={{color: cals.find(c=>c.id===form.calId)?.color || "#333"}}>
             {cals.map(cal=>(
               <option key={cal.id} value={cal.id}>{cal.label}</option>
@@ -1368,7 +1487,7 @@ function EventModal() {
             </div>
             <button onClick={()=>set("allDay",!form.allDay)}
               className={`relative w-12 h-6 rounded-full transition-colors duration-200
-                ${form.allDay?"bg-gray-400":"bg-gray-200"}`}>
+                ${form.allDay?"bg-blue-600":"bg-gray-200"}`}>
               <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform
                 ${form.allDay?"translate-x-6":"translate-x-0"}`}/>
             </button>
@@ -1405,20 +1524,7 @@ function EventModal() {
           {errs.time&&<p className="text-red-500 text-xs pl-9">{errs.time}</p>}
         </div>
 
-        {/* 담당팀 — 캘린더(팀) 선택 드롭다운, 초기값 미정 */}
-        <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-100">
-          <User size={18} className="text-gray-400 shrink-0"/>
-          <span className="text-sm text-gray-500 shrink-0">담당팀</span>
-          <select
-            value={form.team||""}
-            onChange={e=>set("team",e.target.value)}
-            className="flex-1 text-sm text-gray-800 outline-none bg-transparent text-right">
-            <option value="">미정</option>
-            {cals.map(cal=>(
-              <option key={cal.id} value={cal.label}>{cal.label}</option>
-            ))}
-          </select>
-        </div>
+
 
         {/* 주소 */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-100">
@@ -1426,6 +1532,11 @@ function EventModal() {
           <input value={form.place} onChange={e=>set("place",e.target.value)}
             placeholder="장소"
             className="flex-1 text-sm text-gray-800 outline-none placeholder-gray-300"/>
+          {form.place && (
+            <a href={`https://map.naver.com/v5/search/${encodeURIComponent(form.place)}`} target="_blank" rel="noopener noreferrer" className="shrink-0 px-2 py-1 bg-blue-50 rounded-full text-blue-500 text-xs font-bold transition-colors hover:bg-blue-100">
+              지도보기
+            </a>
+          )}
         </div>
 
         {/* 연락처 */}
@@ -1436,14 +1547,32 @@ function EventModal() {
             onChange={e=>set("contact",e.target.value)}
             placeholder="연락처"
             className="flex-1 text-sm text-gray-800 outline-none placeholder-gray-300"/>
+          {form.contact && form.contact.replace(/[^0-9]/g, '').length >= 9 && (
+            <a href={`tel:${form.contact.replace(/[^0-9]/g, '')}`} className="shrink-0 px-2 py-1 bg-green-50 rounded-full text-green-600 text-xs font-bold transition-colors hover:bg-green-100">
+              전화걸기
+            </a>
+          )}
         </div>
 
         {/* 내용 */}
         <div className="flex gap-3 px-4 py-4 border-b border-gray-100">
           <AlignLeft size={18} className="text-gray-400 shrink-0 mt-0.5"/>
-          <textarea value={form.description} onChange={e=>set("description",e.target.value)}
-            placeholder="내용" rows={5}
-            className="flex-1 text-sm text-gray-800 outline-none resize-none placeholder-gray-300 leading-relaxed"/>
+          <textarea value={form.description}
+            onChange={e => {
+              set("description",e.target.value);
+              e.target.style.height = "auto";
+              e.target.style.height = e.target.scrollHeight + "px";
+            }}
+            ref={el => {
+              if (el) {
+                el.style.height = "auto";
+                el.style.height = el.scrollHeight + "px";
+              }
+            }}
+            placeholder="내용 (작성하는 만큼 자동으로 늘어납니다)"
+            className="flex-1 text-sm text-gray-800 outline-none resize-none placeholder-gray-300 leading-relaxed overflow-hidden"
+            style={{minHeight: "120px"}}
+          />
         </div>
 
         {/* 반복 (밸리데이션 가드) */}
@@ -1491,7 +1620,7 @@ function EventModal() {
 
 // ── 상단 헤더 ─────────────────────────────────────────────────────
 function TopHeader() {
-  const { current, setCurrent, setDrawer, sheetMode, setSheetMode, selDate, setSelDate } = useC();
+  const { current, setCurrent, setDrawer, sheetMode, setSheetMode, selDate, setSelDate, setSearchOpen } = useC();
   const y=current.getFullYear(), m=current.getMonth();
   const [picker,setPicker]=useState(false);
   const DAYS=["일","월","화","수","목","금","토"];
@@ -1517,10 +1646,7 @@ function TopHeader() {
 
       {/* 우측 아이콘 */}
       <div className="flex items-center">
-        <button onClick={()=>{setCurrent(new Date());setSelDate(fmt(new Date()));}} className="p-2">
-          <Calendar size={22} className="text-gray-700"/>
-        </button>
-        <button className="p-2"><Search size={22} className="text-gray-700"/></button>
+        <button onClick={()=>setSearchOpen(true)} className="p-2"><Search size={22} className="text-gray-700"/></button>
       </div>
 
       {/* 월 피커 */}
@@ -1566,6 +1692,69 @@ function FloatingButtons() {
 }
 
 // ── 앱 루트 ───────────────────────────────────────────────────────
+// ── 검색 모달 ───────────────────────────────────────────────
+function SearchModal() {
+  const { searchOpen, setSearchOpen, searchQuery: q, setSearchQuery: setQ, visibleEvents, setDetEv } = useC();
+  
+  if (!searchOpen) return null;
+
+  const res = q.trim() ? visibleEvents.filter(e => 
+    (e.title && e.title.includes(q)) || 
+    (e.description && e.description.includes(q)) || 
+    (e.place && e.place.includes(q)) ||
+    (e.contact && e.contact.includes(q))
+  ).sort((a,b) => new Date(b.start) - new Date(a.start)) : [];
+
+  return (
+    <div className="absolute inset-0 z-[60] bg-white flex flex-col">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
+        <button onClick={() => setSearchOpen(false)} className="p-2 -ml-2 rounded-full hover:bg-gray-50">
+          <ChevronLeft size={24} className="text-gray-700"/>
+        </button>
+        <div className="flex-1 flex items-center bg-gray-100 rounded-lg px-3 py-1.5">
+          <Search size={18} className="text-gray-400 mr-2 shrink-0"/>
+          <input 
+            autoFocus
+            value={q} 
+            onChange={e => setQ(e.target.value)} 
+            placeholder="제목, 내용, 장소, 연락처 검색" 
+            className="bg-transparent flex-1 outline-none text-sm text-gray-800"
+          />
+          {q && <button onClick={()=>setQ("")}><X size={16} className="text-gray-400"/></button>}
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto bg-gray-50/50">
+        {!q.trim() && (
+          <div className="py-20 flex flex-col items-center text-gray-400 text-sm">
+            <Search size={40} strokeWidth={1} className="mb-3 text-gray-300"/>
+            <p>검색어를 입력해 주세요</p>
+          </div>
+        )}
+        {q.trim() && res.length === 0 && (
+          <div className="py-20 text-center text-gray-400 text-sm">검색 결과가 없습니다</div>
+        )}
+        {res.map(ev => {
+          const cal = CALS.find(c=>c.id===ev.calId);
+          return (
+            <div key={ev.id} onClick={() => { setDetEv(ev); setSearchOpen(false); }} className="bg-white p-4 border-b border-gray-100 active:bg-gray-50 cursor-pointer">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor: cal?.color||"#333"}}/>
+                  <span className="font-bold text-gray-900 text-[15px]">{ev.title}</span>
+                </div>
+                <span className="text-[11px] font-semibold" style={{color: cal?.color||"#333"}}>{cal?.label}</span>
+              </div>
+              <div className="text-xs text-gray-500 pl-4.5 mt-1 font-medium">{ev.start} {ev.allDay ? "종일" : ev.startTime}</div>
+              {ev.place && <div className="text-xs text-gray-500 pl-4.5 mt-1 truncate">{ev.place}</div>}
+              {ev.description && <div className="text-xs text-gray-500 pl-4.5 mt-1 truncate">{ev.description}</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <Provider>
@@ -1574,16 +1763,145 @@ export default function App() {
   );
 }
 
+// ── 직원 관리 메인 화면 ───────────────────────────────────────────────
+function EmployeeListScreen() {
+  const { users, setEmpModal } = useC();
+  const [filter, setFilter] = useState("전체");
+
+  const filtered = filter === "전체" ? users : users.filter(u => u.team === filter);
+
+  return (
+    <div className="flex-1 bg-gray-50 flex flex-col relative overflow-hidden">
+      {/* 필터 영역: 스크롤 안 되고 상단에 고정 */}
+      <div className="px-4 py-3 bg-white border-b border-gray-100 flex gap-2 overflow-x-auto whitespace-nowrap hide-scrollbar shrink-0 z-10 shadow-sm relative">
+        <button onClick={()=>setFilter("전체")} className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-colors ${filter==="전체" ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-500 border-gray-200"}`}>전체</button>
+        {TEAMS.map(t => (
+          <button key={t} onClick={()=>setFilter(t)} className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-colors ${filter===t ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-500 border-gray-200"}`}>{t}</button>
+        ))}
+      </div>
+      
+      {/* 리스트 영역: 여기만 스크롤 */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-24">
+        {filtered.map(u => (
+          <div key={u.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-bold text-gray-900 text-base">{u.name}</span>
+                <span className="text-[11px] px-2 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">{u.role}</span>
+              </div>
+              <div className="text-sm text-gray-500 mb-0.5">{u.team}</div>
+              <div className="text-xs text-gray-400">📞 {u.phone}</div>
+            </div>
+            <button onClick={() => setEmpModal({open:true, editId:u.id})} className="p-2 text-gray-400 hover:text-gray-800 hover:bg-gray-50 rounded-full">
+              <Edit3 size={18}/>
+            </button>
+          </div>
+        ))}
+      </div>
+      {/* FAB 추가 버튼 */}
+      <button onClick={() => setEmpModal({open:true, editId:null})} className="absolute bottom-6 right-6 w-14 h-14 bg-gray-900 rounded-full flex items-center justify-center shadow-lg shadow-gray-400/50 hover:bg-black transition-transform active:scale-95 z-10">
+        <Plus size={28} className="text-white" />
+      </button>
+    </div>
+  );
+}
+
+// ── 직원 등록/수정 모달 ───────────────────────────────────────────────
+function EmployeeFormModal() {
+  const { empModal, setEmpModal, users, setUsers } = useC();
+  const [form, setForm] = useState({ name: "", phone: "", team: "입주청소팀", role: "팀원" });
+
+  useEffect(() => {
+    if (empModal.open) {
+      if (empModal.editId) {
+        const u = users.find(x => x.id === empModal.editId);
+        if (u) setForm(u);
+      } else {
+        setForm({ name: "", phone: "", team: "입주청소팀", role: "팀원" });
+      }
+    }
+  }, [empModal.open, empModal.editId, users]);
+
+  if (!empModal.open) return null;
+
+  const close = () => setEmpModal({open:false, editId:null});
+  const save = () => {
+    if (!form.name.trim()) return alert("이름을 입력하세요.");
+    if (empModal.editId) {
+      setUsers(p => p.map(u => u.id === empModal.editId ? { ...u, ...form } : u));
+    } else {
+      setUsers(p => [...p, { id: "u" + Date.now(), ...form }]);
+    }
+    close();
+  }
+  const del = () => {
+    if (confirm("정말 이 직원을 삭제하시겠습니까?")) {
+      setUsers(p => p.filter(u => u.id !== empModal.editId));
+      close();
+    }
+  }
+
+  return (
+    <div className="absolute inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-gray-900">{empModal.editId ? "직원 수정" : "새 직원 등록"}</h2>
+          <button onClick={close} className="p-1 -mr-1 rounded-full hover:bg-gray-100"><X size={20} className="text-gray-500"/></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">이름</label>
+            <input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800" placeholder="홍길동" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">연락처</label>
+            <input value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800" placeholder="010-0000-0000" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">소속 팀</label>
+            <select value={form.team} onChange={e=>setForm({...form,team:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800">
+              {TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">직급</label>
+            <select value={form.role} onChange={e=>setForm({...form,role:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800">
+              {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="px-5 py-4 border-t border-gray-50 bg-gray-50 flex gap-2">
+          {empModal.editId && (
+            <button onClick={del} className="px-4 py-2 text-sm font-bold text-red-500 bg-red-50 rounded-lg hover:bg-red-100">삭제</button>
+          )}
+          <div className="flex-1"></div>
+          <button onClick={close} className="px-4 py-2 text-sm font-bold text-gray-500 hover:bg-gray-200 rounded-lg">취소</button>
+          <button onClick={save} className="px-5 py-2 text-sm font-bold text-white bg-gray-900 hover:bg-black rounded-lg">저장</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AppInner() {
+  const { currentScreen } = useC();
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none">
       <style>{ANIM_CSS}</style>
       <TopHeader/>
-      <CalendarView/>
-      <FloatingButtons/>
+      {currentScreen === "calendar" ? (
+        <>
+          <CalendarView/>
+          <FloatingButtons/>
+        </>
+      ) : (
+        <EmployeeListScreen/>
+      )}
       <SideDrawer/>
       <DetailSheet/>
       <EventModal/>
+      <SearchModal/>
+      <EmployeeFormModal/>
     </div>
   );
 }
