@@ -1923,8 +1923,6 @@ function EmployeeFormModal() {
   );
 }
 
-}
-
 // ── 팀 관리 모달 ───────────────────────────────────────────────
 function TeamManagementModal() {
   const { teamModal, setTeamModal, teams, setTeams, users, setUsers } = useC();
