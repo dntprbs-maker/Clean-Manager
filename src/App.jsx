@@ -310,6 +310,7 @@ function Provider({ children }) {
   });
   const [selDate,setSelDate]   = useState(() => fmt(new Date()));
   const [detEv,setDetEv]       = useState(null);
+  const [fieldReportEv, setFieldReportEv] = useState(null);
   const [drawer,setDrawer]     = useState(false);
   const [searchOpen,setSearchOpen] = useState(false);
   const [searchQuery,setSearchQuery] = useState("");
@@ -379,6 +380,7 @@ function Provider({ children }) {
   return (
     <Ctx.Provider value={{
       events,visibleEvents,addEvent,updateEvent,deleteEvent,
+      fieldReportEv,setFieldReportEv,
       cals,toggleCal,
       modal,openModal,closeModal,
       current,setCurrent,
@@ -1101,7 +1103,7 @@ function CalendarView() {
 
 // ── 이벤트 상세 Bottom Sheet ──────────────────────────────────────
 function DetailSheet() {
-  const { detEv, setDetEv, deleteEvent, openModal } = useC();
+  const { detEv, setDetEv, deleteEvent, openModal, setFieldReportEv, currentUser } = useC();
   const [vis,setVis]=useState(false);
   useEffect(()=>{ if(detEv)setTimeout(()=>setVis(true),10); else setVis(false); },[detEv]);
   if(!detEv) return null;
@@ -1187,6 +1189,17 @@ function DetailSheet() {
               <div className="flex-1 text-[15px] text-gray-800 whitespace-pre-wrap leading-relaxed">
                 {detEv.description}
               </div>
+            </div>
+          )}
+          {/* 팀장 이상만 보이는 현장 완료 보고 버튼 */}
+          {(currentUser.role === "팀장" || currentUser.role === "최고관리자") && (
+            <div className="px-4 py-4 border-t border-gray-100 mt-2">
+              <button
+                onClick={() => { setFieldReportEv(detEv); setDetEv(null); }}
+                className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2"
+                style={{ background: "linear-gradient(135deg, #1a56db 0%, #2563eb 100%)" }}>
+                🧹 현장 완료 보고
+              </button>
             </div>
           )}
         </div>
@@ -1787,6 +1800,203 @@ function SearchModal() {
   );
 }
 
+
+// ── 현장 완료 보고 화면 (2단계: 시작 → 완료) ─────────────────────
+function FieldReportScreen({ ev, onClose }) {
+  const { currentUser } = useC();
+  const [step, setStep] = useState("start");
+  const [startMemo, setStartMemo] = useState("");
+  const [endMemo, setEndMemo] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [showLog, setShowLog] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [logDone, setLogDone] = useState(false);
+  const logBodyRef = useRef(null);
+  const cal = calById(ev?.calId);
+
+  const handleStart = () => {
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+    setStartTime(timeStr);
+    setStep("working");
+  };
+
+  const LOG_ITEMS = [
+    { delay: 600, avatar: "📱", avatarBg: "#1e40af", sender: "시스템", senderColor: "#93c5fd",
+      text: () => `팀장 ${currentUser.name}님이 완료 전송 버튼을 눌렀습니다.\n현장 데이터를 AI 관리실로 전달합니다.` },
+    { delay: 1800, avatar: "🤖", avatarBg: "#92400e", sender: "관리실장 AI", senderColor: "#fcd34d",
+      text: () => `현장 피드백 분석 중...\n"${endMemo || "특이사항 없음, 깔끔하게 완료"}"\n✔ 내용 확인 완료. 정밀 보고서를 총괄 김 부장에게 상신합니다.` },
+    { delay: 3200, avatar: "💼", avatarBg: "#1e3a5f", sender: "총괄 김 부장", senderColor: "#60a5fa",
+      text: () => `관리실장 보고 확인.\n현장 특이사항 승인 완료.\n→ [재무실장] ${ev?.title} 건 정산 절차 진행하세요.` },
+    { delay: 4600, avatar: "💰", avatarBg: "#064e3b", sender: "재무실장 AI", senderColor: "#6ee7b7",
+      text: () => `자동 정산 시작.\n→ ${ev?.title} 확정 매출 반영 완료.\n→ 누적 수익률 대시보드 업데이트 성공.` },
+    { delay: 6000, avatar: "👑", avatarBg: "#4c1d95", sender: "최종 보고", senderColor: "#a78bfa",
+      text: () => `대표님 대시보드에 한 줄 리포트 작성 완료.\n대표님은 퇴근 전 확인만 하시면 됩니다. 😊` },
+  ];
+
+  const handleComplete = () => {
+    setShowLog(true);
+    setLogs([]);
+    setLogDone(false);
+    LOG_ITEMS.forEach((item) => {
+      setTimeout(() => {
+        setLogs(prev => [...prev, { ...item, text: item.text() }]);
+        setTimeout(() => {
+          if (logBodyRef.current) logBodyRef.current.scrollTop = logBodyRef.current.scrollHeight;
+        }, 50);
+      }, item.delay);
+    });
+    setTimeout(() => setLogDone(true), 7200);
+  };
+
+  if (!ev) return null;
+
+  return (
+    <div className="absolute inset-0 z-[80] bg-white flex flex-col"
+      style={{ animation: "modalSlideUp 0.35s cubic-bezier(0.32,0.72,0,1) both" }}>
+
+      {/* 헤더 */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100"
+        style={{ background: "linear-gradient(135deg, #1a56db 0%, #2563eb 100%)" }}>
+        <button onClick={onClose} className="p-1"><X size={22} className="text-white"/></button>
+        <div className="flex items-center gap-2">
+          <span className="text-lg">🧹</span>
+          <span className="font-bold text-white text-base">현장 완료 보고</span>
+        </div>
+        <div style={{width:30}}/>
+      </div>
+
+      {/* 현장 정보 카드 */}
+      <div className="mx-4 mt-4 mb-2 p-4 rounded-2xl border border-blue-100"
+        style={{ background: "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)" }}>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
+            style={{ background: cal?.color || "#1a56db" }}>🏠</div>
+          <div>
+            <p className="font-bold text-gray-900 text-sm">{ev.title}</p>
+            <p className="text-xs text-blue-600 font-medium mt-0.5">{ev.start}{!ev.allDay && ev.startTime ? ` · ${fmtTime(ev.startTime)}` : ""}</p>
+            {ev.place && <p className="text-xs text-gray-500 mt-0.5">📍 {ev.place}</p>}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 mt-3">
+          <div className={`flex-1 h-1.5 rounded-full ${step !== "start" ? "bg-blue-500" : "bg-gray-200"}`}/>
+          <div className={`flex-1 h-1.5 rounded-full ${showLog ? "bg-green-500" : "bg-gray-200"}`}/>
+        </div>
+        <div className="flex justify-between mt-1">
+          <span className="text-[10px] text-gray-400 font-medium">청소 시작</span>
+          <span className="text-[10px] text-gray-400 font-medium">완료 보고</span>
+        </div>
+      </div>
+
+      {/* STEP 1: 청소 시작 보고 */}
+      {step === "start" && (
+        <div className="flex-1 overflow-y-auto px-4 py-2 flex flex-col gap-4">
+          <div className="flex items-center gap-2 py-2">
+            <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">1</div>
+            <span className="font-bold text-gray-800 text-sm">현장 도착 확인 · 청소 전 사진</span>
+          </div>
+          <div>
+            <p className="text-xs font-bold text-gray-500 mb-2">📸 청소 전 사진 (Before)</p>
+            <div className="border-2 border-dashed border-blue-200 rounded-2xl p-6 text-center bg-blue-50/50 cursor-pointer"
+              onClick={() => alert("실제 앱에서는 카메라/갤러리와 연동됩니다.")}>
+              <div className="text-3xl mb-2">📷</div>
+              <p className="text-sm text-gray-400 font-medium">청소 전 사진 첨부</p>
+              <p className="text-xs text-blue-300 mt-1">최대 10장 · JPG / PNG</p>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-bold text-gray-500 mb-2">✍️ 도착 시 특이사항</p>
+            <textarea value={startMemo} onChange={e => setStartMemo(e.target.value)}
+              placeholder="예: 현관 비밀번호 1234, 3층 엘리베이터 없음"
+              className="w-full border border-gray-200 rounded-xl p-3 text-sm text-gray-800 outline-none resize-none bg-gray-50 placeholder-gray-300"
+              rows={3}/>
+          </div>
+          <button onClick={handleStart}
+            className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2"
+            style={{ background: "linear-gradient(135deg, #1a56db 0%, #2563eb 100%)" }}>
+            🚀 청소 시작
+          </button>
+          <div className="h-4"/>
+        </div>
+      )}
+
+      {/* STEP 2: 완료 보고 */}
+      {step === "working" && !showLog && (
+        <div className="flex-1 overflow-y-auto px-4 py-2 flex flex-col gap-4">
+          <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-xl border border-blue-100">
+            <span className="text-blue-500 text-sm font-bold">✅ 청소 시작됨</span>
+            <span className="text-xs text-gray-400 ml-auto">{startTime} 시작</span>
+          </div>
+          <div className="flex items-center gap-2 py-2">
+            <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center text-white text-xs font-bold">2</div>
+            <span className="font-bold text-gray-800 text-sm">청소 완료 · 사진 및 보고</span>
+          </div>
+          <div>
+            <p className="text-xs font-bold text-gray-500 mb-2">📸 청소 후 사진 (After)</p>
+            <div className="border-2 border-dashed border-green-200 rounded-2xl p-6 text-center bg-green-50/50 cursor-pointer"
+              onClick={() => alert("실제 앱에서는 카메라/갤러리와 연동됩니다.")}>
+              <div className="text-3xl mb-2">📷</div>
+              <p className="text-sm text-gray-400 font-medium">청소 후 사진 첨부</p>
+              <p className="text-xs text-green-300 mt-1">최대 10장 · JPG / PNG</p>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-bold text-gray-500 mb-2">✍️ 현장 특이사항 메모</p>
+            <textarea value={endMemo} onChange={e => setEndMemo(e.target.value)}
+              placeholder="예: 싱크대 오염 심했는데 다 지웠고 가스레인지 탈거 청소함"
+              className="w-full border border-gray-200 rounded-xl p-3 text-sm text-gray-800 outline-none resize-none bg-gray-50 placeholder-gray-300"
+              rows={3}/>
+          </div>
+          <button onClick={handleComplete}
+            className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2"
+            style={{ background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)" }}>
+            ✔ 청소 완료 전송
+          </button>
+          <div className="h-4"/>
+        </div>
+      )}
+
+      {/* AI 워크플로우 로그 */}
+      {showLog && (
+        <div className="flex-1 flex flex-col overflow-hidden" style={{background:"#030712"}}>
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-800">
+            <div className="w-2 h-2 rounded-full bg-green-400" style={{animation:"pulse 1.5s infinite"}}/>
+            <span className="text-xs text-gray-400 font-medium">크린드림 AI 관리실 · 실시간 처리 중</span>
+          </div>
+          <div ref={logBodyRef} className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+            {logs.map((log, i) => (
+              <div key={i} className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm shrink-0"
+                  style={{background: log.avatarBg}}>{log.avatar}</div>
+                <div>
+                  <p className="text-xs font-bold mb-1" style={{color: log.senderColor}}>{log.sender}</p>
+                  <div className="text-xs text-gray-300 whitespace-pre-line px-3 py-2 rounded-lg rounded-tl-none leading-relaxed"
+                    style={{background:"#1e293b"}}>{log.text}</div>
+                </div>
+              </div>
+            ))}
+            {logDone && (
+              <div className="mt-2 p-4 rounded-2xl border border-green-700 text-center"
+                style={{background:"linear-gradient(135deg,#052e16 0%,#14532d 100%)"}}>
+                <div className="text-3xl mb-2">✅</div>
+                <p className="text-green-400 font-bold text-sm">오늘도 수고하셨습니다!</p>
+                <p className="text-green-300 text-xs mt-1 leading-relaxed">모든 처리가 완료됐습니다.<br/>대표님 대시보드에 자동 반영되었습니다.</p>
+              </div>
+            )}
+          </div>
+          {logDone && (
+            <button onClick={onClose}
+              className="mx-4 mb-6 py-3 rounded-xl text-gray-400 text-sm font-bold border border-gray-700"
+              style={{background:"#111827"}}>
+              ← 캘린더로 돌아가기
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <Provider>
@@ -2200,7 +2410,7 @@ function ExternalLinksScreen() {
 }
 
 function AppInner() {
-  const { currentScreen } = useC();
+  const { currentScreen, fieldReportEv, setFieldReportEv } = useC();
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none">
       <style>{ANIM_CSS}</style>
@@ -2223,6 +2433,9 @@ function AppInner() {
       <SearchModal/>
       <EmployeeFormModal/>
       <TeamManagementModal/>
+      {fieldReportEv && (
+        <FieldReportScreen ev={fieldReportEv} onClose={() => setFieldReportEv(null)}/>
+      )}
     </div>
   );
 }
