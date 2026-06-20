@@ -1370,6 +1370,12 @@ function SideDrawer() {
             <History size={20} className="text-green-500" />
             <span className="text-sm font-medium text-gray-700 flex-1 text-left">최근 작업 내역</span>
           </button>
+          <button
+            onClick={() => { setCurrentScreen("report_history"); setDrawer(false); }}
+            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+            <CheckSquare size={20} className="text-blue-500" />
+            <span className="text-sm font-medium text-gray-700 flex-1 text-left">완료 보고 내역</span>
+          </button>
           <button 
             onClick={() => { setCurrentScreen("links"); setDrawer(false); }}
             className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
@@ -2080,6 +2086,171 @@ function FieldReportScreen({ ev, onClose }) {
   );
 }
 
+// ── 로그인 화면 (목업) ───────────────────────────────────────────────
+function LoginScreen({ onLogin }) {
+  const [tab, setTab] = useState("kakao"); // kakao | email
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleKakao = () => {
+    setLoading(true);
+    setTimeout(()=>{ setLoading(false); onLogin({name:"김팀장",role:"팀장",team:"청소 1팀"}); }, 1500);
+  };
+  const handleEmail = () => {
+    if(!email||!pw) return;
+    setLoading(true);
+    setTimeout(()=>{ setLoading(false); onLogin({name:"관리자",role:"최고관리자",team:"관리팀"}); }, 1200);
+  };
+
+  return (
+    <div className="min-h-screen bg-white flex flex-col">
+      {/* 상단 브랜딩 */}
+      <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
+        <div className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mb-5 shadow-lg" style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🧹</div>
+        <h1 className="text-2xl font-extrabold text-gray-900 mb-1">크린드림</h1>
+        <p className="text-sm text-gray-400">현장 관리 앱에 오신 것을 환영합니다</p>
+      </div>
+
+      {/* 로그인 영역 */}
+      <div className="px-6 pb-12 flex flex-col gap-4">
+        {/* 탭 */}
+        <div className="flex bg-gray-100 rounded-2xl p-1">
+          {[["kakao","카카오 로그인"],["email","이메일 로그인"]].map(([k,l])=>(
+            <button key={k} onClick={()=>setTab(k)}
+              className={"flex-1 py-2 rounded-xl text-sm font-bold transition-all " + (tab===k?"bg-white shadow text-gray-900":"text-gray-400")}>
+              {l}
+            </button>
+          ))}
+        </div>
+
+        {tab === "kakao" ? (
+          <button onClick={handleKakao} disabled={loading}
+            className="w-full py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-opacity"
+            style={{background:"#FEE500",color:"#191919",opacity:loading?0.7:1}}>
+            {loading ? "⏳ 로그인 중..." : "💬 카카오로 시작하기"}
+          </button>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <input type="email" placeholder="이메일" value={email} onChange={e=>setEmail(e.target.value)}
+              className="w-full border border-gray-200 rounded-2xl px-4 py-3 text-sm outline-none focus:border-blue-400 bg-gray-50"/>
+            <input type="password" placeholder="비밀번호" value={pw} onChange={e=>setPw(e.target.value)}
+              className="w-full border border-gray-200 rounded-2xl px-4 py-3 text-sm outline-none focus:border-blue-400 bg-gray-50"/>
+            <button onClick={handleEmail} disabled={loading}
+              className="w-full py-4 rounded-2xl text-white font-bold text-sm flex items-center justify-center gap-2"
+              style={{background:"linear-gradient(135deg,#1a56db,#2563eb)",opacity:loading?0.7:1}}>
+              {loading ? "⏳ 로그인 중..." : "🔐 로그인"}
+            </button>
+          </div>
+        )}
+
+        <p className="text-center text-xs text-gray-400 mt-2">
+          ⚠️ 목업 화면입니다. Firebase 연동 후 실제 로그인이 가능합니다.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── 완료 보고 히스토리 화면 ───────────────────────────────────────────────
+function ReportHistoryScreen() {
+  const { setCurrentScreen, events, cals, currentUser } = useC();
+
+  // 샘플 보고 데이터 (Firebase 연동 전 목업)
+  const sampleReports = [
+    {id:"r1", title:"강남구 OO동 입주청소 30평", date:"2026-06-20", startTime:"09:00", teamName:"청소 1팀", teamColor:"#1a56db", status:"완료", memo:"주방 기름때 심했으나 완료. 베란다 청소 추가 진행.", price:"400,000"},
+    {id:"r2", title:"마포구 아현동 이사청소 25평", date:"2026-06-19", startTime:"13:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음. 깔끔하게 완료.", price:"320,000"},
+    {id:"r3", title:"송파구 잠실 정기청소", date:"2026-06-18", startTime:"10:00", teamName:"청소 1팀", teamColor:"#1a56db", status:"완료", memo:"에어컨 필터 청소 추가 요청. 처리 완료.", price:"150,000"},
+    {id:"r4", title:"동대문구 전농동 입주청소 33평", date:"2026-06-17", startTime:"09:30", teamName:"청소 3팀", teamColor:"#ea580c", status:"완료", memo:"인테리어 후 입주 청소. 실리콘 작업 흔적 제거 완료.", price:"450,000"},
+    {id:"r5", title:"서초구 방배동 이사청소 28평", date:"2026-06-16", startTime:"14:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음.", price:"350,000"},
+  ];
+
+  const [selected, setSelected] = useState(null);
+
+  if(selected) {
+    return (
+      <div className="flex-1 overflow-y-auto bg-white flex flex-col">
+        <div className="flex items-center gap-3 px-5 pt-5 pb-3 border-b border-gray-100">
+          <button onClick={()=>setSelected(null)} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+            <ChevronLeft size={24} className="text-gray-700"/>
+          </button>
+          <h2 className="text-base font-bold text-gray-900 flex-1 line-clamp-1">보고서 상세</h2>
+        </div>
+        {/* 히어로 */}
+        <div className="px-5 py-5" style={{background:`linear-gradient(135deg,${selected.teamColor},${selected.teamColor}cc)`}}>
+          <p className="text-xs font-bold text-white/70 mb-1">{selected.teamName}</p>
+          <p className="text-lg font-extrabold text-white leading-snug">{selected.title}</p>
+          <p className="text-xs text-white/80 mt-2">📅 {selected.date} · {selected.startTime.replace(":","시 ")}분 시작</p>
+        </div>
+        <div className="px-5 py-4 flex flex-col gap-4">
+          {/* Before/After 사진 영역 */}
+          <div>
+            <p className="text-xs font-bold text-gray-500 mb-2">📸 현장 사진</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="aspect-square rounded-2xl bg-gray-100 flex flex-col items-center justify-center border-2 border-dashed border-gray-200">
+                <span className="text-2xl mb-1">📷</span>
+                <p className="text-xs text-gray-400 font-medium">Before</p>
+                <p className="text-[10px] text-gray-300 mt-0.5">Firebase 연동 후</p>
+              </div>
+              <div className="aspect-square rounded-2xl bg-gray-100 flex flex-col items-center justify-center border-2 border-dashed border-gray-200">
+                <span className="text-2xl mb-1">📷</span>
+                <p className="text-xs text-gray-400 font-medium">After</p>
+                <p className="text-[10px] text-gray-300 mt-0.5">Firebase 연동 후</p>
+              </div>
+            </div>
+          </div>
+          {/* 금액 */}
+          <div className="bg-green-50 rounded-2xl p-4 flex items-center justify-between">
+            <span className="text-sm font-bold text-green-700">💰 확정 금액</span>
+            <span className="text-lg font-extrabold text-green-600">{selected.price}원</span>
+          </div>
+          {/* 메모 */}
+          <div className="bg-gray-50 rounded-2xl p-4">
+            <p className="text-xs font-bold text-gray-500 mb-2">📝 현장 메모</p>
+            <p className="text-sm text-gray-700 leading-relaxed">{selected.memo}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
+      <div className="flex items-center gap-3 px-5 pt-5 pb-3">
+        <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
+          <ChevronLeft size={24} className="text-gray-700"/>
+        </button>
+        <h2 className="text-xl font-bold text-gray-900 flex-1">완료 보고 내역</h2>
+        <span className="text-xs text-gray-400 font-medium">{sampleReports.length}건</span>
+      </div>
+
+      <div className="px-5 pb-8 flex flex-col gap-3">
+        {sampleReports.map(r=>(
+          <button key={r.id} onClick={()=>setSelected(r)}
+            className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 text-left w-full flex items-center gap-3 hover:border-blue-200 transition-all">
+            {/* 팀 컬러 바 */}
+            <div className="w-1 self-stretch rounded-full shrink-0" style={{background:r.teamColor}}/>
+            {/* 사진 썸네일 자리 */}
+            <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-2xl shrink-0">🏠</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-gray-900 truncate">{r.title}</p>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{background:r.teamColor+"22",color:r.teamColor}}>{r.teamName}</span>
+                <span className="text-xs text-gray-400">{r.date}</span>
+              </div>
+              <p className="text-xs text-green-600 font-bold mt-1">{r.price}원</p>
+            </div>
+            <div className="flex flex-col items-end gap-1 shrink-0">
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-50 text-green-600">✅ {r.status}</span>
+              <ChevronLeft size={14} className="text-gray-300 rotate-180"/>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <Provider>
@@ -2325,34 +2496,113 @@ function TeamScheduleScreen() {
 
 // ── 대시보드 화면 ───────────────────────────────────────────────
 function DashboardScreen() {
-  const { visibleEvents, setCurrentScreen } = useC();
+  const { visibleEvents, setCurrentScreen, cals, currentUser } = useC();
   const today = new Date();
   const todayStr = fmt(today);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate()+1);
   const tmrwStr = fmt(tomorrow);
+  const thisMonth = todayStr.slice(0,7);
 
-  const todayEvs = visibleEvents.filter(e => e.start <= todayStr && (!e.end || e.end >= todayStr));
-  const tmrwEvs = visibleEvents.filter(e => e.start <= tmrwStr && (!e.end || e.end >= tmrwStr));
+  const todayEvs  = visibleEvents.filter(e=>e.start<=todayStr&&(!e.end||e.end>=todayStr));
+  const tmrwEvs   = visibleEvents.filter(e=>e.start<=tmrwStr&&(!e.end||e.end>=tmrwStr));
+  const monthEvs  = visibleEvents.filter(e=>e.start.startsWith(thisMonth));
+  const cleanEvs  = visibleEvents.filter(e=>e.calId?.startsWith("clean")&&e.start<=todayStr&&(!e.end||e.end>=todayStr));
+
+  const fmtTime=(t)=>{if(!t)return"";const[h,m]=t.split(":");const hr=parseInt(h);return`${hr<12?"오전":"오후"} ${hr===0?12:hr>12?hr-12:hr}:${m}`};
 
   return (
-    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col p-5 gap-5 relative">
-      <div className="flex items-center gap-3 mb-2">
-        <button onClick={() => setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
+      {/* 헤더 */}
+      <div className="flex items-center gap-3 px-5 pt-5 pb-3">
+        <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
           <ChevronLeft size={24} className="text-gray-700"/>
         </button>
-        <h2 className="text-xl font-bold text-gray-900">일정 요약</h2>
+        <div className="flex-1">
+          <h2 className="text-xl font-bold text-gray-900">
+            {currentUser.role === "최고관리자" ? "사장님 대시보드" : "일정 요약"}
+          </h2>
+          <p className="text-xs text-gray-400 mt-0.5">{todayStr.replace(/-/g,".")} 기준</p>
+        </div>
+        <div className="text-2xl">{currentUser.role === "최고관리자" ? "👑" : "📊"}</div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col items-center justify-center">
-          <span className="text-gray-500 text-sm font-medium mb-1">오늘 일정</span>
-          <span className="text-3xl font-bold text-blue-600">{todayEvs.length}건</span>
-        </div>
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col items-center justify-center">
-          <span className="text-gray-500 text-sm font-medium mb-1">내일 일정</span>
-          <span className="text-3xl font-bold text-indigo-600">{tmrwEvs.length}건</span>
-        </div>
+      {/* 통계 카드 4개 */}
+      <div className="grid grid-cols-2 gap-3 px-5 mb-4">
+        {[
+          {label:"오늘 일정",  value:todayEvs.length,  unit:"건", color:"#1a56db", bg:"#eff6ff", icon:"📅"},
+          {label:"내일 일정",  value:tmrwEvs.length,   unit:"건", color:"#7c3aed", bg:"#f5f3ff", icon:"🗓️"},
+          {label:"이번달 총",  value:monthEvs.length,  unit:"건", color:"#16a34a", bg:"#f0fdf4", icon:"📈"},
+          {label:"오늘 청소팀",value:cleanEvs.length,  unit:"팀", color:"#ea580c", bg:"#fff7ed", icon:"🧹"},
+        ].map((s,i)=>(
+          <div key={i} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-gray-500">{s.label}</span>
+              <span className="text-lg">{s.icon}</span>
+            </div>
+            <div className="flex items-end gap-1">
+              <span className="text-3xl font-extrabold" style={{color:s.color}}>{s.value}</span>
+              <span className="text-sm text-gray-400 mb-1">{s.unit}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 오늘 일정 카드 목록 */}
+      <div className="px-5 mb-2">
+        <h3 className="text-sm font-bold text-gray-700 mb-3">📋 오늘 일정</h3>
+        {todayEvs.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-gray-400 text-sm">오늘 일정이 없습니다</div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {todayEvs.map(ev=>{
+              const cal = cals.find(c=>c.id===ev.calId);
+              return (
+                <div key={ev.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm flex items-center gap-3">
+                  <div className="w-1 self-stretch rounded-full shrink-0" style={{background:cal?.color||"#1a56db"}}/>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-gray-900 text-sm truncate">{ev.title}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {ev.allDay ? "종일" : `${fmtTime(ev.startTime)} ~ ${fmtTime(ev.endTime)}`}
+                      {ev.place ? ` · ${ev.place}` : ""}
+                    </p>
+                  </div>
+                  <div className="text-xs font-bold px-2 py-1 rounded-full shrink-0" style={{background:cal?.color+"22",color:cal?.color||"#1a56db"}}>
+                    {cal?.name||""}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 내일 일정 */}
+      <div className="px-5 pb-8">
+        <h3 className="text-sm font-bold text-gray-700 mb-3 mt-4">🌅 내일 일정</h3>
+        {tmrwEvs.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-gray-400 text-sm">내일 일정이 없습니다</div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {tmrwEvs.map(ev=>{
+              const cal = cals.find(c=>c.id===ev.calId);
+              return (
+                <div key={ev.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm flex items-center gap-3">
+                  <div className="w-1 self-stretch rounded-full shrink-0" style={{background:cal?.color||"#7c3aed"}}/>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-gray-900 text-sm truncate">{ev.title}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {ev.allDay ? "종일" : `${fmtTime(ev.startTime)} ~ ${fmtTime(ev.endTime)}`}
+                      {ev.place ? ` · ${ev.place}` : ""}
+                    </p>
+                  </div>
+                  <div className="text-xs font-bold px-2 py-1 rounded-full shrink-0" style={{background:cal?.color+"22",color:cal?.color||"#7c3aed"}}>
+                    {cal?.name||""}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2360,32 +2610,117 @@ function DashboardScreen() {
 
 // ── 공지사항 화면 ───────────────────────────────────────────────
 function NoticeScreen() {
-  const { notices, currentUser, setCurrentScreen } = useC();
+  const { notices, setNotices, currentUser, setCurrentScreen } = useC();
+  const [selected, setSelected] = useState(null);
+  const [writing, setWriting] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newBody, setNewBody] = useState("");
+  const [readIds, setReadIds] = useState(()=>JSON.parse(localStorage.getItem("readNotices")||"[]"));
+  const isAdmin = ["사장","관리팀"].includes(currentUser.team);
+
+  const markRead = (id) => {
+    if(readIds.includes(id)) return;
+    const next = [...readIds, id];
+    setReadIds(next);
+    localStorage.setItem("readNotices", JSON.stringify(next));
+  };
+
+  const submitNotice = () => {
+    if(!newTitle.trim()) return;
+    const n = {id:uid(), title:newTitle, body:newBody, author:currentUser.name, date:fmt(new Date()), important:false};
+    setNotices(p=>[n,...p]);
+    setNewTitle(""); setNewBody(""); setWriting(false);
+  };
+
+  // 상세 보기
+  if(selected) {
+    markRead(selected.id);
+    return (
+      <div className="flex-1 overflow-y-auto bg-white flex flex-col">
+        <div className="flex items-center gap-3 px-5 pt-5 pb-3 border-b border-gray-100">
+          <button onClick={()=>setSelected(null)} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+            <ChevronLeft size={24} className="text-gray-700"/>
+          </button>
+          <h2 className="text-base font-bold text-gray-900 flex-1 line-clamp-1">{selected.title}</h2>
+          {isAdmin && (
+            <button onClick={()=>{setNotices(p=>p.filter(n=>n.id!==selected.id));setSelected(null);}}
+              className="text-xs text-red-400 font-bold px-2 py-1 rounded-full hover:bg-red-50">삭제</button>
+          )}
+        </div>
+        <div className="px-5 py-4 flex-1">
+          <div className="flex items-center gap-2 text-xs text-gray-400 mb-4">
+            <span className="font-semibold text-gray-600">{selected.author}</span>
+            <span>·</span>
+            <span>{selected.date}</span>
+            {selected.important && <span className="ml-1 px-2 py-0.5 bg-red-50 text-red-500 font-bold rounded-full">📌 중요</span>}
+          </div>
+          <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{selected.body || "내용이 없습니다."}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 글쓰기
+  if(writing) {
+    return (
+      <div className="flex-1 overflow-y-auto bg-white flex flex-col">
+        <div className="flex items-center gap-3 px-5 pt-5 pb-3 border-b border-gray-100">
+          <button onClick={()=>setWriting(false)} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+            <ChevronLeft size={24} className="text-gray-700"/>
+          </button>
+          <h2 className="text-base font-bold flex-1">새 공지 작성</h2>
+          <button onClick={submitNotice} className="text-blue-500 font-bold text-sm">등록</button>
+        </div>
+        <div className="px-5 py-4 flex flex-col gap-3">
+          <input value={newTitle} onChange={e=>setNewTitle(e.target.value)}
+            placeholder="제목을 입력하세요"
+            className="w-full border-b border-gray-200 py-2 text-sm font-bold outline-none placeholder-gray-300"/>
+          <textarea value={newBody} onChange={e=>setNewBody(e.target.value)}
+            placeholder="내용을 입력하세요..."
+            rows={10}
+            className="w-full text-sm outline-none resize-none text-gray-700 placeholder-gray-300 leading-relaxed"/>
+        </div>
+      </div>
+    );
+  }
+
+  // 목록
   return (
-    <div className="flex-1 overflow-y-auto bg-white flex flex-col p-5">
-      <div className="flex items-center gap-3 mb-5">
-        <button onClick={() => setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
+      <div className="flex items-center gap-3 px-5 pt-5 pb-3">
+        <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
           <ChevronLeft size={24} className="text-gray-700"/>
         </button>
         <h2 className="text-xl font-bold text-gray-900 flex-1">팀 공지사항</h2>
-        {["사장", "관리팀"].includes(currentUser.team) && (
-          <button className="text-sm font-bold text-blue-600 px-3 py-1.5 rounded-full hover:bg-blue-50">
-            새 공지
+        {isAdmin && (
+          <button onClick={()=>setWriting(true)} className="text-sm font-bold text-blue-600 px-3 py-1.5 rounded-full bg-blue-50 hover:bg-blue-100">
+            + 새 공지
           </button>
         )}
       </div>
-
-      <div className="flex flex-col gap-4">
-        {notices.map(n => (
-          <div key={n.id} className="p-4 rounded-xl bg-gray-50 border border-gray-100">
-            <h3 className="font-bold text-gray-900 text-base mb-1">{n.title}</h3>
-            <div className="flex items-center gap-2 text-xs text-gray-500">
-              <span>{n.author}</span>
-              <span>•</span>
-              <span>{n.date}</span>
-            </div>
-          </div>
-        ))}
+      <div className="px-5 pb-8 flex flex-col gap-3">
+        {notices.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400 text-sm mt-4">공지사항이 없습니다</div>
+        ) : notices.map(n=>{
+          const isRead = readIds.includes(n.id);
+          return (
+            <button key={n.id} onClick={()=>setSelected(n)}
+              className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm text-left w-full flex items-start gap-3 hover:border-blue-200 transition-all">
+              <div className={"w-2 h-2 rounded-full mt-2 shrink-0 " + (isRead ? "bg-gray-200" : "bg-blue-500")}/>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  {n.important && <span className="text-xs text-red-500 font-bold">📌</span>}
+                  <p className={"text-sm font-bold truncate " + (isRead ? "text-gray-500" : "text-gray-900")}>{n.title}</p>
+                </div>
+                {n.body && <p className="text-xs text-gray-400 line-clamp-1">{n.body}</p>}
+                <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
+                  <span>{n.author}</span><span>·</span><span>{n.date}</span>
+                </div>
+              </div>
+              <ChevronLeft size={16} className="text-gray-300 rotate-180 shrink-0 mt-1"/>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -2393,41 +2728,65 @@ function NoticeScreen() {
 
 // ── 최근 작업 내역 화면 ───────────────────────────────────────────────
 function ActivityLogScreen() {
-  const { activityLogs, setCurrentScreen } = useC();
+  const { activityLogs, setCurrentScreen, cals } = useC();
+  const [filter, setFilter] = useState("전체");
+  const filters = ["전체","등록","수정","삭제"];
+
+  const filtered = filter === "전체" ? activityLogs : activityLogs.filter(l=>l.action===filter);
+
+  const actionStyle = {
+    "등록": {bg:"#f0fdf4", color:"#16a34a", icon:"✅"},
+    "수정": {bg:"#eff6ff", color:"#1a56db", icon:"✏️"},
+    "삭제": {bg:"#fef2f2", color:"#dc2626", icon:"🗑️"},
+  };
+
   return (
-    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col p-5">
-      <div className="flex items-center gap-3 mb-5">
-        <button onClick={() => setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
+      <div className="flex items-center gap-3 px-5 pt-5 pb-3">
+        <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
           <ChevronLeft size={24} className="text-gray-700"/>
         </button>
-        <h2 className="text-xl font-bold text-gray-900">최근 작업 내역</h2>
+        <h2 className="text-xl font-bold text-gray-900 flex-1">최근 작업 내역</h2>
+        <span className="text-xs text-gray-400 font-medium">{activityLogs.length}건</span>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-        {activityLogs.length === 0 ? (
-          <div className="py-10 text-center text-gray-400 text-sm">최근 작업 내역이 없습니다.</div>
-        ) : (
-          <div className="flex flex-col relative before:absolute before:inset-y-0 before:left-[11px] before:w-px before:bg-gray-200">
-            {activityLogs.map((log, i) => (
-              <div key={log.id} className="relative flex gap-4 py-3">
-                <div className="w-[23px] h-[23px] rounded-full bg-white border-4 border-gray-100 shrink-0 z-10 flex items-center justify-center">
-                  <div className={`w-2 h-2 rounded-full ${
-                    log.action==="등록" ? "bg-green-500" :
-                    log.action==="수정" ? "bg-blue-500" : "bg-red-500"
-                  }`}/>
+      {/* 필터 탭 */}
+      <div className="flex gap-2 px-5 mb-4">
+        {filters.map(f=>(
+          <button key={f} onClick={()=>setFilter(f)}
+            className={"px-3 py-1.5 rounded-full text-xs font-bold transition-all " + (filter===f ? "bg-gray-900 text-white" : "bg-white text-gray-500 border border-gray-200")}>
+            {f}
+          </button>
+        ))}
+      </div>
+
+      {/* 카드 목록 */}
+      <div className="px-5 pb-8 flex flex-col gap-3">
+        {filtered.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400 text-sm">작업 내역이 없습니다</div>
+        ) : filtered.map(log=>{
+          const s = actionStyle[log.action] || actionStyle["등록"];
+          const cal = cals?.find(c=>c.id===log.calId);
+          return (
+            <div key={log.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0" style={{background:s.bg}}>
+                {s.icon}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{background:s.bg, color:s.color}}>{log.action}</span>
+                  {cal && <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{background:cal.color+"22", color:cal.color}}>{cal.name}</span>}
                 </div>
-                <div className="flex flex-col pb-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-sm text-gray-900">{log.user.name}</span>
-                    <span className="text-[11px] text-gray-400 font-medium bg-gray-100 px-1.5 py-0.5 rounded">{log.user.team}</span>
-                  </div>
-                  <span className="text-sm text-gray-600 mt-1 leading-snug">{log.detail}</span>
-                  <span className="text-[11px] text-gray-400 mt-1">{new Date(log.time).toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'})}</span>
+                <p className="text-sm font-bold text-gray-900 truncate">{log.title}</p>
+                <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
+                  <span>{log.user || "관리자"}</span>
+                  <span>·</span>
+                  <span>{log.date || log.time}</span>
                 </div>
               </div>
-            ))}
-          </div>
-        )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -2438,87 +2797,80 @@ function ExternalLinksScreen() {
   const { links, setLinks, setCurrentScreen } = useC();
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
-  const [newUrl, setNewUrl] = useState("");
+  const [newUrl, setNewUrl]   = useState("");
+  const [newEmoji, setNewEmoji] = useState("🔗");
+
+  const EMOJIS = ["🔗","📍","📞","💰","🧹","📋","🏢","🚗","📦","🛠️"];
 
   const handleAdd = () => {
     if(!newTitle.trim() || !newUrl.trim()) return;
-    setLinks(p => [...p, { id: uid(), title: newTitle, url: newUrl.startsWith('http') ? newUrl : `https://${newUrl}` }]);
-    setNewTitle("");
-    setNewUrl("");
-    setAdding(false);
+    setLinks(p=>[...p,{id:uid(),title:newTitle,url:newUrl.startsWith("http")?newUrl:`https://${newUrl}`,emoji:newEmoji}]);
+    setNewTitle(""); setNewUrl(""); setNewEmoji("🔗"); setAdding(false);
   };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col p-5">
-      <div className="flex items-center gap-3 mb-5">
-        <button onClick={() => setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
+      <div className="flex items-center gap-3 px-5 pt-5 pb-3">
+        <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
           <ChevronLeft size={24} className="text-gray-700"/>
         </button>
         <h2 className="text-xl font-bold text-gray-900 flex-1">외부 링크</h2>
-        <button onClick={() => setAdding(true)} className="p-2 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200">
+        <button onClick={()=>setAdding(true)} className="p-2 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200">
           <Plus size={20}/>
         </button>
       </div>
 
+      {/* 추가 폼 */}
       {adding && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4 flex flex-col gap-3">
-          <input type="text" placeholder="링크 이름 (예: 네이버 지도)" value={newTitle} onChange={e=>setNewTitle(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 transition-colors"/>
-          <input type="text" placeholder="URL 주소 (예: map.naver.com)" value={newUrl} onChange={e=>setNewUrl(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 transition-colors"/>
-          <div className="flex gap-2 justify-end mt-1">
-            <button onClick={()=>setAdding(false)} className="px-4 py-2 text-sm font-bold text-gray-500 hover:bg-gray-100 rounded-lg">취소</button>
-            <button onClick={handleAdd} className="px-4 py-2 text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 rounded-lg">추가</button>
+        <div className="mx-5 mb-4 bg-white rounded-2xl border border-blue-100 p-4 flex flex-col gap-3 shadow-sm">
+          <p className="text-xs font-bold text-gray-500">새 링크 추가</p>
+          {/* 이모지 선택 */}
+          <div className="flex gap-2 flex-wrap">
+            {EMOJIS.map(e=>(
+              <button key={e} onClick={()=>setNewEmoji(e)}
+                className={"w-9 h-9 rounded-xl text-lg flex items-center justify-center transition-all " + (newEmoji===e ? "bg-blue-100 ring-2 ring-blue-400" : "bg-gray-50")}>
+                {e}
+              </button>
+            ))}
+          </div>
+          <input type="text" placeholder="링크 이름 (예: 네이버 지도)" value={newTitle}
+            onChange={e=>setNewTitle(e.target.value)}
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-400"/>
+          <input type="url" placeholder="URL (예: naver.com)" value={newUrl}
+            onChange={e=>setNewUrl(e.target.value)}
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-400"/>
+          <div className="flex gap-2">
+            <button onClick={()=>setAdding(false)} className="flex-1 py-2 rounded-xl text-sm font-bold bg-gray-100 text-gray-600">취소</button>
+            <button onClick={handleAdd} className="flex-1 py-2 rounded-xl text-sm font-bold bg-blue-500 text-white">추가</button>
           </div>
         </div>
       )}
 
-      <div className="flex flex-col gap-3">
-        {links.length === 0 && !adding ? (
-          <div className="py-10 text-center text-gray-400 text-sm">등록된 외부 링크가 없습니다.</div>
-        ) : (
-          links.map(lk => (
-            <a key={lk.id} href={lk.url} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-4 bg-white rounded-2xl shadow-sm border border-gray-100 hover:border-blue-200 transition-colors group">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center shrink-0">
-                  <Link2 size={20} className="text-purple-600"/>
-                </div>
-                <span className="font-bold text-gray-800">{lk.title}</span>
+      {/* 링크 목록 */}
+      <div className="px-5 pb-8 flex flex-col gap-3">
+        {links.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400 text-sm">링크가 없습니다.<br/>+ 버튼으로 추가해보세요</div>
+        ) : links.map(l=>(
+          <div key={l.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm flex items-center gap-3 pr-3 overflow-hidden">
+            <a href={l.url} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-3 flex-1 p-4 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center text-xl shrink-0">
+                {l.emoji || "🔗"}
               </div>
-              <ChevronRight size={20} className="text-gray-300 group-hover:text-blue-500 transition-colors"/>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-gray-900 truncate">{l.title}</p>
+                <p className="text-xs text-gray-400 truncate">{l.url}</p>
+              </div>
             </a>
-          ))
-        )}
+            <button onClick={()=>setLinks(p=>p.filter(x=>x.id!==l.id))}
+              className="p-2 rounded-full text-gray-300 hover:text-red-400 hover:bg-red-50 shrink-0">
+              <X size={16}/>
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-function AppInner() {
-  const { currentScreen, fieldReportEv, setFieldReportEv } = useC();
-  return (
-    <div className="h-screen flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none">
-      <style>{ANIM_CSS}</style>
-      <TopHeader/>
-      {currentScreen === "calendar" && (
-        <>
-          <CalendarView/>
-          <FloatingButtons/>
-        </>
-      )}
-      {currentScreen === "employees" && <EmployeeListScreen/>}
-      {currentScreen === "team_schedule" && <TeamScheduleScreen/>}
-      {currentScreen === "dashboard" && <DashboardScreen/>}
-      {currentScreen === "notice" && <NoticeScreen/>}
-      {currentScreen === "activity_log" && <ActivityLogScreen/>}
-      {currentScreen === "links" && <ExternalLinksScreen/>}
-      <SideDrawer/>
-      <DetailSheet/>
-      <EventModal/>
-      <SearchModal/>
-      <EmployeeFormModal/>
-      <TeamManagementModal/>
-      {fieldReportEv && (
-        <FieldReportScreen ev={fieldReportEv} onClose={() => setFieldReportEv(null)}/>
-      )}
-    </div>
-  );
-}
+
