@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 클린메니저 — 네이버 캘린더 완전 재현
  * 3단계 스와이프 모드:
  *   MODE 0 (full)  → 월간 그리드 전체 (이벤트 텍스트 바 표시)
@@ -10,6 +10,7 @@ import {
   useState, useContext, createContext, useCallback,
   useMemo, useRef, useEffect
 } from "react";
+import { useCollection } from "./hooks/useCollection";
 import {
   Search, Plus, X, MapPin, Link2, RotateCcw, Clock,
   Calendar, AlignLeft, ChevronDown, ChevronLeft,
@@ -282,7 +283,6 @@ const makeSamples = () => {
 
 // ── localStorage 저장/불러오기 헬퍼 ─────────────────────────────
 // 주의: Claude 아티팩트 미리보기에서는 동작 안 함 (GitHub Pages 배포 후 정상)
-const LS_KEY_EVENTS = "cleandream_events";
 const LS_KEY_CALS   = "cleandream_cals";
 
 function loadFromStorage(key, fallback) {
@@ -301,7 +301,7 @@ function saveToStorage(key, value) {
 
 function Provider({ children }) {
   // 저장된 데이터 있으면 불러오고, 없으면 샘플 데이터
-  const [events,setEvents]     = useState(() => loadFromStorage(LS_KEY_EVENTS, makeSamples()));
+  const { data: events, loaded: eventsLoaded, add: _addEv, update: _updateEv, remove: _deleteEv } = useCollection("events", "start");
   const [cals,setCals]         = useState(() => loadFromStorage(LS_KEY_CALS, CALS));
   const [modal,setModal]       = useState({open:false,date:null,editId:null});
   const [current,setCurrent]   = useState(() => {
@@ -318,48 +318,54 @@ function Provider({ children }) {
   const [sheetMode,setSheetMode] = useState(1); // 기본: 도트그리드+시트
 
   // 직원 관리 상태
-  const [teams, setTeams] = useState(INIT_TEAMS);
+  const { data: teamsData, loaded: teamsLoaded, add: _addTeam, remove: _deleteTeam } = useCollection("teams");
+  const teams = teamsData.map(t => t.name);
   const [teamModal, setTeamModal] = useState(false);
-  const [users, setUsers] = useState(INIT_USERS);
-  const [currentUser, setCurrentUser] = useState(INIT_USERS[0]); 
+  const { data: users, loaded: usersLoaded, add: _addUser, update: _updateUser, remove: _deleteUser } = useCollection("users");
+  const [currentUser, setCurrentUser] = useState(null);
   const [currentScreen, setCurrentScreen] = useState("calendar"); // "calendar" | "employees"
   const [empModal, setEmpModal] = useState({ open: false, editId: null });
 
+  // Firestore 초기 시드: users/teams 비어있으면 기본값으로 채움
+  useEffect(() => {
+    if (usersLoaded && users.length === 0) INIT_USERS.forEach(u => _addUser(u));
+  }, [usersLoaded]);
+  useEffect(() => {
+    if (teamsLoaded && teams.length === 0) INIT_TEAMS.forEach(name => _addTeam({ name }));
+  }, [teamsLoaded]);
+  useEffect(() => {
+    if (usersLoaded && users.length > 0 && !currentUser) setCurrentUser(users[0]);
+  }, [usersLoaded, users]);
+
   // 부가 기능 상태
   const [activityLogs, setActivityLogs] = useState([]);
-  const [notices, setNotices] = useState([
-    { id: "n1", title: "이번 주말 작업 시 안전화 필수 착용", author: "김사장", date: "2026-06-18" }
-  ]);
-  const [links, setLinks] = useState([]); // 처음에는 빈 목록
+  const { data: notices, add: _addNotice, remove: _deleteNotice } = useCollection("notices", "_createdAt");
+  const { data: links, add: _addLink, remove: _deleteLink } = useCollection("links");
 
   const addLog = useCallback((action, detail) => {
     setActivityLogs(p => [{ id: uid(), time: new Date().toISOString(), user: currentUser, action, detail }, ...p].slice(0, 100));
   }, [currentUser]);
 
   const addEvent    = useCallback(ev => {
-    setEvents(p => [...p, { ...ev, id: uid() }]);
+    _addEv(ev);
     addLog("등록", `'${ev.title}' 일정을 등록했습니다.`);
-  }, [addLog]);
+  }, [_addEv, addLog]);
   
   const updateEvent = useCallback(ev => {
-    setEvents(p => p.map(e => e.id === ev.id ? ev : e));
+    _updateEv(ev);
     addLog("수정", `'${ev.title}' 일정을 수정했습니다.`);
-  }, [addLog]);
+  }, [_updateEv, addLog]);
   
   const deleteEvent = useCallback(id => {
-    setEvents(p => {
-      const target = p.find(e => e.id === id);
-      if (target) addLog("삭제", `'${target.title}' 일정을 삭제했습니다.`);
-      return p.filter(e => e.id !== id);
-    });
-  }, [addLog]);
+    const target = events.find(e => e.id === id);
+    if (target) addLog("삭제", `'${target.title}' 일정을 삭제했습니다.`);
+    _deleteEv(id);
+  }, [_deleteEv, events, addLog]);
   
   const openModal   = useCallback((date=null,editId=null)=>setModal({open:true,date,editId}),[]);
   const closeModal  = useCallback(()=>setModal({open:false,date:null,editId:null}),[]);
   const toggleCal   = useCallback(id=>setCals(p=>p.map(c=>c.id===id?{...c,checked:!c.checked}:c)),[]);
 
-  // events 변경 시마다 localStorage 자동 저장
-  useEffect(()=>{ saveToStorage(LS_KEY_EVENTS, events); }, [events]);
   // cals(캘린더 ON/OFF) 변경 시마다 저장
   useEffect(()=>{ saveToStorage(LS_KEY_CALS, cals); }, [cals]);
 
@@ -390,14 +396,14 @@ function Provider({ children }) {
       searchOpen,setSearchOpen,
       searchQuery,setSearchQuery,
       sheetMode,setSheetMode,
-      teams,setTeams,teamModal,setTeamModal,
-      users,setUsers,
+      teams,teamsData,_addTeam,_deleteTeam,teamModal,setTeamModal,
+      users,_addUser,_updateUser,_deleteUser,
       currentUser,setCurrentUser,
       currentScreen,setCurrentScreen,
       empModal,setEmpModal,
       activityLogs,setActivityLogs,
-      notices,setNotices,
-      links,setLinks,
+      notices,_addNotice,_deleteNotice,
+      links,_addLink,_deleteLink,
     }}>
       {children}
     </Ctx.Provider>
@@ -2058,7 +2064,7 @@ function EmployeeListScreen() {
 
 // ── 직원 등록/수정 모달 ───────────────────────────────────────────────
 function EmployeeFormModal() {
-  const { empModal, setEmpModal, users, setUsers, activityLogs, setActivityLogs, teams } = useC();
+  const { empModal, setEmpModal, users, _addUser, _updateUser, _deleteUser, activityLogs, setActivityLogs, teams } = useC();
   const [form, setForm] = useState({ name: "", phone: "", team: "입주청소팀", role: "팀원" });
 
   useEffect(() => {
@@ -2078,15 +2084,15 @@ function EmployeeFormModal() {
   const save = () => {
     if (!form.name.trim()) return alert("이름을 입력하세요.");
     if (empModal.editId) {
-      setUsers(p => p.map(u => u.id === empModal.editId ? { ...u, ...form } : u));
+      const target = users.find(u => u.id === empModal.editId); if (target) _updateUser({ ...target, ...form });
     } else {
-      setUsers(p => [...p, { id: "u" + Date.now(), ...form }]);
+      _addUser({ ...form });
     }
     close();
   }
   const del = () => {
     if (confirm("정말 이 직원을 삭제하시겠습니까?")) {
-      setUsers(p => p.filter(u => u.id !== empModal.editId));
+      _deleteUser(empModal.editId);
       close();
     }
   }
@@ -2135,7 +2141,7 @@ function EmployeeFormModal() {
 
 // ── 팀 관리 모달 ───────────────────────────────────────────────
 function TeamManagementModal() {
-  const { teamModal, setTeamModal, teams, setTeams, users, setUsers } = useC();
+  const { teamModal, setTeamModal, teams, teamsData, _addTeam, _deleteTeam, users, _updateUser } = useC();
   const [newTeam, setNewTeam] = useState("");
 
   if (!teamModal) return null;
@@ -2148,14 +2154,14 @@ function TeamManagementModal() {
       alert("이미 존재하는 팀입니다.");
       return;
     }
-    setTeams([...teams, newTeam.trim()]);
+    _addTeam({ name: newTeam.trim() });
     setNewTeam("");
   };
 
   const handleDelete = (targetTeam) => {
     if (window.confirm("삭제하는 팀의 팀장,팀원은 소속이 미정으로 변경됩니다.")) {
-      setUsers(users.map(u => u.team === targetTeam ? { ...u, team: "미정" } : u));
-      setTeams(teams.filter(t => t !== targetTeam));
+      users.filter(u => u.team === targetTeam).forEach(u => _updateUser({ ...u, team: "미정" }));
+      const td = teamsData.find(t => t.name === targetTeam); if (td) _deleteTeam(td.id);
     }
   };
 
@@ -2352,14 +2358,14 @@ function ActivityLogScreen() {
 
 // ── 외부 링크 화면 ───────────────────────────────────────────────
 function ExternalLinksScreen() {
-  const { links, setLinks, setCurrentScreen } = useC();
+  const { links, _addLink, _deleteLink, setCurrentScreen } = useC();
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newUrl, setNewUrl] = useState("");
 
   const handleAdd = () => {
     if(!newTitle.trim() || !newUrl.trim()) return;
-    setLinks(p => [...p, { id: uid(), title: newTitle, url: newUrl.startsWith('http') ? newUrl : `https://${newUrl}` }]);
+    _addLink({ title: newTitle, url: newUrl.startsWith('http') ? newUrl : `https://${newUrl}` });
     setNewTitle("");
     setNewUrl("");
     setAdding(false);
