@@ -1393,6 +1393,8 @@ function EventModal() {
   const [errs,setErrs]=useState({});
   const [anim,setAnim]=useState(false);
   const [pasteText,setPasteText]=useState("");
+  const [aiMode,setAiMode]=useState(false);   // true=AI 상담대화 모드
+  const [aiLoading,setAiLoading]=useState(false);
   // step: "paste"=텍스트입력단계, "form"=일정폼단계
   const [step,setStep]=useState("paste");
   const tRef=useRef(null);
@@ -1403,6 +1405,8 @@ function EventModal() {
       setForm(editEv?{...editEv}:blank(date));
       setErrs({});
       setPasteText("");
+      setAiMode(false);
+      setAiLoading(false);
       // 수정모드 또는 날짜 직접 추가는 바로 폼, 새 일정은 텍스트 입력부터
       setStep(editEv ? "form" : "paste");
       setTimeout(()=>setAnim(true),10);
@@ -1453,29 +1457,108 @@ function EventModal() {
               className="text-blue-500 font-bold text-base">확인</button>
           </div>
           <div className="flex-1 overflow-y-auto p-4">
-            <p className="text-sm text-gray-500 mb-3">
-              📋 카카오톡 문자나 메모를 붙여넣으면 날짜·장소·연락처·비밀번호를 자동으로 정리해드려요.
-            </p>
-            <textarea
-              autoFocus
-              value={pasteText}
-              onChange={e=>setPasteText(e.target.value)}
-              placeholder={"여기에 내용을 입력하거나 붙여넣으세요...\n\n예)\n6월 15일 오전\n서울시 동대문구 망우로1길27\n이효림 010-2192-9533\n비밀번호 1469*"}
-              rows={14}
-              className="w-full text-sm outline-none resize-none text-gray-800 placeholder-gray-300 leading-relaxed"
-            />
+            {/* 탭 전환 */}
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={()=>setAiMode(false)}
+                className={"flex-1 py-2 rounded-xl text-sm font-bold transition-all " + (!aiMode ? "bg-blue-500 text-white" : "bg-gray-100 text-gray-500")}>
+                📋 메모·문자 입력
+              </button>
+              <button
+                onClick={()=>setAiMode(true)}
+                className={"flex-1 py-2 rounded-xl text-sm font-bold transition-all " + (aiMode ? "bg-blue-500 text-white" : "bg-gray-100 text-gray-500")}>
+                💬 상담 대화 AI 분석
+              </button>
+            </div>
+
+            {!aiMode ? (
+              <>
+                <p className="text-sm text-gray-500 mb-3">
+                  📋 카카오톡 문자나 메모를 붙여넣으면 날짜·장소·연락처·비밀번호를 자동으로 정리해드려요.
+                </p>
+                <textarea
+                  autoFocus
+                  value={pasteText}
+                  onChange={e=>setPasteText(e.target.value)}
+                  placeholder={"여기에 내용을 입력하거나 붙여넣으세요...\n\n예)\n6월 15일 오전\n서울시 동대문구 망우로1길27\n이효림 010-2192-9533\n비밀번호 1469*"}
+                  rows={12}
+                  className="w-full text-sm outline-none resize-none text-gray-800 placeholder-gray-300 leading-relaxed"
+                />
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-500 mb-3">
+                  💬 고객과 나눈 카카오톡 상담 대화를 통째로 붙여넣으면 AI가 예약 정보를 뽑아드려요.
+                </p>
+                <textarea
+                  value={pasteText}
+                  onChange={e=>setPasteText(e.target.value)}
+                  placeholder={"[고객]\n안녕하세요! 청소 견적 문의드려요...\n\n[사장님]\n안녕하세요! 연락 주셔서 감사합니다..."}
+                  rows={12}
+                  className="w-full text-sm outline-none resize-none text-gray-800 placeholder-gray-300 leading-relaxed"
+                />
+              </>
+            )}
           </div>
           <div className="px-4 py-3 border-t border-gray-100">
             <button
-              onClick={()=>{
-                if(pasteText.trim()){
+              disabled={aiLoading}
+              onClick={async ()=>{
+                if(!pasteText.trim()){ setStep("form"); return; }
+                if(!aiMode){
+                  // 기존 정규식 파싱
                   const parsed = parseEventText(pasteText);
                   setForm(p=>({...p, ...parsed}));
+                  setStep("form");
+                } else {
+                  // AI 분석
+                  setAiLoading(true);
+                  try {
+                    const res = await fetch("https://api.anthropic.com/v1/messages", {
+                      method: "POST",
+                      headers: {"Content-Type":"application/json"},
+                      body: JSON.stringify({
+                        model: "claude-sonnet-4-6",
+                        max_tokens: 1000,
+                        system: `청소업체 상담 대화를 분석해서 예약 정보를 JSON으로만 반환하세요. 마크다운 없이 순수 JSON만.
+{
+  "title": "일정 제목 (예: 강남구 OO동 입주청소 30평)",
+  "start": "YYYY-MM-DD 형식 또는 null",
+  "end": "YYYY-MM-DD 형식 또는 null",
+  "startTime": "HH:MM 24시간 또는 null",
+  "endTime": "HH:MM 24시간 또는 null",
+  "place": "주소",
+  "contact": "연락처 또는 null",
+  "description": "금액·예약금·인원·포함항목·특이사항 등 메모"
+}`,
+                        messages:[{role:"user",content:`다음 상담 대화에서 예약 정보를 추출해주세요:\n\n${pasteText}`}]
+                      })
+                    });
+                    const data = await res.json();
+                    const text = data.content[0].text.trim().replace(/\`\`\`json|\`\`\`/g,"").trim();
+                    const parsed = JSON.parse(text);
+                    setForm(p=>({
+                      ...p,
+                      title: parsed.title || p.title,
+                      start: parsed.start || p.start,
+                      end: parsed.end || parsed.start || p.end,
+                      startTime: parsed.startTime || p.startTime,
+                      endTime: parsed.endTime || p.endTime,
+                      place: parsed.place || p.place,
+                      contact: parsed.contact || p.contact,
+                      description: parsed.description || p.description,
+                    }));
+                    setStep("form");
+                  } catch(e) {
+                    alert("AI 분석 중 오류가 발생했어요. 다시 시도해주세요.");
+                    console.error(e);
+                  } finally {
+                    setAiLoading(false);
+                  }
                 }
-                setStep("form");
               }}
-              className="w-full py-3 bg-blue-500 text-white text-sm font-bold rounded-2xl">
-              {pasteText.trim() ? "✨ 자동 분석하고 계속" : "직접 입력하기"}
+              className={"w-full py-3 text-white text-sm font-bold rounded-2xl transition-all " + (aiLoading ? "bg-gray-300" : "bg-blue-500")}>
+              {aiLoading ? "⏳ AI 분석 중..." : aiMode ? "✨ AI로 자동 분석" : (pasteText.trim() ? "✨ 자동 분석하고 계속" : "직접 입력하기")}
             </button>
           </div>
         </>
