@@ -16,6 +16,12 @@ import {
   ChevronRight, Menu, Settings, User, Edit3, Trash2,
   PieChart, Bell, History, ExternalLink, Activity
 } from "lucide-react";
+// Firebase Firestore 관련 함수 import
+import { db } from "./firebase";
+import {
+  collection, doc, setDoc, deleteDoc,
+  onSnapshot, query, orderBy, serverTimestamp
+} from "firebase/firestore";
 
 // ── 캘린더 목록 ───────────────────────────────────────────────
 const CALS = [
@@ -280,95 +286,150 @@ const makeSamples = () => {
   ];
 };
 
-// ── localStorage 저장/불러오기 헬퍼 ─────────────────────────────
-// 주의: Claude 아티팩트 미리보기에서는 동작 안 함 (GitHub Pages 배포 후 정상)
-const LS_KEY_EVENTS = "cleandream_events";
-const LS_KEY_CALS   = "cleandream_cals";
+// ── LocalStorage 키 상수 (캘린더 ON/OFF 토글 상태만 유지) ─────────
+const LS_KEY_CALS = "cleanmanager_cals";
 
-function loadFromStorage(key, fallback) {
+function loadCalsFromStorage() {
   try {
-    const raw = window.localStorage.getItem(key);
+    const raw = window.localStorage.getItem(LS_KEY_CALS);
     if (raw) return JSON.parse(raw);
-  } catch(e) { /* 아티팩트 환경 등에서 접근 불가 시 무시 */ }
-  return fallback;
-}
-
-function saveToStorage(key, value) {
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch(e) { /* 저장 실패 무시 */ }
+  } catch(e) { /* 접근 불가 시 무시 */ }
+  return CALS;
 }
 
 function Provider({ children }) {
-  // 저장된 데이터 있으면 불러오고, 없으면 샘플 데이터
-  const [events,setEvents]     = useState(() => loadFromStorage(LS_KEY_EVENTS, makeSamples()));
-  const [cals,setCals]         = useState(() => loadFromStorage(LS_KEY_CALS, CALS));
-  const [modal,setModal]       = useState({open:false,date:null,editId:null});
-  const [current,setCurrent]   = useState(() => {
+  // ── UI/로컬 전용 상태 ─────────────────────────────────────────
+  const [cals, setCals]               = useState(loadCalsFromStorage);
+  const [modal, setModal]             = useState({open:false,date:null,editId:null});
+  const [current, setCurrent]         = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
-  const [selDate,setSelDate]   = useState(() => fmt(new Date()));
-  const [detEv,setDetEv]       = useState(null);
+  const [selDate, setSelDate]         = useState(() => fmt(new Date()));
+  const [detEv, setDetEv]             = useState(null);
   const [fieldReportEv, setFieldReportEv] = useState(null);
-  const [drawer,setDrawer]     = useState(false);
-  const [searchOpen,setSearchOpen] = useState(false);
-  const [searchQuery,setSearchQuery] = useState("");
-  // 0=full month bar, 1=half dot+sheet, 2=list only
-  const [sheetMode,setSheetMode] = useState(1); // 기본: 도트그리드+시트
+  const [drawer, setDrawer]           = useState(false);
+  const [searchOpen, setSearchOpen]   = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sheetMode, setSheetMode]     = useState(1);
 
-  // 직원 관리 상태
-  const [teams, setTeams] = useState(INIT_TEAMS);
-  const [teamModal, setTeamModal] = useState(false);
-  const [users, setUsers] = useState(INIT_USERS);
-  const [currentUser, setCurrentUser] = useState(INIT_USERS[0]); 
-  const [currentScreen, setCurrentScreen] = useState("calendar"); // "calendar" | "employees"
-  const [empModal, setEmpModal] = useState({ open: false, editId: null });
+  // 직원 관리 상태 (추후 Firestore 연동 예정)
+  const [teams, setTeams]             = useState(INIT_TEAMS);
+  const [teamModal, setTeamModal]     = useState(false);
+  const [users, setUsers]             = useState(INIT_USERS);
+  const [currentUser, setCurrentUser] = useState(INIT_USERS[0]);
+  const [currentScreen, setCurrentScreen] = useState("calendar");
+  const [empModal, setEmpModal]       = useState({ open: false, editId: null });
 
-  // 부가 기능 상태
+  // ── Firestore 실시간 동기화 상태 ───────────────────────────────
+  const [events, setEvents]           = useState([]);
   const [activityLogs, setActivityLogs] = useState([]);
-  const [notices, setNotices] = useState([
-    { id: "n1", title: "이번 주말 작업 시 안전화 필수 착용", author: "김사장", date: "2026-06-18" }
-  ]);
-  const [links, setLinks] = useState([]); // 처음에는 빈 목록
+  const [notices, setNotices]         = useState([]);
+  const [links, setLinks]             = useState([]);
+  const [fsLoading, setFsLoading]     = useState(true); // Firestore 초기 로딩 상태
 
-  const addLog = useCallback((action, detail) => {
-    setActivityLogs(p => [{ id: uid(), time: new Date().toISOString(), user: currentUser, action, detail }, ...p].slice(0, 100));
+  // ── Firestore onSnapshot 구독 (컴포넌트 마운트 시 1회 설정) ──────
+  useEffect(() => {
+    const unsubs = [];
+
+    // 1) events 컬렉션 — 날짜순 정렬
+    unsubs.push(
+      onSnapshot(
+        query(collection(db, "events"), orderBy("start")),
+        (snap) => {
+          setEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+          setFsLoading(false);
+        },
+        (err) => console.error("[events] onSnapshot 오류:", err)
+      )
+    );
+
+    // 2) activityLogs 컬렉션 — 최신순 정렬
+    unsubs.push(
+      onSnapshot(
+        query(collection(db, "activityLogs"), orderBy("time", "desc")),
+        (snap) => setActivityLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).slice(0, 100)),
+        (err) => console.error("[activityLogs] onSnapshot 오류:", err)
+      )
+    );
+
+    // 3) notices 컬렉션 — 날짜 내림차순
+    unsubs.push(
+      onSnapshot(
+        query(collection(db, "notices"), orderBy("date", "desc")),
+        (snap) => setNotices(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+        (err) => console.error("[notices] onSnapshot 오류:", err)
+      )
+    );
+
+    // 4) links 컬렉션 — 등록 순서 유지
+    unsubs.push(
+      onSnapshot(
+        collection(db, "links"),
+        (snap) => setLinks(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+        (err) => console.error("[links] onSnapshot 오류:", err)
+      )
+    );
+
+    // 컴포넌트 언마운트 시 구독 해제
+    return () => unsubs.forEach(u => u());
+  }, []);
+
+  // cals ON/OFF 상태는 LocalStorage에만 저장 (기기별 개인 설정)
+  useEffect(() => {
+    try { window.localStorage.setItem(LS_KEY_CALS, JSON.stringify(cals)); } catch(e) {}
+  }, [cals]);
+
+  // ── 로그 기록 (Firestore에 저장) ──────────────────────────────
+  const addLog = useCallback(async (action, detail) => {
+    const logId = uid();
+    const logData = {
+      time: new Date().toISOString(),
+      user: currentUser,
+      action,
+      detail,
+    };
+    try {
+      await setDoc(doc(db, "activityLogs", logId), logData);
+    } catch(e) { console.error("[addLog] 저장 실패:", e); }
   }, [currentUser]);
 
-  const addEvent    = useCallback(ev => {
-    setEvents(p => [...p, { ...ev, id: uid() }]);
-    addLog("등록", `'${ev.title}' 일정을 등록했습니다.`);
+  // ── 일정 CRUD (Firestore 연동) ─────────────────────────────────
+  const addEvent = useCallback(async (ev) => {
+    const newId = uid();
+    const newEv = { ...ev, id: newId };
+    try {
+      await setDoc(doc(db, "events", newId), newEv);
+      await addLog("등록", `'${ev.title}' 일정을 등록했습니다.`);
+    } catch(e) { console.error("[addEvent] 저장 실패:", e); }
   }, [addLog]);
-  
-  const updateEvent = useCallback(ev => {
-    setEvents(p => p.map(e => e.id === ev.id ? ev : e));
-    addLog("수정", `'${ev.title}' 일정을 수정했습니다.`);
-  }, [addLog]);
-  
-  const deleteEvent = useCallback(id => {
-    setEvents(p => {
-      const target = p.find(e => e.id === id);
-      if (target) addLog("삭제", `'${target.title}' 일정을 삭제했습니다.`);
-      return p.filter(e => e.id !== id);
-    });
-  }, [addLog]);
-  
-  const openModal   = useCallback((date=null,editId=null)=>setModal({open:true,date,editId}),[]);
-  const closeModal  = useCallback(()=>setModal({open:false,date:null,editId:null}),[]);
-  const toggleCal   = useCallback(id=>setCals(p=>p.map(c=>c.id===id?{...c,checked:!c.checked}:c)),[]);
 
-  // events 변경 시마다 localStorage 자동 저장
-  useEffect(()=>{ saveToStorage(LS_KEY_EVENTS, events); }, [events]);
-  // cals(캘린더 ON/OFF) 변경 시마다 저장
-  useEffect(()=>{ saveToStorage(LS_KEY_CALS, cals); }, [cals]);
+  const updateEvent = useCallback(async (ev) => {
+    try {
+      await setDoc(doc(db, "events", ev.id), ev);
+      await addLog("수정", `'${ev.title}' 일정을 수정했습니다.`);
+    } catch(e) { console.error("[updateEvent] 저장 실패:", e); }
+  }, [addLog]);
 
-  const checkedIds     = useMemo(()=>new Set(cals.filter(c=>c.checked).map(c=>c.id)),[cals]);
-  const visibleEvents  = useMemo(()=>{
+  const deleteEvent = useCallback(async (id) => {
+    const target = events.find(e => e.id === id);
+    try {
+      await deleteDoc(doc(db, "events", id));
+      if (target) await addLog("삭제", `'${target.title}' 일정을 삭제했습니다.`);
+    } catch(e) { console.error("[deleteEvent] 삭제 실패:", e); }
+  }, [events, addLog]);
+
+  const openModal  = useCallback((date=null,editId=null)=>setModal({open:true,date,editId}),[]);
+  const closeModal = useCallback(()=>setModal({open:false,date:null,editId:null}),[]);
+  const toggleCal  = useCallback(id=>setCals(p=>p.map(c=>c.id===id?{...c,checked:!c.checked}:c)),[]);
+
+  // ── 필터링된 일정 (권한 체크 포함) ───────────────────────────────
+  const checkedIds    = useMemo(()=>new Set(cals.filter(c=>c.checked).map(c=>c.id)),[cals]);
+  const visibleEvents = useMemo(()=>{
     let evs = events.filter(e=>checkedIds.has(e.calId));
-    // 청소팀 권한 체크: 사장/관리/영업팀이 아니면, 본인 팀과 관련된 캘린더만 열람 가능하도록 제한
+    // 청소팀 권한 체크: 사장/관리/영업팀이 아니면 본인 팀 관련 캘린더만 열람
     if (!["사장", "관리팀", "영업팀"].includes(currentUser.team)) {
-      const myTeamKeyword = currentUser.team.replace("팀", ""); // 예: "정기청소"
+      const myTeamKeyword = currentUser.team.replace("팀", "");
       evs = evs.filter(e => {
         const cal = CALS.find(c=>c.id===e.calId);
         return cal && cal.label.includes(myTeamKeyword);
@@ -379,25 +440,26 @@ function Provider({ children }) {
 
   return (
     <Ctx.Provider value={{
-      events,visibleEvents,addEvent,updateEvent,deleteEvent,
-      fieldReportEv,setFieldReportEv,
-      cals,toggleCal,
-      modal,openModal,closeModal,
-      current,setCurrent,
-      selDate,setSelDate,
-      detEv,setDetEv,
-      drawer,setDrawer,
-      searchOpen,setSearchOpen,
-      searchQuery,setSearchQuery,
-      sheetMode,setSheetMode,
-      teams,setTeams,teamModal,setTeamModal,
-      users,setUsers,
-      currentUser,setCurrentUser,
-      currentScreen,setCurrentScreen,
-      empModal,setEmpModal,
-      activityLogs,setActivityLogs,
-      notices,setNotices,
-      links,setLinks,
+      events, visibleEvents, addEvent, updateEvent, deleteEvent,
+      fieldReportEv, setFieldReportEv,
+      cals, toggleCal,
+      modal, openModal, closeModal,
+      current, setCurrent,
+      selDate, setSelDate,
+      detEv, setDetEv,
+      drawer, setDrawer,
+      searchOpen, setSearchOpen,
+      searchQuery, setSearchQuery,
+      sheetMode, setSheetMode,
+      teams, setTeams, teamModal, setTeamModal,
+      users, setUsers,
+      currentUser, setCurrentUser,
+      currentScreen, setCurrentScreen,
+      empModal, setEmpModal,
+      activityLogs, setActivityLogs,
+      notices, setNotices,
+      links, setLinks,
+      fsLoading,
     }}>
       {children}
     </Ctx.Provider>
@@ -2610,7 +2672,8 @@ function DashboardScreen() {
 
 // ── 공지사항 화면 ───────────────────────────────────────────────
 function NoticeScreen() {
-  const { notices, setNotices, currentUser, setCurrentScreen } = useC();
+  // notices, setNotices 대신 Firestore 연동 함수 사용
+  const { notices, currentUser, setCurrentScreen } = useC();
   const [selected, setSelected] = useState(null);
   const [writing, setWriting] = useState(false);
   const [newTitle, setNewTitle] = useState("");
@@ -2625,10 +2688,14 @@ function NoticeScreen() {
     localStorage.setItem("readNotices", JSON.stringify(next));
   };
 
-  const submitNotice = () => {
+  // 공지사항 등록 → Firestore에 저장
+  const submitNotice = async () => {
     if(!newTitle.trim()) return;
-    const n = {id:uid(), title:newTitle, body:newBody, author:currentUser.name, date:fmt(new Date()), important:false};
-    setNotices(p=>[n,...p]);
+    const nId = uid();
+    const n = { id: nId, title: newTitle, body: newBody, author: currentUser.name, date: fmt(new Date()), important: false };
+    try {
+      await setDoc(doc(db, "notices", nId), n);
+    } catch(e) { console.error("[submitNotice] 저장 실패:", e); }
     setNewTitle(""); setNewBody(""); setWriting(false);
   };
 
@@ -2643,7 +2710,10 @@ function NoticeScreen() {
           </button>
           <h2 className="text-base font-bold text-gray-900 flex-1 line-clamp-1">{selected.title}</h2>
           {isAdmin && (
-            <button onClick={()=>{setNotices(p=>p.filter(n=>n.id!==selected.id));setSelected(null);}}
+            <button onClick={async ()=>{
+              try { await deleteDoc(doc(db, "notices", selected.id)); } catch(e) { console.error(e); }
+              setSelected(null);
+            }}
               className="text-xs text-red-400 font-bold px-2 py-1 rounded-full hover:bg-red-50">삭제</button>
           )}
         </div>
@@ -2794,7 +2864,8 @@ function ActivityLogScreen() {
 
 // ── 외부 링크 화면 ───────────────────────────────────────────────
 function ExternalLinksScreen() {
-  const { links, setLinks, setCurrentScreen } = useC();
+  // links는 Firestore onSnapshot으로 자동 업데이트되므로 setLinks 불필요
+  const { links, setCurrentScreen } = useC();
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newUrl, setNewUrl]   = useState("");
@@ -2802,9 +2873,13 @@ function ExternalLinksScreen() {
 
   const EMOJIS = ["🔗","📍","📞","💰","🧹","📋","🏢","🚗","📦","🛠️"];
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if(!newTitle.trim() || !newUrl.trim()) return;
-    setLinks(p=>[...p,{id:uid(),title:newTitle,url:newUrl.startsWith("http")?newUrl:`https://${newUrl}`,emoji:newEmoji}]);
+    const newId = uid();
+    const newLink = { id: newId, title: newTitle, url: newUrl.startsWith("http") ? newUrl : `https://${newUrl}`, emoji: newEmoji };
+    try {
+      await setDoc(doc(db, "links", newId), newLink);
+    } catch(e) { console.error("[handleAdd link] 저장 실패:", e); }
     setNewTitle(""); setNewUrl(""); setNewEmoji("🔗"); setAdding(false);
   };
 
@@ -2862,7 +2937,7 @@ function ExternalLinksScreen() {
                 <p className="text-xs text-gray-400 truncate">{l.url}</p>
               </div>
             </a>
-            <button onClick={()=>setLinks(p=>p.filter(x=>x.id!==l.id))}
+            <button onClick={async ()=>{ try { await deleteDoc(doc(db, "links", l.id)); } catch(e){ console.error(e); } }}
               className="p-2 rounded-full text-gray-300 hover:text-red-400 hover:bg-red-50 shrink-0">
               <X size={16}/>
             </button>
