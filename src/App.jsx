@@ -1820,9 +1820,11 @@ function TopHeader() {
           : <button onClick={()=>setDrawer(true)} className="p-1 -ml-1"><Menu size={22} className="text-gray-700"/></button>
         }
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white shadow-sm"
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white shadow-sm overflow-hidden"
             style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
-            {currentUser?.companyName?.charAt(0) || "🏢"}
+            {currentUser?.companyLogoUrl 
+              ? <img src={currentUser.companyLogoUrl} alt="Logo" className="w-full h-full object-cover" />
+              : (currentUser?.companyName?.charAt(0) || "🏢")}
           </div>
           <span className="font-extrabold text-gray-900 text-lg">{currentUser?.companyName || "로딩중..."}</span>
         </div>
@@ -2362,7 +2364,17 @@ function LoginScreen({ onLogin }) {
 // ── 신규 가입 화면 ───────────────────────────────────────────────
 function RegisterScreen({ user, onComplete }) {
   const [companyName, setCompanyName] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
   const [loading, setLoading] = useState(false);
+  
+  const handleLogoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setLogoUrl(reader.result);
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleRegister = async () => {
     if (!companyName.trim()) return alert("회사명을 입력해주세요.");
@@ -2389,7 +2401,7 @@ function RegisterScreen({ user, onComplete }) {
       await setDoc(doc(db, "admins", user.uid), adminData);
       
       // 유저 정보에 company 이름도 담아서 onComplete
-      onComplete({ uid: user.uid, ...adminData, companyName });
+      onComplete({ uid: user.uid, ...adminData, companyName, companyLogoUrl: logoUrl });
     } catch (e) {
       console.error(e);
       alert("가입 중 오류가 발생했습니다.");
@@ -2399,8 +2411,12 @@ function RegisterScreen({ user, onComplete }) {
 
   return (
     <div className="flex-1 flex flex-col bg-white min-h-screen items-center justify-center px-8">
-      <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
-        style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🏢</div>
+      <label className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl overflow-hidden cursor-pointer bg-gray-100 border-2 border-dashed border-gray-300 hover:border-blue-500 transition-colors"
+        style={{background: logoUrl ? "#fff" : "linear-gradient(135deg,#1a56db,#2563eb)"}}>
+        {logoUrl ? <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" /> : "🏢"}
+        <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
+      </label>
+      <p className="text-xs text-gray-400 -mt-4 mb-4 text-center">로고 이미지를 선택하세요 (선택)</p>
       <h1 className="text-2xl font-extrabold text-gray-900 mb-2">회사 등록</h1>
       <p className="text-sm text-gray-500 mb-8 text-center">환영합니다!<br/>앱을 사용할 회사(업체) 이름을 입력해주세요.</p>
       
@@ -2470,8 +2486,9 @@ export default function App() {
             const data = adminDoc.data();
             const compDoc = await getDoc(doc(db, "companies", data.companyId));
             const companyName = compDoc.exists() ? compDoc.data().name : "클린메니저";
+            const companyLogoUrl = compDoc.exists() ? compDoc.data().logoUrl : null;
             
-            setLoginUser({ uid: user.uid, email: user.email, name: data.name || user.displayName, companyId: data.companyId, companyName, role: data.role || "최고관리자", team: data.team || "관리팀" });
+            setLoginUser({ uid: user.uid, email: user.email, name: data.name || user.displayName, companyId: data.companyId, companyName, companyLogoUrl, role: data.role || "최고관리자", team: data.team || "관리팀" });
             setAuthState("app");
             return;
           }
@@ -2482,8 +2499,9 @@ export default function App() {
             const data = staffDoc.data();
             const compDoc = await getDoc(doc(db, "companies", data.companyId));
             const companyName = compDoc.exists() ? compDoc.data().name : "클린메니저";
+            const companyLogoUrl = compDoc.exists() ? compDoc.data().logoUrl : null;
             
-            setLoginUser({ uid: user.uid, email: user.email, name: data.name, companyId: data.companyId, companyName, role: data.role, team: data.team });
+            setLoginUser({ uid: user.uid, email: user.email, name: data.name, companyId: data.companyId, companyName, companyLogoUrl, role: data.role, team: data.team });
             setAuthState("app");
             return;
           }
