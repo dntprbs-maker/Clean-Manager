@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 클린메니저 — 네이버 캘린더 완전 재현
  * 3단계 스와이프 모드:
  *   MODE 0 (full)  → 월간 그리드 전체 (이벤트 텍스트 바 표시)
@@ -2413,6 +2413,35 @@ function RegisterScreen({ user, onComplete }) {
         style={{background:companyName.trim()?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb", opacity: loading ? 0.7 : 1}}>
         {loading ? "등록 중..." : "가입 완료"}
       </button>
+    </div>
+  );
+}
+
+function AppInner() {
+  const { currentScreen } = useC();
+  return (
+    <div className="h-screen flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none">
+      <style>{ANIM_CSS}</style>
+      <TopHeader/>
+      {currentScreen === "calendar" && (
+        <>
+          <CalendarView/>
+          <FloatingButtons/>
+        </>
+      )}
+      {currentScreen === "employees"    && <EmployeeListScreen/>}
+      {currentScreen === "team_schedule"&& <TeamScheduleScreen/>}
+      {currentScreen === "dashboard"    && <DashboardScreen/>}
+      {currentScreen === "notice"       && <NoticeScreen/>}
+      {currentScreen === "activity_log" && <ActivityLogScreen/>}
+      {currentScreen === "links"        && <ExternalLinksScreen/>}
+      {currentScreen === "report_history"&& <ReportHistoryScreen/>}
+      <SideDrawer/>
+      <DetailSheet/>
+      <EventModal/>
+      <SearchModal/>
+      <EmployeeFormModal/>
+      <TeamManagementModal/>
     </div>
   );
 }
