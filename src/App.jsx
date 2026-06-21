@@ -2707,6 +2707,7 @@ function AppInner() {
       {currentScreen === "activity_log" && <ActivityLogScreen/>}
       {currentScreen === "links"        && <ExternalLinksScreen/>}
       {currentScreen === "report_history"&& <ReportHistoryScreen/>}
+      {currentScreen === "import_calendar" && <ImportCalendarScreen/>}
       <SideDrawer/>
       <DetailSheet/>
       <EventModal/>
