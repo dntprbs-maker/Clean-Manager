@@ -14,15 +14,8 @@ import {
   Search, Plus, X, MapPin, Link2, RotateCcw, Clock,
   Calendar, AlignLeft, ChevronDown, ChevronLeft,
   ChevronRight, Menu, Settings, User, Edit3, Trash2,
-  PieChart, Bell, History, ExternalLink, Activity,
-  CheckSquare, FileText, Camera
+  PieChart, Bell, History, ExternalLink, Activity
 } from "lucide-react";
-// Firebase Firestore 관련 함수 import
-import { db } from "./firebase";
-import {
-  collection, doc, setDoc, deleteDoc,
-  onSnapshot, query, orderBy, serverTimestamp
-} from "firebase/firestore";
 
 // ── 캘린더 목록 ───────────────────────────────────────────────
 const CALS = [
@@ -287,150 +280,95 @@ const makeSamples = () => {
   ];
 };
 
-// ── LocalStorage 키 상수 (캘린더 ON/OFF 토글 상태만 유지) ─────────
-const LS_KEY_CALS = "cleanmanager_cals";
+// ── localStorage 저장/불러오기 헬퍼 ─────────────────────────────
+// 주의: Claude 아티팩트 미리보기에서는 동작 안 함 (GitHub Pages 배포 후 정상)
+const LS_KEY_EVENTS = "cleandream_events";
+const LS_KEY_CALS   = "cleandream_cals";
 
-function loadCalsFromStorage() {
+function loadFromStorage(key, fallback) {
   try {
-    const raw = window.localStorage.getItem(LS_KEY_CALS);
+    const raw = window.localStorage.getItem(key);
     if (raw) return JSON.parse(raw);
-  } catch(e) { /* 접근 불가 시 무시 */ }
-  return CALS;
+  } catch(e) { /* 아티팩트 환경 등에서 접근 불가 시 무시 */ }
+  return fallback;
 }
 
-function Provider({ children }) {
-  // ── UI/로컬 전용 상태 ─────────────────────────────────────────
-  const [cals, setCals]               = useState(loadCalsFromStorage);
-  const [modal, setModal]             = useState({open:false,date:null,editId:null});
-  const [current, setCurrent]         = useState(() => {
+function saveToStorage(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch(e) { /* 저장 실패 무시 */ }
+}
+
+function Provider({ children, loginUser, onLogout }) {
+  // 저장된 데이터 있으면 불러오고, 없으면 샘플 데이터
+  const [events,setEvents]     = useState(() => loadFromStorage(LS_KEY_EVENTS, makeSamples()));
+  const [cals,setCals]         = useState(() => loadFromStorage(LS_KEY_CALS, CALS));
+  const [modal,setModal]       = useState({open:false,date:null,editId:null});
+  const [current,setCurrent]   = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
-  const [selDate, setSelDate]         = useState(() => fmt(new Date()));
-  const [detEv, setDetEv]             = useState(null);
+  const [selDate,setSelDate]   = useState(() => fmt(new Date()));
+  const [detEv,setDetEv]       = useState(null);
   const [fieldReportEv, setFieldReportEv] = useState(null);
-  const [drawer, setDrawer]           = useState(false);
-  const [searchOpen, setSearchOpen]   = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sheetMode, setSheetMode]     = useState(1);
+  const [drawer,setDrawer]     = useState(false);
+  const [searchOpen,setSearchOpen] = useState(false);
+  const [searchQuery,setSearchQuery] = useState("");
+  // 0=full month bar, 1=half dot+sheet, 2=list only
+  const [sheetMode,setSheetMode] = useState(1); // 기본: 도트그리드+시트
 
-  // 직원 관리 상태 (추후 Firestore 연동 예정)
-  const [teams, setTeams]             = useState(INIT_TEAMS);
-  const [teamModal, setTeamModal]     = useState(false);
-  const [users, setUsers]             = useState(INIT_USERS);
-  const [currentUser, setCurrentUser] = useState(INIT_USERS[0]);
-  const [currentScreen, setCurrentScreen] = useState("calendar");
-  const [empModal, setEmpModal]       = useState({ open: false, editId: null });
+  // 직원 관리 상태
+  const [teams, setTeams] = useState(INIT_TEAMS);
+  const [teamModal, setTeamModal] = useState(false);
+  const [users, setUsers] = useState(INIT_USERS);
+  const [currentUser, setCurrentUser] = useState(INIT_USERS[0]); 
+  const [currentScreen, setCurrentScreen] = useState("calendar"); // "calendar" | "employees"
+  const [empModal, setEmpModal] = useState({ open: false, editId: null });
 
-  // ── Firestore 실시간 동기화 상태 ───────────────────────────────
-  const [events, setEvents]           = useState([]);
+  // 부가 기능 상태
   const [activityLogs, setActivityLogs] = useState([]);
-  const [notices, setNotices]         = useState([]);
-  const [links, setLinks]             = useState([]);
-  const [fsLoading, setFsLoading]     = useState(true); // Firestore 초기 로딩 상태
+  const [notices, setNotices] = useState([
+    { id: "n1", title: "이번 주말 작업 시 안전화 필수 착용", author: "김사장", date: "2026-06-18" }
+  ]);
+  const [links, setLinks] = useState([]); // 처음에는 빈 목록
 
-  // ── Firestore onSnapshot 구독 (컴포넌트 마운트 시 1회 설정) ──────
-  useEffect(() => {
-    const unsubs = [];
-
-    // 1) events 컬렉션 — 날짜순 정렬
-    unsubs.push(
-      onSnapshot(
-        query(collection(db, "events"), orderBy("start")),
-        (snap) => {
-          setEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-          setFsLoading(false);
-        },
-        (err) => console.error("[events] onSnapshot 오류:", err)
-      )
-    );
-
-    // 2) activityLogs 컬렉션 — 최신순 정렬
-    unsubs.push(
-      onSnapshot(
-        query(collection(db, "activityLogs"), orderBy("time", "desc")),
-        (snap) => setActivityLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).slice(0, 100)),
-        (err) => console.error("[activityLogs] onSnapshot 오류:", err)
-      )
-    );
-
-    // 3) notices 컬렉션 — 날짜 내림차순
-    unsubs.push(
-      onSnapshot(
-        query(collection(db, "notices"), orderBy("date", "desc")),
-        (snap) => setNotices(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
-        (err) => console.error("[notices] onSnapshot 오류:", err)
-      )
-    );
-
-    // 4) links 컬렉션 — 등록 순서 유지
-    unsubs.push(
-      onSnapshot(
-        collection(db, "links"),
-        (snap) => setLinks(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
-        (err) => console.error("[links] onSnapshot 오류:", err)
-      )
-    );
-
-    // 컴포넌트 언마운트 시 구독 해제
-    return () => unsubs.forEach(u => u());
-  }, []);
-
-  // cals ON/OFF 상태는 LocalStorage에만 저장 (기기별 개인 설정)
-  useEffect(() => {
-    try { window.localStorage.setItem(LS_KEY_CALS, JSON.stringify(cals)); } catch(e) {}
-  }, [cals]);
-
-  // ── 로그 기록 (Firestore에 저장) ──────────────────────────────
-  const addLog = useCallback(async (action, detail) => {
-    const logId = uid();
-    const logData = {
-      time: new Date().toISOString(),
-      user: currentUser,
-      action,
-      detail,
-    };
-    try {
-      await setDoc(doc(db, "activityLogs", logId), logData);
-    } catch(e) { console.error("[addLog] 저장 실패:", e); }
+  const addLog = useCallback((action, detail) => {
+    setActivityLogs(p => [{ id: uid(), time: new Date().toISOString(), user: currentUser, action, detail }, ...p].slice(0, 100));
   }, [currentUser]);
 
-  // ── 일정 CRUD (Firestore 연동) ─────────────────────────────────
-  const addEvent = useCallback(async (ev) => {
-    const newId = uid();
-    const newEv = { ...ev, id: newId };
-    try {
-      await setDoc(doc(db, "events", newId), newEv);
-      await addLog("등록", `'${ev.title}' 일정을 등록했습니다.`);
-    } catch(e) { console.error("[addEvent] 저장 실패:", e); }
+  const addEvent    = useCallback(ev => {
+    setEvents(p => [...p, { ...ev, id: uid() }]);
+    addLog("등록", `'${ev.title}' 일정을 등록했습니다.`);
   }, [addLog]);
-
-  const updateEvent = useCallback(async (ev) => {
-    try {
-      await setDoc(doc(db, "events", ev.id), ev);
-      await addLog("수정", `'${ev.title}' 일정을 수정했습니다.`);
-    } catch(e) { console.error("[updateEvent] 저장 실패:", e); }
+  
+  const updateEvent = useCallback(ev => {
+    setEvents(p => p.map(e => e.id === ev.id ? ev : e));
+    addLog("수정", `'${ev.title}' 일정을 수정했습니다.`);
   }, [addLog]);
+  
+  const deleteEvent = useCallback(id => {
+    setEvents(p => {
+      const target = p.find(e => e.id === id);
+      if (target) addLog("삭제", `'${target.title}' 일정을 삭제했습니다.`);
+      return p.filter(e => e.id !== id);
+    });
+  }, [addLog]);
+  
+  const openModal   = useCallback((date=null,editId=null)=>setModal({open:true,date,editId}),[]);
+  const closeModal  = useCallback(()=>setModal({open:false,date:null,editId:null}),[]);
+  const toggleCal   = useCallback(id=>setCals(p=>p.map(c=>c.id===id?{...c,checked:!c.checked}:c)),[]);
 
-  const deleteEvent = useCallback(async (id) => {
-    const target = events.find(e => e.id === id);
-    try {
-      await deleteDoc(doc(db, "events", id));
-      if (target) await addLog("삭제", `'${target.title}' 일정을 삭제했습니다.`);
-    } catch(e) { console.error("[deleteEvent] 삭제 실패:", e); }
-  }, [events, addLog]);
+  // events 변경 시마다 localStorage 자동 저장
+  useEffect(()=>{ saveToStorage(LS_KEY_EVENTS, events); }, [events]);
+  // cals(캘린더 ON/OFF) 변경 시마다 저장
+  useEffect(()=>{ saveToStorage(LS_KEY_CALS, cals); }, [cals]);
 
-  const openModal  = useCallback((date=null,editId=null)=>setModal({open:true,date,editId}),[]);
-  const closeModal = useCallback(()=>setModal({open:false,date:null,editId:null}),[]);
-  const toggleCal  = useCallback(id=>setCals(p=>p.map(c=>c.id===id?{...c,checked:!c.checked}:c)),[]);
-
-  // ── 필터링된 일정 (권한 체크 포함) ───────────────────────────────
-  const checkedIds    = useMemo(()=>new Set(cals.filter(c=>c.checked).map(c=>c.id)),[cals]);
-  const visibleEvents = useMemo(()=>{
+  const checkedIds     = useMemo(()=>new Set(cals.filter(c=>c.checked).map(c=>c.id)),[cals]);
+  const visibleEvents  = useMemo(()=>{
     let evs = events.filter(e=>checkedIds.has(e.calId));
-    // 청소팀 권한 체크: 사장/관리/영업팀이 아니면 본인 팀 관련 캘린더만 열람
+    // 청소팀 권한 체크: 사장/관리/영업팀이 아니면, 본인 팀과 관련된 캘린더만 열람 가능하도록 제한
     if (!["사장", "관리팀", "영업팀"].includes(currentUser.team)) {
-      const myTeamKeyword = currentUser.team.replace("팀", "");
+      const myTeamKeyword = currentUser.team.replace("팀", ""); // 예: "정기청소"
       evs = evs.filter(e => {
         const cal = CALS.find(c=>c.id===e.calId);
         return cal && cal.label.includes(myTeamKeyword);
@@ -441,26 +379,25 @@ function Provider({ children }) {
 
   return (
     <Ctx.Provider value={{
-      events, visibleEvents, addEvent, updateEvent, deleteEvent,
-      fieldReportEv, setFieldReportEv,
-      cals, toggleCal,
-      modal, openModal, closeModal,
-      current, setCurrent,
-      selDate, setSelDate,
-      detEv, setDetEv,
-      drawer, setDrawer,
-      searchOpen, setSearchOpen,
-      searchQuery, setSearchQuery,
-      sheetMode, setSheetMode,
-      teams, setTeams, teamModal, setTeamModal,
-      users, setUsers,
-      currentUser, setCurrentUser,
-      currentScreen, setCurrentScreen,
-      empModal, setEmpModal,
-      activityLogs, setActivityLogs,
-      notices, setNotices,
-      links, setLinks,
-      fsLoading,
+      events,visibleEvents,addEvent,updateEvent,deleteEvent,
+      fieldReportEv,setFieldReportEv,
+      cals,toggleCal,
+      modal,openModal,closeModal,
+      current,setCurrent,
+      selDate,setSelDate,
+      detEv,setDetEv,
+      drawer,setDrawer,
+      searchOpen,setSearchOpen,
+      searchQuery,setSearchQuery,
+      sheetMode,setSheetMode,
+      teams,setTeams,teamModal,setTeamModal,
+      users,setUsers,
+      currentUser,setCurrentUser,onLogout,
+      currentScreen,setCurrentScreen,
+      empModal,setEmpModal,
+      activityLogs,setActivityLogs,
+      notices,setNotices,
+      links,setLinks,
     }}>
       {children}
     </Ctx.Provider>
@@ -1409,36 +1346,53 @@ function SideDrawer() {
               <span className="text-sm font-medium text-gray-700 flex-1 text-left">직원 관리</span>
             </button>
           )}
-          <button 
-            onClick={() => { setCurrentScreen("team_schedule"); setDrawer(false); }}
-            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
-            <Calendar size={20} className="text-indigo-500" />
-            <span className="text-sm font-medium text-gray-700 flex-1 text-left">팀별 일정</span>
-          </button>
-          <button 
-            onClick={() => { setCurrentScreen("dashboard"); setDrawer(false); }}
-            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
-            <PieChart size={20} className="text-blue-500" />
-            <span className="text-sm font-medium text-gray-700 flex-1 text-left">일정 요약</span>
-          </button>
-          <button 
+          {/* 팀별 일정 - 팀원 제외 */}
+          {currentUser.role !== "팀원" && (
+            <button
+              onClick={() => { setCurrentScreen("team_schedule"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <Calendar size={20} className="text-indigo-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">팀별 일정</span>
+            </button>
+          )}
+
+          {/* 대시보드 - 팀원 제외 */}
+          {currentUser.role !== "팀원" && (
+            <button
+              onClick={() => { setCurrentScreen("dashboard"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <PieChart size={20} className="text-blue-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">일정 요약</span>
+            </button>
+          )}
+
+          {/* 공지사항 - 전체 */}
+          <button
             onClick={() => { setCurrentScreen("notice"); setDrawer(false); }}
             className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
             <Bell size={20} className="text-orange-500" />
             <span className="text-sm font-medium text-gray-700 flex-1 text-left">팀 공지사항</span>
           </button>
-          <button 
-            onClick={() => { setCurrentScreen("activity_log"); setDrawer(false); }}
-            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
-            <History size={20} className="text-green-500" />
-            <span className="text-sm font-medium text-gray-700 flex-1 text-left">최근 작업 내역</span>
-          </button>
-          <button
-            onClick={() => { setCurrentScreen("report_history"); setDrawer(false); }}
-            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
-            <CheckSquare size={20} className="text-blue-500" />
-            <span className="text-sm font-medium text-gray-700 flex-1 text-left">완료 보고 내역</span>
-          </button>
+
+          {/* 변경 로그 - 최고관리자, 관리팀장만 */}
+          {(currentUser.role === "최고관리자" || currentUser.role === "관리팀장") && (
+            <button
+              onClick={() => { setCurrentScreen("activity_log"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <History size={20} className="text-green-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">변경 로그</span>
+            </button>
+          )}
+
+          {/* 완료 보고 내역 - 팀원 제외 */}
+          {currentUser.role !== "팀원" && (
+            <button
+              onClick={() => { setCurrentScreen("report_history"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <CheckSquare size={20} className="text-blue-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">완료 보고 내역</span>
+            </button>
+          )}
           <button 
             onClick={() => { setCurrentScreen("links"); setDrawer(false); }}
             className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
@@ -2314,39 +2268,139 @@ function ReportHistoryScreen() {
   );
 }
 
-// ── 앱 메인 라우터 ───────────────────────────────────────────────
-function AppInner() {
-  const { currentScreen } = useC();
+// ── 로그인 화면 ───────────────────────────────────────────────
+const STAFF_ACCOUNTS = [
+  {id:"clean1",  pw:"1234", name:"이팀장",  role:"팀장",      team:"청소 1팀", calId:"clean1"},
+  {id:"clean2",  pw:"1234", name:"박팀장",  role:"팀장",      team:"청소 2팀", calId:"clean2"},
+  {id:"sales01", pw:"abcd", name:"최영업",  role:"영업팀장",  team:"영업팀",   calId:null},
+  {id:"mgr01",   pw:"mgr1", name:"김관리",  role:"관리팀장",  team:"관리팀",   calId:null},
+  {id:"staff01", pw:"1111", name:"홍길동",  role:"팀원",      team:"청소 1팀", calId:"clean1"},
+];
+
+function LoginScreen({ onLogin }) {
+  const [tab, setTab]         = useState("google");
+  const [staffId, setStaffId] = useState("");
+  const [staffPw, setStaffPw] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState("");
+  const [showPw, setShowPw]   = useState(false);
+
+  const handleGoogle = () => {
+    setLoading(true); setError("");
+    setTimeout(()=>{
+      setLoading(false);
+      onLogin({name:"김대표", role:"최고관리자", team:"관리팀", calId:null});
+    }, 1600);
+  };
+
+  const handleStaff = () => {
+    if(!staffId||!staffPw){ setError("아이디와 비밀번호를 입력하세요."); return; }
+    setLoading(true); setError("");
+    setTimeout(()=>{
+      setLoading(false);
+      const found = STAFF_ACCOUNTS.find(a=>a.id===staffId&&a.pw===staffPw);
+      if(found) onLogin(found);
+      else setError("아이디 또는 비밀번호가 올바르지 않습니다.");
+    }, 900);
+  };
+
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none">
-      <style>{ANIM_CSS}</style>
-      <TopHeader/>
-      {currentScreen === "calendar" && (
-        <>
-          <CalendarView/>
-          <FloatingButtons/>
-        </>
-      )}
-      {currentScreen === "employees"    && <EmployeeListScreen/>}
-      {currentScreen === "team_schedule"&& <TeamScheduleScreen/>}
-      {currentScreen === "dashboard"    && <DashboardScreen/>}
-      {currentScreen === "notice"       && <NoticeScreen/>}
-      {currentScreen === "activity_log" && <ActivityLogScreen/>}
-      {currentScreen === "links"        && <ExternalLinksScreen/>}
-      {currentScreen === "report_history"&& <ReportHistoryScreen/>}
-      <SideDrawer/>
-      <DetailSheet/>
-      <EventModal/>
-      <SearchModal/>
-      <EmployeeFormModal/>
-      <TeamManagementModal/>
+    <div className="flex-1 flex flex-col bg-white min-h-screen">
+      <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
+        <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
+          style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🧹</div>
+        <h1 className="text-3xl font-extrabold text-gray-900 mb-2">크린드림</h1>
+        <p className="text-sm text-gray-400">현장 관리 앱</p>
+      </div>
+      <div className="px-6 pb-12 flex flex-col gap-3">
+        <div className="flex bg-gray-100 rounded-2xl p-1 gap-1 mb-1">
+          {[["google","👑 관리자"],["staff","👤 직원"]].map(([k,l])=>(
+            <button key={k} onClick={()=>{setTab(k);setError("");}}
+              className={"flex-1 py-2.5 rounded-xl text-sm font-bold transition-all " +
+                (tab===k?"bg-white shadow text-gray-900":"text-gray-400")}>
+              {l}
+            </button>
+          ))}
+        </div>
+        {tab==="google" && (
+          <div className="flex flex-col gap-3">
+            <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100">
+              <p className="text-sm font-bold text-blue-600 mb-1">최고관리자 전용</p>
+              <p className="text-xs text-gray-500 leading-relaxed">등록된 Gmail 계정으로만 로그인 가능합니다.</p>
+            </div>
+            <button onClick={handleGoogle} disabled={loading}
+              className="w-full py-4 rounded-2xl border border-gray-200 bg-white text-gray-700 text-sm font-bold flex items-center justify-center gap-3 shadow-sm"
+              style={{opacity:loading?0.7:1}}>
+              {loading
+                ? <div className="w-5 h-5 rounded-full border-2 border-gray-200 border-t-blue-500" style={{animation:"spin .7s linear infinite"}}/>
+                : <svg width="20" height="20" viewBox="0 0 48 48">
+                    <path fill="#FFC107" d="M43.6 20H24v8h11.3C33.6 33.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.7 1.1 7.8 2.9l5.7-5.7C33.9 6.5 29.2 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20c11 0 20-8.9 20-20 0-1.3-.1-2.7-.4-4z"/>
+                    <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.5 19 12 24 12c3 0 5.7 1.1 7.8 2.9l5.7-5.7C33.9 6.5 29.2 4 24 4 16.3 4 9.7 8.4 6.3 14.7z"/>
+                    <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.3 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.3 16.3 44 24 44z"/>
+                    <path fill="#1976D2" d="M43.6 20H24v8h11.3c-.9 2.7-2.7 4.9-5.1 6.4l6.2 5.2C40.5 36 44 30.4 44 24c0-1.3-.1-2.7-.4-4z"/>
+                  </svg>
+              }
+              {loading?"로그인 중...":"Google 계정으로 로그인"}
+            </button>
+          </div>
+        )}
+        {tab==="staff" && (
+          <div className="flex flex-col gap-3">
+            <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100">
+              <p className="text-sm font-bold text-gray-700 mb-1">직원 로그인</p>
+              <p className="text-xs text-gray-400 leading-relaxed">관리자에게 받은 아이디/비밀번호로 로그인하세요.</p>
+            </div>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
+              <input placeholder="아이디" value={staffId} onChange={e=>{setStaffId(e.target.value);setError("");}}
+                className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
+                  (error?"border-red-300":staffId?"border-blue-400":"border-gray-200")}/>
+            </div>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+              <input type={showPw?"text":"password"} placeholder="비밀번호" value={staffPw}
+                onChange={e=>{setStaffPw(e.target.value);setError("");}}
+                onKeyDown={e=>e.key==="Enter"&&handleStaff()}
+                className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
+                  (error?"border-red-300":staffPw?"border-blue-400":"border-gray-200")}/>
+              <button onClick={()=>setShowPw(p=>!p)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-base border-none bg-transparent cursor-pointer">
+                {showPw?"🙈":"👁️"}
+              </button>
+            </div>
+            {error && (
+              <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">
+                ⚠️ {error}
+              </div>
+            )}
+            <button onClick={handleStaff} disabled={loading}
+              className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
+              style={{background:staffId&&staffPw?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",opacity:loading?0.7:1}}>
+              {loading?"로그인 중...":"로그인"}
+            </button>
+          </div>
+        )}
+        <p className="text-xs text-gray-300 text-center mt-1">⚠️ Firebase Auth 연동 후 실제 동작</p>
+      </div>
     </div>
   );
 }
 
 export default function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loginUser, setLoginUser]   = useState(null);
+
+  if(!isLoggedIn) {
+    return (
+      <LoginScreen onLogin={(user)=>{
+        setLoginUser(user);
+        setIsLoggedIn(true);
+      }}/>
+    );
+  }
+
   return (
-    <Provider>
+    <Provider loginUser={loginUser} onLogout={()=>setIsLoggedIn(false)}>
       <AppInner/>
     </Provider>
   );
@@ -2588,113 +2642,127 @@ function TeamScheduleScreen() {
 }
 
 // ── 대시보드 화면 ───────────────────────────────────────────────
+// 카드 선택형 대시보드
+const ALL_DASH_CARDS = [
+  {id:"today_count",   label:"오늘 일정",      icon:"📅", color:"#1a56db", bg:"#eff6ff", roles:["최고관리자","관리팀장","현장팀장"],
+    getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const t=fmt(new Date());return{value:f.filter(e=>e.start<=t&&(!e.end||e.end>=t)).length,unit:"건"};}},
+  {id:"tomorrow_count",label:"내일 일정",      icon:"🗓️", color:"#7c3aed", bg:"#f5f3ff", roles:["최고관리자","관리팀장","현장팀장"],
+    getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const t=fmt(new Date(Date.now()+86400000));return{value:f.filter(e=>e.start<=t&&(!e.end||e.end>=t)).length,unit:"건"};}},
+  {id:"month_count",   label:"이번달 총",      icon:"📈", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","관리팀장","영업팀장","현장팀장"],
+    getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const m=fmt(new Date()).slice(0,7);return{value:f.filter(e=>e.start.startsWith(m)).length,unit:"건"};}},
+  {id:"complaint",     label:"미처리 컴플레인", icon:"🚨", color:"#ef4444", bg:"#fef2f2", roles:["최고관리자","관리팀장"],
+    getValue:()=>({value:0,unit:"건"})},
+  {id:"month_revenue", label:"이번달 매출",    icon:"💰", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","영업팀장"],
+    getValue:(ev)=>{const m=fmt(new Date()).slice(0,7);return{value:Math.round(ev.filter(e=>e.start.startsWith(m)).reduce((s,e)=>s+(e.price||0),0)/10000),unit:"만원"};}},
+  {id:"week_contract", label:"이번주 계약",    icon:"📋", color:"#7c3aed", bg:"#f5f3ff", roles:["최고관리자","영업팀장"],
+    getValue:(ev)=>{const d=new Date(),day=d.getDay(),ws=fmt(new Date(new Date().setDate(d.getDate()-day+(day===0?-6:1))));return{value:ev.filter(e=>e.start>=ws&&e.start<=fmt(new Date())).length,unit:"건"};}},
+  {id:"team_count",    label:"운영 팀 수",     icon:"🧹", color:"#ea580c", bg:"#fff7ed", roles:["최고관리자","관리팀장"],
+    getValue:(_,__,cals)=>({value:cals?.length||0,unit:"팀"})},
+];
+
+const DEFAULT_DASH_CARDS = {
+  "최고관리자": ["today_count","month_revenue","complaint","team_count"],
+  "관리팀장":   ["today_count","tomorrow_count","complaint","team_count"],
+  "영업팀장":   ["week_contract","month_revenue"],
+  "현장팀장":   ["today_count","tomorrow_count","month_count"],
+  "팀원":       ["today_count","tomorrow_count"],
+};
+
 function DashboardScreen() {
   const { visibleEvents, setCurrentScreen, cals, currentUser } = useC();
-  const today = new Date();
-  const todayStr = fmt(today);
-  const tomorrow = new Date(today); tomorrow.setDate(today.getDate()+1);
-  const tmrwStr = fmt(tomorrow);
-  const thisMonth = todayStr.slice(0,7);
+  const [editing, setEditing]   = useState(false);
+  const [selectedIds, setSelectedIds] = useState(DEFAULT_DASH_CARDS[currentUser.role]||["today_count"]);
 
-  const todayEvs  = visibleEvents.filter(e=>e.start<=todayStr&&(!e.end||e.end>=todayStr));
-  const tmrwEvs   = visibleEvents.filter(e=>e.start<=tmrwStr&&(!e.end||e.end>=tmrwStr));
-  const monthEvs  = visibleEvents.filter(e=>e.start.startsWith(thisMonth));
-  const cleanEvs  = visibleEvents.filter(e=>e.calId?.startsWith("clean")&&e.start<=todayStr&&(!e.end||e.end>=todayStr));
+  const available = ALL_DASH_CARDS.filter(c=>c.roles.includes(currentUser.role)||currentUser.role==="최고관리자");
+  const selected  = available.filter(c=>selectedIds.includes(c.id));
 
-  const fmtTime=(t)=>{if(!t)return"";const[h,m]=t.split(":");const hr=parseInt(h);return`${hr<12?"오전":"오후"} ${hr===0?12:hr>12?hr-12:hr}:${m}`};
+  const toggle = (id) => setSelectedIds(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
 
   return (
     <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
       {/* 헤더 */}
-      <div className="flex items-center gap-3 px-5 pt-5 pb-3">
-        <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
-          <ChevronLeft size={24} className="text-gray-700"/>
-        </button>
-        <div className="flex-1">
-          <h2 className="text-xl font-bold text-gray-900">
-            {currentUser.role === "최고관리자" ? "사장님 대시보드" : "일정 요약"}
-          </h2>
-          <p className="text-xs text-gray-400 mt-0.5">{todayStr.replace(/-/g,".")} 기준</p>
+      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
+              <ChevronLeft size={24} className="text-gray-700"/>
+            </button>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">
+                {currentUser.role==="최고관리자"?"사장님 대시보드":"일정 요약"}
+              </h2>
+              <p className="text-xs text-gray-400 mt-0.5">{currentUser.name} · {currentUser.role}</p>
+            </div>
+          </div>
+          <button onClick={()=>setEditing(p=>!p)}
+            className="text-sm font-bold px-4 py-2 rounded-full transition-all"
+            style={{background:editing?"#111827":"#f3f4f6", color:editing?"white":"#374151"}}>
+            {editing?"✅ 완료":"✏️ 편집"}
+          </button>
         </div>
-        <div className="text-2xl">{currentUser.role === "최고관리자" ? "👑" : "📊"}</div>
       </div>
 
-      {/* 통계 카드 4개 */}
-      <div className="grid grid-cols-2 gap-3 px-5 mb-4">
-        {[
-          {label:"오늘 일정",  value:todayEvs.length,  unit:"건", color:"#1a56db", bg:"#eff6ff", icon:"📅"},
-          {label:"내일 일정",  value:tmrwEvs.length,   unit:"건", color:"#7c3aed", bg:"#f5f3ff", icon:"🗓️"},
-          {label:"이번달 총",  value:monthEvs.length,  unit:"건", color:"#16a34a", bg:"#f0fdf4", icon:"📈"},
-          {label:"오늘 청소팀",value:cleanEvs.length,  unit:"팀", color:"#ea580c", bg:"#fff7ed", icon:"🧹"},
-        ].map((s,i)=>(
-          <div key={i} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-gray-500">{s.label}</span>
-              <span className="text-lg">{s.icon}</span>
-            </div>
-            <div className="flex items-end gap-1">
-              <span className="text-3xl font-extrabold" style={{color:s.color}}>{s.value}</span>
-              <span className="text-sm text-gray-400 mb-1">{s.unit}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* 오늘 일정 카드 목록 */}
-      <div className="px-5 mb-2">
-        <h3 className="text-sm font-bold text-gray-700 mb-3">📋 오늘 일정</h3>
-        {todayEvs.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-gray-400 text-sm">오늘 일정이 없습니다</div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {todayEvs.map(ev=>{
-              const cal = cals.find(c=>c.id===ev.calId);
+      <div className="px-4 py-4 flex flex-col gap-4">
+        {/* 편집 모드 */}
+        {editing ? (
+          <>
+            <p className="text-sm text-gray-500 leading-relaxed">보여줄 카드를 선택하세요.</p>
+            {available.map(card=>{
+              const checked = selectedIds.includes(card.id);
+              const {value,unit} = card.getValue(visibleEvents, currentUser, cals);
               return (
-                <div key={ev.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm flex items-center gap-3">
-                  <div className="w-1 self-stretch rounded-full shrink-0" style={{background:cal?.color||"#1a56db"}}/>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-gray-900 text-sm truncate">{ev.title}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {ev.allDay ? "종일" : `${fmtTime(ev.startTime)} ~ ${fmtTime(ev.endTime)}`}
-                      {ev.place ? ` · ${ev.place}` : ""}
-                    </p>
+                <button key={card.id} onClick={()=>toggle(card.id)}
+                  className="flex items-center gap-4 p-4 rounded-2xl text-left transition-all"
+                  style={{background:"white", border:`2px solid ${checked?card.color:"#f3f4f6"}`,
+                    boxShadow:checked?`0 0 0 3px ${card.color}22`:"none"}}>
+                  <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center"
+                    style={{border:`2px solid ${checked?card.color:"#d1d5db"}`, background:checked?card.color:"white"}}>
+                    {checked && <span style={{color:"white",fontSize:12,fontWeight:800}}>✓</span>}
                   </div>
-                  <div className="text-xs font-bold px-2 py-1 rounded-full shrink-0" style={{background:cal?.color+"22",color:cal?.color||"#1a56db"}}>
-                    {cal?.name||""}
+                  <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-xl shrink-0"
+                    style={{background:card.bg}}>{card.icon}</div>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-gray-900">{card.label}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">현재 <span className="font-bold" style={{color:card.color}}>{value}{unit}</span></p>
                   </div>
-                </div>
+                </button>
               );
             })}
-          </div>
-        )}
-      </div>
-
-      {/* 내일 일정 */}
-      <div className="px-5 pb-8">
-        <h3 className="text-sm font-bold text-gray-700 mb-3 mt-4">🌅 내일 일정</h3>
-        {tmrwEvs.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-gray-400 text-sm">내일 일정이 없습니다</div>
+          </>
         ) : (
-          <div className="flex flex-col gap-2">
-            {tmrwEvs.map(ev=>{
-              const cal = cals.find(c=>c.id===ev.calId);
-              return (
-                <div key={ev.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm flex items-center gap-3">
-                  <div className="w-1 self-stretch rounded-full shrink-0" style={{background:cal?.color||"#7c3aed"}}/>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-gray-900 text-sm truncate">{ev.title}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {ev.allDay ? "종일" : `${fmtTime(ev.startTime)} ~ ${fmtTime(ev.endTime)}`}
-                      {ev.place ? ` · ${ev.place}` : ""}
-                    </p>
-                  </div>
-                  <div className="text-xs font-bold px-2 py-1 rounded-full shrink-0" style={{background:cal?.color+"22",color:cal?.color||"#7c3aed"}}>
-                    {cal?.name||""}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <>
+            {selected.length===0 ? (
+              <div className="text-center py-16 text-gray-400">
+                <div className="text-5xl mb-4">📋</div>
+                <p className="text-sm font-bold mb-2">표시할 카드가 없어요</p>
+                <button onClick={()=>setEditing(true)}
+                  className="mt-4 px-6 py-3 rounded-full text-white text-sm font-bold"
+                  style={{background:"#111827"}}>✏️ 카드 선택하기</button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                {selected.map(card=>{
+                  const {value,unit} = card.getValue(visibleEvents, currentUser, cals);
+                  const isAlert = card.id==="complaint" && parseInt(value)>0;
+                  return (
+                    <div key={card.id}
+                      className="bg-white rounded-2xl p-4 relative"
+                      style={{border:`1.5px solid ${isAlert?card.color+"66":"#f3f4f6"}`,
+                        boxShadow:isAlert?`0 0 0 3px ${card.color}18`:"0 1px 4px rgba(0,0,0,.06)"}}>
+                      {isAlert && <div className="absolute top-3 right-3 w-2 h-2 rounded-full" style={{background:card.color}}/>}
+                      <div className="w-10 h-10 rounded-2xl flex items-center justify-center text-xl mb-3"
+                        style={{background:card.bg}}>{card.icon}</div>
+                      <p className="text-xs font-bold text-gray-400 mb-1">{card.label}</p>
+                      <div className="flex items-end gap-1">
+                        <span className="text-3xl font-extrabold leading-none" style={{color:card.color}}>{value}</span>
+                        <span className="text-sm text-gray-400 mb-0.5">{unit}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -2703,14 +2771,15 @@ function DashboardScreen() {
 
 // ── 공지사항 화면 ───────────────────────────────────────────────
 function NoticeScreen() {
-  // notices, setNotices 대신 Firestore 연동 함수 사용
-  const { notices, currentUser, setCurrentScreen } = useC();
-  const [selected, setSelected] = useState(null);
-  const [writing, setWriting] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newBody, setNewBody] = useState("");
-  const [readIds, setReadIds] = useState(()=>JSON.parse(localStorage.getItem("readNotices")||"[]"));
-  const isAdmin = ["사장","관리팀"].includes(currentUser.team);
+  const { notices, setNotices, currentUser, setCurrentScreen } = useC();
+  const [selected, setSelected]   = useState(null);
+  const [writing, setWriting]     = useState(false);
+  const [newTitle, setNewTitle]   = useState("");
+  const [newBody, setNewBody]     = useState("");
+  const [important, setImportant] = useState(false);
+  const [readIds, setReadIds]     = useState(()=>JSON.parse(localStorage.getItem("readNotices")||"[]"));
+
+  const isAdmin = currentUser.role === "최고관리자" || currentUser.team === "사장" || currentUser.team === "관리팀";
 
   const markRead = (id) => {
     if(readIds.includes(id)) return;
@@ -2719,16 +2788,14 @@ function NoticeScreen() {
     localStorage.setItem("readNotices", JSON.stringify(next));
   };
 
-  // 공지사항 등록 → Firestore에 저장
-  const submitNotice = async () => {
+  const submitNotice = () => {
     if(!newTitle.trim()) return;
-    const nId = uid();
-    const n = { id: nId, title: newTitle, body: newBody, author: currentUser.name, date: fmt(new Date()), important: false };
-    try {
-      await setDoc(doc(db, "notices", nId), n);
-    } catch(e) { console.error("[submitNotice] 저장 실패:", e); }
-    setNewTitle(""); setNewBody(""); setWriting(false);
+    const n = {id:uid(), title:newTitle, body:newBody, author:currentUser.name, date:fmt(new Date()), important};
+    setNotices(p=>[n,...p]);
+    setNewTitle(""); setNewBody(""); setImportant(false); setWriting(false);
   };
+
+  const deleteNotice = (id) => { setNotices(p=>p.filter(n=>n.id!==id)); setSelected(null); };
 
   // 상세 보기
   if(selected) {
@@ -2741,82 +2808,119 @@ function NoticeScreen() {
           </button>
           <h2 className="text-base font-bold text-gray-900 flex-1 line-clamp-1">{selected.title}</h2>
           {isAdmin && (
-            <button onClick={async ()=>{
-              try { await deleteDoc(doc(db, "notices", selected.id)); } catch(e) { console.error(e); }
-              setSelected(null);
-            }}
-              className="text-xs text-red-400 font-bold px-2 py-1 rounded-full hover:bg-red-50">삭제</button>
+            <button onClick={()=>deleteNotice(selected.id)}
+              className="text-xs text-red-400 font-bold px-3 py-1.5 rounded-full bg-red-50">삭제</button>
           )}
         </div>
         <div className="px-5 py-4 flex-1">
           <div className="flex items-center gap-2 text-xs text-gray-400 mb-4">
-            <span className="font-semibold text-gray-600">{selected.author}</span>
-            <span>·</span>
-            <span>{selected.date}</span>
-            {selected.important && <span className="ml-1 px-2 py-0.5 bg-red-50 text-red-500 font-bold rounded-full">📌 중요</span>}
+            <span className="font-bold text-gray-600">{selected.author}</span>
+            <span>·</span><span>{selected.date}</span>
+            {selected.important && <span className="px-2 py-0.5 bg-red-50 text-red-500 font-bold rounded-full">📌 중요</span>}
           </div>
+          <div className="h-px bg-gray-100 mb-4"/>
           <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{selected.body || "내용이 없습니다."}</p>
         </div>
       </div>
     );
   }
 
-  // 글쓰기
+  // 새 공지 작성
   if(writing) {
     return (
-      <div className="flex-1 overflow-y-auto bg-white flex flex-col">
-        <div className="flex items-center gap-3 px-5 pt-5 pb-3 border-b border-gray-100">
+      <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
+        <div className="flex items-center gap-3 px-5 pt-5 pb-3 border-b border-gray-100 bg-white">
           <button onClick={()=>setWriting(false)} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
             <ChevronLeft size={24} className="text-gray-700"/>
           </button>
-          <h2 className="text-base font-bold flex-1">새 공지 작성</h2>
-          <button onClick={submitNotice} className="text-blue-500 font-bold text-sm">등록</button>
+          <span className="flex-1 font-bold text-base">새 공지 작성</span>
+          <button onClick={submitNotice}
+            className="text-sm font-bold px-4 py-2 rounded-full text-white"
+            style={{background:newTitle.trim()?"#1a56db":"#d1d5db"}}>등록</button>
         </div>
-        <div className="px-5 py-4 flex flex-col gap-3">
-          <input value={newTitle} onChange={e=>setNewTitle(e.target.value)}
-            placeholder="제목을 입력하세요"
-            className="w-full border-b border-gray-200 py-2 text-sm font-bold outline-none placeholder-gray-300"/>
-          <textarea value={newBody} onChange={e=>setNewBody(e.target.value)}
-            placeholder="내용을 입력하세요..."
-            rows={10}
-            className="w-full text-sm outline-none resize-none text-gray-700 placeholder-gray-300 leading-relaxed"/>
+        <div className="px-4 py-4 flex flex-col gap-4">
+          {/* 중요 토글 */}
+          <div onClick={()=>setImportant(p=>!p)}
+            className="flex items-center gap-3 p-4 rounded-2xl cursor-pointer transition-all"
+            style={{background:important?"#fef2f2":"white", border:`1.5px solid ${important?"#fca5a5":"#f3f4f6"}`}}>
+            <div className="w-11 h-6 rounded-full relative transition-all shrink-0"
+              style={{background:important?"#ef4444":"#e5e7eb"}}>
+              <div className="absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all"
+                style={{left:important?"calc(100% - 20px)":"4px"}}/>
+            </div>
+            <div>
+              <p className="text-sm font-bold" style={{color:important?"#ef4444":"#374151"}}>📌 중요 공지</p>
+              <p className="text-xs text-gray-400 mt-0.5">{important?"목록 상단 강조 표시":"일반 공지로 등록"}</p>
+            </div>
+          </div>
+          {/* 제목 */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-4">
+            <p className="text-xs font-bold text-gray-400 mb-2 uppercase tracking-wide">제목</p>
+            <input value={newTitle} onChange={e=>setNewTitle(e.target.value)}
+              placeholder="공지 제목을 입력하세요"
+              className="w-full text-base font-bold outline-none bg-transparent text-gray-900"/>
+          </div>
+          {/* 내용 */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-4">
+            <p className="text-xs font-bold text-gray-400 mb-2 uppercase tracking-wide">내용</p>
+            <textarea value={newBody} onChange={e=>setNewBody(e.target.value)}
+              placeholder="내용을 입력하세요..."
+              rows={10}
+              className="w-full text-sm outline-none resize-none text-gray-700 leading-relaxed bg-transparent"/>
+          </div>
         </div>
       </div>
     );
   }
 
   // 목록
+  const unread = notices.filter(n=>!readIds.includes(n.id)).length;
   return (
     <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
-      <div className="flex items-center gap-3 px-5 pt-5 pb-3">
-        <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
-          <ChevronLeft size={24} className="text-gray-700"/>
-        </button>
-        <h2 className="text-xl font-bold text-gray-900 flex-1">팀 공지사항</h2>
-        {isAdmin && (
-          <button onClick={()=>setWriting(true)} className="text-sm font-bold text-blue-600 px-3 py-1.5 rounded-full bg-blue-50 hover:bg-blue-100">
-            + 새 공지
-          </button>
-        )}
+      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+              <ChevronLeft size={24} className="text-gray-700"/>
+            </button>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">팀 공지사항</h2>
+              {unread>0 && <p className="text-xs text-blue-500 font-semibold mt-0.5">읽지 않은 공지 {unread}개</p>}
+            </div>
+          </div>
+          {isAdmin && (
+            <button onClick={()=>setWriting(true)}
+              className="flex items-center gap-1 text-sm font-bold text-blue-600 px-4 py-2 rounded-full bg-blue-50">
+              + 새 공지
+            </button>
+          )}
+        </div>
       </div>
-      <div className="px-5 pb-8 flex flex-col gap-3">
-        {notices.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400 text-sm mt-4">공지사항이 없습니다</div>
+      <div className="px-4 py-4 flex flex-col gap-3">
+        {notices.length===0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
+            <div className="text-4xl mb-3">📋</div>
+            <p className="text-sm text-gray-400 font-semibold">공지사항이 없습니다</p>
+          </div>
         ) : notices.map(n=>{
           const isRead = readIds.includes(n.id);
           return (
             <button key={n.id} onClick={()=>setSelected(n)}
-              className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm text-left w-full flex items-start gap-3 hover:border-blue-200 transition-all">
-              <div className={"w-2 h-2 rounded-full mt-2 shrink-0 " + (isRead ? "bg-gray-200" : "bg-blue-500")}/>
+              className="text-left w-full rounded-2xl p-4 flex items-start gap-3 transition-all"
+              style={{background:n.important?"#fffbeb":"white",
+                border:`1.5px solid ${n.important?"#fde68a":isRead?"#f3f4f6":"#dbeafe"}`,
+                boxShadow:isRead?"none":"0 2px 8px rgba(26,86,219,.08)"}}>
+              <div className="w-2 h-2 rounded-full mt-1.5 shrink-0"
+                style={{background:isRead?"#e5e7eb":"#1a56db",
+                  boxShadow:isRead?"none":"0 0 0 3px rgba(26,86,219,.15)"}}/>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  {n.important && <span className="text-xs text-red-500 font-bold">📌</span>}
-                  <p className={"text-sm font-bold truncate " + (isRead ? "text-gray-500" : "text-gray-900")}>{n.title}</p>
+                  {n.important && <span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">📌 중요</span>}
+                  <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{n.author}</span>
                 </div>
-                {n.body && <p className="text-xs text-gray-400 line-clamp-1">{n.body}</p>}
-                <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
-                  <span>{n.author}</span><span>·</span><span>{n.date}</span>
-                </div>
+                <p className="text-sm font-bold truncate" style={{color:isRead?"#9ca3af":"#111827"}}>{n.title}</p>
+                {n.body && <p className="text-xs text-gray-400 truncate mt-1">{n.body}</p>}
+                <p className="text-xs text-gray-300 mt-1">{n.date}</p>
               </div>
               <ChevronLeft size={16} className="text-gray-300 rotate-180 shrink-0 mt-1"/>
             </button>
@@ -2827,67 +2931,120 @@ function NoticeScreen() {
   );
 }
 
-// ── 최근 작업 내역 화면 ───────────────────────────────────────────────
+// ── 최근 작업 내역 화면 (변경 로그) ───────────────────────────────────────────────
 function ActivityLogScreen() {
-  const { activityLogs, setCurrentScreen, cals } = useC();
-  const [filter, setFilter] = useState("전체");
-  const filters = ["전체","등록","수정","삭제"];
+  const { activityLogs, setCurrentScreen, cals, currentUser } = useC();
+  const [filter, setFilter]     = useState("전체");
+  const [calFilter, setCalFilter] = useState("전체");
+  const FILTERS = ["전체","등록","수정","삭제"];
 
-  const filtered = filter === "전체" ? activityLogs : activityLogs.filter(l=>l.action===filter);
-
-  const actionStyle = {
+  const ACTION_STYLE = {
     "등록": {bg:"#f0fdf4", color:"#16a34a", icon:"✅"},
     "수정": {bg:"#eff6ff", color:"#1a56db", icon:"✏️"},
     "삭제": {bg:"#fef2f2", color:"#dc2626", icon:"🗑️"},
   };
 
+  const filtered = activityLogs
+    .filter(l=>filter==="전체"||l.action===filter)
+    .filter(l=>calFilter==="전체"||l.calId===calFilter);
+
+  // 날짜별 그룹
+  const grouped = filtered.reduce((acc,log)=>{
+    if(!acc[log.date]) acc[log.date]=[];
+    acc[log.date].push(log);
+    return acc;
+  },{});
+  const groupedDates = Object.keys(grouped).sort((a,b)=>b.localeCompare(a));
+
+  const today = fmt(new Date());
+  const yesterday = fmt(new Date(Date.now()-86400000));
+  const dateLabel = (d) => d===today?"오늘":d===yesterday?"어제":d.slice(5).replace("-",".");
+
   return (
     <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
-      <div className="flex items-center gap-3 px-5 pt-5 pb-3">
-        <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
-          <ChevronLeft size={24} className="text-gray-700"/>
-        </button>
-        <h2 className="text-xl font-bold text-gray-900 flex-1">최근 작업 내역</h2>
-        <span className="text-xs text-gray-400 font-medium">{activityLogs.length}건</span>
-      </div>
-
-      {/* 필터 탭 */}
-      <div className="flex gap-2 px-5 mb-4">
-        {filters.map(f=>(
-          <button key={f} onClick={()=>setFilter(f)}
-            className={"px-3 py-1.5 rounded-full text-xs font-bold transition-all " + (filter===f ? "bg-gray-900 text-white" : "bg-white text-gray-500 border border-gray-200")}>
-            {f}
-          </button>
-        ))}
-      </div>
-
-      {/* 카드 목록 */}
-      <div className="px-5 pb-8 flex flex-col gap-3">
-        {filtered.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400 text-sm">작업 내역이 없습니다</div>
-        ) : filtered.map(log=>{
-          const s = actionStyle[log.action] || actionStyle["등록"];
-          const cal = cals?.find(c=>c.id===log.calId);
-          return (
-            <div key={log.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm flex items-start gap-3">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0" style={{background:s.bg}}>
-                {s.icon}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{background:s.bg, color:s.color}}>{log.action}</span>
-                  {cal && <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{background:cal.color+"22", color:cal.color}}>{cal.name}</span>}
-                </div>
-                <p className="text-sm font-bold text-gray-900 truncate">{log.title}</p>
-                <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
-                  <span>{log.user || "관리자"}</span>
-                  <span>·</span>
-                  <span>{log.date || log.time}</span>
-                </div>
-              </div>
+      {/* 헤더 */}
+      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-0">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
+              <ChevronLeft size={24} className="text-gray-700"/>
+            </button>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">변경 로그</h2>
+              <p className="text-xs text-gray-400 mt-0.5">전체 {activityLogs.length}건</p>
             </div>
-          );
-        })}
+          </div>
+        </div>
+        {/* 액션 필터 */}
+        <div className="flex gap-2 pb-3 overflow-x-auto">
+          {FILTERS.map(f=>{
+            const s = f==="전체"?null:ACTION_STYLE[f];
+            const active = filter===f;
+            return (
+              <button key={f} onClick={()=>setFilter(f)}
+                className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-full transition-all"
+                style={{background:active?(s?s.color:"#111827"):"#f3f4f6",
+                  color:active?"white":"#6b7280"}}>
+                {f==="전체"?"전체":s.icon+" "+f}
+              </button>
+            );
+          })}
+        </div>
+        {/* 팀 필터 */}
+        <div className="flex gap-2 pb-3 overflow-x-auto">
+          <button onClick={()=>setCalFilter("전체")}
+            className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-full transition-all"
+            style={{background:calFilter==="전체"?"#111827":"#f3f4f6",
+              color:calFilter==="전체"?"white":"#6b7280"}}>전체 팀</button>
+          {cals?.map(cal=>(
+            <button key={cal.id} onClick={()=>setCalFilter(calFilter===cal.id?"전체":cal.id)}
+              className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-full transition-all"
+              style={{background:calFilter===cal.id?cal.color:"#f3f4f6",
+                color:calFilter===cal.id?"white":"#6b7280"}}>{cal.name}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* 목록 */}
+      <div className="px-4 py-4 flex flex-col gap-5">
+        {filtered.length===0 ? (
+          <div className="text-center py-16 text-gray-400">
+            <div className="text-4xl mb-3">📭</div>
+            <p className="text-sm font-bold">해당 내역이 없습니다</p>
+          </div>
+        ) : groupedDates.map(date=>(
+          <div key={date}>
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-xs font-bold text-gray-700">{dateLabel(date)}</span>
+              <div className="flex-1 h-px bg-gray-200"/>
+              <span className="text-xs text-gray-400">{grouped[date].length}건</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {grouped[date].map(log=>{
+                const s = ACTION_STYLE[log.action]||ACTION_STYLE["등록"];
+                const cal = cals?.find(c=>c.id===log.calId);
+                return (
+                  <div key={log.id} className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 shadow-sm">
+                    <div className="w-10 h-10 rounded-2xl flex items-center justify-center text-lg shrink-0"
+                      style={{background:s.bg}}>{s.icon}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{background:s.bg,color:s.color}}>{log.action}</span>
+                        {cal && <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{background:cal.color+"22",color:cal.color}}>{cal.name}</span>}
+                      </div>
+                      <p className="text-sm font-bold truncate" style={{color:log.action==="삭제"?"#9ca3af":"#111827",
+                        textDecoration:log.action==="삭제"?"line-through":"none"}}>{log.title}</p>
+                      <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
+                        <span className="font-semibold text-gray-600">{log.user||"관리자"}</span>
+                        <span>·</span><span>{log.time}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -2895,83 +3052,202 @@ function ActivityLogScreen() {
 
 // ── 외부 링크 화면 ───────────────────────────────────────────────
 function ExternalLinksScreen() {
-  // links는 Firestore onSnapshot으로 자동 업데이트되므로 setLinks 불필요
-  const { links, setCurrentScreen } = useC();
-  const [adding, setAdding] = useState(false);
+  const { links, setLinks, setCurrentScreen } = useC();
+  const [adding, setAdding]     = useState(false);
+  const [sorting, setSorting]   = useState(false);
+  const [category, setCategory] = useState("전체");
   const [newTitle, setNewTitle] = useState("");
-  const [newUrl, setNewUrl]   = useState("");
+  const [newUrl, setNewUrl]     = useState("");
   const [newEmoji, setNewEmoji] = useState("🔗");
+  const [newCat, setNewCat]     = useState("업무");
+  const [draggingId, setDraggingId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+  const dragFrom = useRef(null);
+  const dragTo   = useRef(null);
 
-  const EMOJIS = ["🔗","📍","📞","💰","🧹","📋","🏢","🚗","📦","🛠️"];
+  const EMOJIS    = ["🔗","📍","📞","💰","🧹","📋","🏢","🚗","📦","🛠️","🌐","📱","💬","📧","🗺️","📸"];
+  const CATEGORIES = ["전체","업무","지도","연락처","기타"];
 
-  const handleAdd = async () => {
-    if(!newTitle.trim() || !newUrl.trim()) return;
-    const newId = uid();
-    const newLink = { id: newId, title: newTitle, url: newUrl.startsWith("http") ? newUrl : `https://${newUrl}`, emoji: newEmoji };
-    try {
-      await setDoc(doc(db, "links", newId), newLink);
-    } catch(e) { console.error("[handleAdd link] 저장 실패:", e); }
-    setNewTitle(""); setNewUrl(""); setNewEmoji("🔗"); setAdding(false);
+  const filtered = category==="전체" ? links : links.filter(l=>l.category===category);
+
+  const handleAdd = () => {
+    if(!newTitle.trim()||!newUrl.trim()) return;
+    const url = newUrl.startsWith("http")?newUrl:`https://${newUrl}`;
+    setLinks(p=>[...p,{id:uid(),title:newTitle,url,emoji:newEmoji,category:newCat}]);
+    setNewTitle(""); setNewUrl(""); setNewEmoji("🔗"); setNewCat("업무"); setAdding(false);
   };
+
+  const moveUp   = (id) => setLinks(p=>{const a=[...p],i=a.findIndex(l=>l.id===id);if(i<=0)return p;[a[i-1],a[i]]=[a[i],a[i-1]];return a;});
+  const moveDown = (id) => setLinks(p=>{const a=[...p],i=a.findIndex(l=>l.id===id);if(i>=a.length-1)return p;[a[i],a[i+1]]=[a[i+1],a[i]];return a;});
+
+  const reorder = (fromId,toId) => {
+    if(!fromId||!toId||fromId===toId) return;
+    setLinks(prev=>{
+      const arr=[...prev];
+      const fi=arr.findIndex(l=>l.id===fromId), ti=arr.findIndex(l=>l.id===toId);
+      if(fi<0||ti<0) return prev;
+      const [item]=arr.splice(fi,1); arr.splice(ti,0,item); return arr;
+    });
+  };
+
+  const onDragStart=(id)=>{dragFrom.current=id;setDraggingId(id);};
+  const onDragOver=(e,id)=>{e.preventDefault();dragTo.current=id;setDragOverId(id);};
+  const onDragEnd=()=>{reorder(dragFrom.current,dragTo.current);dragFrom.current=null;dragTo.current=null;setDraggingId(null);setDragOverId(null);};
 
   return (
     <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
-      <div className="flex items-center gap-3 px-5 pt-5 pb-3">
-        <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
-          <ChevronLeft size={24} className="text-gray-700"/>
-        </button>
-        <h2 className="text-xl font-bold text-gray-900 flex-1">외부 링크</h2>
-        <button onClick={()=>setAdding(true)} className="p-2 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200">
-          <Plus size={20}/>
-        </button>
-      </div>
-
-      {/* 추가 폼 */}
-      {adding && (
-        <div className="mx-5 mb-4 bg-white rounded-2xl border border-blue-100 p-4 flex flex-col gap-3 shadow-sm">
-          <p className="text-xs font-bold text-gray-500">새 링크 추가</p>
-          {/* 이모지 선택 */}
-          <div className="flex gap-2 flex-wrap">
-            {EMOJIS.map(e=>(
-              <button key={e} onClick={()=>setNewEmoji(e)}
-                className={"w-9 h-9 rounded-xl text-lg flex items-center justify-center transition-all " + (newEmoji===e ? "bg-blue-100 ring-2 ring-blue-400" : "bg-gray-50")}>
-                {e}
+      {/* 헤더 */}
+      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-0">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
+              <ChevronLeft size={24} className="text-gray-700"/>
+            </button>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">외부 링크</h2>
+              <p className="text-xs text-gray-400 mt-0.5">자주 쓰는 링크 모음</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {!adding && (
+              <button onClick={()=>setSorting(p=>!p)}
+                className="text-sm font-bold px-3 py-2 rounded-xl transition-all"
+                style={{background:sorting?"#1a56db":"#f3f4f6", color:sorting?"white":"#374151"}}>
+                {sorting?"✅ 완료":"↕ 순서"}
+              </button>
+            )}
+            {!sorting && (
+              <button onClick={()=>setAdding(p=>!p)}
+                className="w-10 h-10 rounded-xl flex items-center justify-center text-xl transition-all"
+                style={{background:adding?"#111827":"#eff6ff", color:adding?"white":"#1a56db"}}>
+                {adding?"✕":"+"}
+              </button>
+            )}
+          </div>
+        </div>
+        {!sorting && (
+          <div className="flex gap-2 pb-3 overflow-x-auto">
+            {CATEGORIES.map(c=>(
+              <button key={c} onClick={()=>setCategory(c)}
+                className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-full transition-all"
+                style={{background:category===c?"#111827":"#f3f4f6", color:category===c?"white":"#6b7280"}}>
+                {c}
               </button>
             ))}
           </div>
-          <input type="text" placeholder="링크 이름 (예: 네이버 지도)" value={newTitle}
-            onChange={e=>setNewTitle(e.target.value)}
-            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-400"/>
-          <input type="url" placeholder="URL (예: naver.com)" value={newUrl}
-            onChange={e=>setNewUrl(e.target.value)}
-            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-400"/>
-          <div className="flex gap-2">
-            <button onClick={()=>setAdding(false)} className="flex-1 py-2 rounded-xl text-sm font-bold bg-gray-100 text-gray-600">취소</button>
-            <button onClick={handleAdd} className="flex-1 py-2 rounded-xl text-sm font-bold bg-blue-500 text-white">추가</button>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* 링크 목록 */}
-      <div className="px-5 pb-8 flex flex-col gap-3">
-        {links.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400 text-sm">링크가 없습니다.<br/>+ 버튼으로 추가해보세요</div>
-        ) : links.map(l=>(
-          <div key={l.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm flex items-center gap-3 pr-3 overflow-hidden">
-            <a href={l.url} target="_blank" rel="noopener noreferrer"
-              className="flex items-center gap-3 flex-1 p-4 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center text-xl shrink-0">
-                {l.emoji || "🔗"}
+      <div className="px-4 py-4 flex flex-col gap-3">
+        {/* 추가 폼 */}
+        {adding && (
+          <div className="bg-white rounded-2xl border border-blue-100 p-5 shadow-sm">
+            <p className="text-xs font-bold text-blue-500 mb-4 uppercase tracking-wide">새 링크 추가</p>
+            <div className="flex gap-2 flex-wrap mb-4">
+              {EMOJIS.map(e=>(
+                <button key={e} onClick={()=>setNewEmoji(e)}
+                  className="w-9 h-9 rounded-xl text-lg flex items-center justify-center transition-all"
+                  style={{background:newEmoji===e?"#1a56db":"#f3f4f6"}}>
+                  {e}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2 mb-3">
+              {CATEGORIES.filter(c=>c!=="전체").map(c=>(
+                <button key={c} onClick={()=>setNewCat(c)}
+                  className="flex-1 py-2 rounded-xl text-xs font-bold transition-all"
+                  style={{background:newCat===c?"#1a56db":"#f3f4f6", color:newCat===c?"white":"#6b7280"}}>
+                  {c}
+                </button>
+              ))}
+            </div>
+            <input placeholder="링크 이름" value={newTitle} onChange={e=>setNewTitle(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none mb-2 bg-gray-50"/>
+            <input placeholder="URL (예: naver.com)" value={newUrl} onChange={e=>setNewUrl(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none mb-4 bg-gray-50"/>
+            <div className="flex gap-2">
+              <button onClick={()=>setAdding(false)}
+                className="flex-1 py-3 rounded-xl text-sm font-bold bg-gray-100 text-gray-600">취소</button>
+              <button onClick={handleAdd}
+                className="flex-1 py-3 rounded-xl text-sm font-bold text-white transition-all"
+                style={{background:newTitle.trim()&&newUrl.trim()?"#1a56db":"#d1d5db"}}>추가</button>
+            </div>
+          </div>
+        )}
+
+        {/* 링크 목록 */}
+        {(sorting?links:filtered).length===0 ? (
+          <div className="text-center py-16 text-gray-400">
+            <div className="text-4xl mb-3">🔗</div>
+            <p className="text-sm font-bold">링크가 없습니다</p>
+          </div>
+        ) : (sorting?links:filtered).map((l,idx)=>(
+          <div key={l.id}
+            data-lid={l.id}
+            draggable={sorting}
+            onDragStart={sorting?()=>onDragStart(l.id):undefined}
+            onDragOver={sorting?e=>onDragOver(e,l.id):undefined}
+            onDragEnd={sorting?onDragEnd:undefined}
+            className="bg-white rounded-2xl flex items-center overflow-hidden transition-all"
+            style={{border:`1.5px solid ${sorting&&dragOverId===l.id?"#1a56db":"#f3f4f6"}`,
+              opacity:sorting&&draggingId===l.id?0.4:1,
+              boxShadow:sorting&&dragOverId===l.id?"0 0 0 3px rgba(26,86,219,.15)":"0 1px 4px rgba(0,0,0,.05)"}}>
+            {/* 드래그 핸들 */}
+            {sorting && (
+              <div className="w-12 self-stretch flex items-center justify-center shrink-0 bg-gray-50 border-r border-gray-100 cursor-grab">
+                <svg width="16" height="22" viewBox="0 0 16 22" fill="none">
+                  <circle cx="5" cy="5"  r="2" fill="#d1d5db"/>
+                  <circle cx="11" cy="5" r="2" fill="#d1d5db"/>
+                  <circle cx="5" cy="11" r="2" fill="#d1d5db"/>
+                  <circle cx="11" cy="11" r="2" fill="#d1d5db"/>
+                  <circle cx="5" cy="17" r="2" fill="#d1d5db"/>
+                  <circle cx="11" cy="17" r="2" fill="#d1d5db"/>
+                </svg>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-gray-900 truncate">{l.title}</p>
-                <p className="text-xs text-gray-400 truncate">{l.url}</p>
+            )}
+            {/* 링크 본문 */}
+            {sorting ? (
+              <div className="flex-1 flex items-center gap-3 p-4 min-w-0">
+                <div className="w-11 h-11 rounded-2xl bg-gray-100 flex items-center justify-center text-xl shrink-0">{l.emoji||"🔗"}</div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-gray-900 truncate">{l.title}</p>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">{l.category}</span>
+                </div>
               </div>
-            </a>
-            <button onClick={async ()=>{ try { await deleteDoc(doc(db, "links", l.id)); } catch(e){ console.error(e); } }}
-              className="p-2 rounded-full text-gray-300 hover:text-red-400 hover:bg-red-50 shrink-0">
-              <X size={16}/>
-            </button>
+            ) : (
+              <a href={l.url} target="_blank" rel="noopener noreferrer"
+                className="flex-1 flex items-center gap-3 p-4 min-w-0 no-underline">
+                <div className="w-11 h-11 rounded-2xl bg-gray-100 flex items-center justify-center text-xl shrink-0">{l.emoji||"🔗"}</div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-gray-900 truncate">{l.title}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 shrink-0">{l.category}</span>
+                    <span className="text-xs text-gray-300 truncate">{l.url.replace(/https?:\/\//,"")}</span>
+                  </div>
+                </div>
+                <ChevronLeft size={16} className="text-gray-300 rotate-180 shrink-0"/>
+              </a>
+            )}
+            {/* 순서변경: 위아래 버튼 */}
+            {sorting && (
+              <div className="flex flex-col gap-1 p-2 shrink-0">
+                <button onClick={()=>moveUp(l.id)} disabled={links.findIndex(x=>x.id===l.id)===0}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold transition-all"
+                  style={{background:links.findIndex(x=>x.id===l.id)===0?"#f9fafb":"#f3f4f6",
+                    color:links.findIndex(x=>x.id===l.id)===0?"#d1d5db":"#374151"}}>↑</button>
+                <button onClick={()=>moveDown(l.id)} disabled={links.findIndex(x=>x.id===l.id)===links.length-1}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold transition-all"
+                  style={{background:links.findIndex(x=>x.id===l.id)===links.length-1?"#f9fafb":"#f3f4f6",
+                    color:links.findIndex(x=>x.id===l.id)===links.length-1?"#d1d5db":"#374151"}}>↓</button>
+              </div>
+            )}
+            {/* 일반: 삭제 버튼 */}
+            {!sorting && (
+              <button onClick={()=>setLinks(p=>p.filter(x=>x.id!==l.id))}
+                className="w-11 self-stretch border-l border-gray-100 bg-gray-50 flex items-center justify-center text-gray-300 hover:text-red-400 shrink-0 text-lg">
+                ✕
+              </button>
+            )}
           </div>
         ))}
       </div>
