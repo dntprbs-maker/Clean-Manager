@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 클린메니저 — 네이버 캘린더 완전 재현
  * 3단계 스와이프 모드:
  *   MODE 0 (full)  → 월간 그리드 전체 (이벤트 텍스트 바 표시)
@@ -2258,7 +2258,7 @@ function LoginScreen({ onLogin }) {
     setLoading(true); setError("");
     try {
       // 팝업 문제로 인해 리다이렉트 방식으로 전면 교체
-      await signInWithRedirect(auth, provider);
+      await signInWithPopup(auth, provider);
     } catch (e) {
       console.error(e);
       setError("구글 로그인으로 이동할 수 없습니다.");
