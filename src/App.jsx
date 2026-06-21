@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 
 import { auth, provider, db, secondaryAuth } from "./firebase";
-import { signInWithPopup, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
+import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { collection, doc, setDoc, getDoc, getDocs, onSnapshot, query, orderBy, deleteDoc, serverTimestamp } from "firebase/firestore";
 
 // ── 캘린더 목록 ───────────────────────────────────────────────
@@ -2257,11 +2257,11 @@ function LoginScreen({ onLogin }) {
   const handleGoogle = async () => {
     setLoading(true); setError("");
     try {
-      await signInWithPopup(auth, provider);
-      // 성공하면 App의 onAuthStateChanged가 처리함
+      // 팝업 문제로 인해 리다이렉트 방식으로 전면 교체
+      await signInWithRedirect(auth, provider);
     } catch (e) {
       console.error(e);
-      setError("구글 로그인에 실패했습니다.");
+      setError("구글 로그인으로 이동할 수 없습니다.");
       setLoading(false);
     }
   };
@@ -2422,6 +2422,16 @@ export default function App() {
   const [loginUser, setLoginUser] = useState(null);
 
   useEffect(() => {
+    // 리다이렉트 결과(에러 등) 확인
+    getRedirectResult(auth).then((result) => {
+      if (result) {
+        console.log("Redirect login success:", result);
+      }
+    }).catch((error) => {
+      console.error("Redirect login error:", error);
+      alert("로그인 에러: " + (error.message || "원인을 알 수 없는 오류"));
+    });
+
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
