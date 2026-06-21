@@ -2505,8 +2505,8 @@ function LoginScreen({ onLogin }) {
   const handleGoogle = async () => {
     setLoading(true); setError("");
     try {
-      // 팝업 문제로 인해 리다이렉트 방식으로 전면 교체
-      await signInWithPopup(auth, provider);
+      // 모바일 호환을 위해 리다이렉트 방식 사용
+      await signInWithRedirect(auth, provider);
     } catch (e) {
       console.error(e);
       setError("구글 로그인으로 이동할 수 없습니다.");
