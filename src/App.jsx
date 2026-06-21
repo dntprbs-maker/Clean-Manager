@@ -299,7 +299,7 @@ function saveToStorage(key, value) {
   } catch(e) { /* 저장 실패 무시 */ }
 }
 
-function Provider({ children }) {
+function Provider({ children, loginUser, onLogout }) {
   // 저장된 데이터 있으면 불러오고, 없으면 샘플 데이터
   const [events,setEvents]     = useState(() => loadFromStorage(LS_KEY_EVENTS, makeSamples()));
   const [cals,setCals]         = useState(() => loadFromStorage(LS_KEY_CALS, CALS));
@@ -392,7 +392,7 @@ function Provider({ children }) {
       sheetMode,setSheetMode,
       teams,setTeams,teamModal,setTeamModal,
       users,setUsers,
-      currentUser,setCurrentUser,
+      currentUser,setCurrentUser,onLogout,
       currentScreen,setCurrentScreen,
       empModal,setEmpModal,
       activityLogs,setActivityLogs,
@@ -2251,9 +2251,139 @@ function ReportHistoryScreen() {
   );
 }
 
-export default function App() {
+// ── 로그인 화면 ───────────────────────────────────────────────
+const STAFF_ACCOUNTS = [
+  {id:"clean1",  pw:"1234", name:"이팀장",  role:"팀장",      team:"청소 1팀", calId:"clean1"},
+  {id:"clean2",  pw:"1234", name:"박팀장",  role:"팀장",      team:"청소 2팀", calId:"clean2"},
+  {id:"sales01", pw:"abcd", name:"최영업",  role:"영업팀장",  team:"영업팀",   calId:null},
+  {id:"mgr01",   pw:"mgr1", name:"김관리",  role:"관리팀장",  team:"관리팀",   calId:null},
+  {id:"staff01", pw:"1111", name:"홍길동",  role:"팀원",      team:"청소 1팀", calId:"clean1"},
+];
+
+function LoginScreen({ onLogin }) {
+  const [tab, setTab]         = useState("google");
+  const [staffId, setStaffId] = useState("");
+  const [staffPw, setStaffPw] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState("");
+  const [showPw, setShowPw]   = useState(false);
+
+  const handleGoogle = () => {
+    setLoading(true); setError("");
+    setTimeout(()=>{
+      setLoading(false);
+      onLogin({name:"김대표", role:"최고관리자", team:"관리팀", calId:null});
+    }, 1600);
+  };
+
+  const handleStaff = () => {
+    if(!staffId||!staffPw){ setError("아이디와 비밀번호를 입력하세요."); return; }
+    setLoading(true); setError("");
+    setTimeout(()=>{
+      setLoading(false);
+      const found = STAFF_ACCOUNTS.find(a=>a.id===staffId&&a.pw===staffPw);
+      if(found) onLogin(found);
+      else setError("아이디 또는 비밀번호가 올바르지 않습니다.");
+    }, 900);
+  };
+
   return (
-    <Provider>
+    <div className="flex-1 flex flex-col bg-white min-h-screen">
+      <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
+        <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
+          style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🧹</div>
+        <h1 className="text-3xl font-extrabold text-gray-900 mb-2">크린드림</h1>
+        <p className="text-sm text-gray-400">현장 관리 앱</p>
+      </div>
+      <div className="px-6 pb-12 flex flex-col gap-3">
+        <div className="flex bg-gray-100 rounded-2xl p-1 gap-1 mb-1">
+          {[["google","👑 관리자"],["staff","👤 직원"]].map(([k,l])=>(
+            <button key={k} onClick={()=>{setTab(k);setError("");}}
+              className={"flex-1 py-2.5 rounded-xl text-sm font-bold transition-all " +
+                (tab===k?"bg-white shadow text-gray-900":"text-gray-400")}>
+              {l}
+            </button>
+          ))}
+        </div>
+        {tab==="google" && (
+          <div className="flex flex-col gap-3">
+            <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100">
+              <p className="text-sm font-bold text-blue-600 mb-1">최고관리자 전용</p>
+              <p className="text-xs text-gray-500 leading-relaxed">등록된 Gmail 계정으로만 로그인 가능합니다.</p>
+            </div>
+            <button onClick={handleGoogle} disabled={loading}
+              className="w-full py-4 rounded-2xl border border-gray-200 bg-white text-gray-700 text-sm font-bold flex items-center justify-center gap-3 shadow-sm"
+              style={{opacity:loading?0.7:1}}>
+              {loading
+                ? <div className="w-5 h-5 rounded-full border-2 border-gray-200 border-t-blue-500" style={{animation:"spin .7s linear infinite"}}/>
+                : <svg width="20" height="20" viewBox="0 0 48 48">
+                    <path fill="#FFC107" d="M43.6 20H24v8h11.3C33.6 33.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.7 1.1 7.8 2.9l5.7-5.7C33.9 6.5 29.2 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20c11 0 20-8.9 20-20 0-1.3-.1-2.7-.4-4z"/>
+                    <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.5 19 12 24 12c3 0 5.7 1.1 7.8 2.9l5.7-5.7C33.9 6.5 29.2 4 24 4 16.3 4 9.7 8.4 6.3 14.7z"/>
+                    <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.3 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.3 16.3 44 24 44z"/>
+                    <path fill="#1976D2" d="M43.6 20H24v8h11.3c-.9 2.7-2.7 4.9-5.1 6.4l6.2 5.2C40.5 36 44 30.4 44 24c0-1.3-.1-2.7-.4-4z"/>
+                  </svg>
+              }
+              {loading?"로그인 중...":"Google 계정으로 로그인"}
+            </button>
+          </div>
+        )}
+        {tab==="staff" && (
+          <div className="flex flex-col gap-3">
+            <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100">
+              <p className="text-sm font-bold text-gray-700 mb-1">직원 로그인</p>
+              <p className="text-xs text-gray-400 leading-relaxed">관리자에게 받은 아이디/비밀번호로 로그인하세요.</p>
+            </div>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
+              <input placeholder="아이디" value={staffId} onChange={e=>{setStaffId(e.target.value);setError("");}}
+                className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
+                  (error?"border-red-300":staffId?"border-blue-400":"border-gray-200")}/>
+            </div>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+              <input type={showPw?"text":"password"} placeholder="비밀번호" value={staffPw}
+                onChange={e=>{setStaffPw(e.target.value);setError("");}}
+                onKeyDown={e=>e.key==="Enter"&&handleStaff()}
+                className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
+                  (error?"border-red-300":staffPw?"border-blue-400":"border-gray-200")}/>
+              <button onClick={()=>setShowPw(p=>!p)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-base border-none bg-transparent cursor-pointer">
+                {showPw?"🙈":"👁️"}
+              </button>
+            </div>
+            {error && (
+              <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">
+                ⚠️ {error}
+              </div>
+            )}
+            <button onClick={handleStaff} disabled={loading}
+              className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
+              style={{background:staffId&&staffPw?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",opacity:loading?0.7:1}}>
+              {loading?"로그인 중...":"로그인"}
+            </button>
+          </div>
+        )}
+        <p className="text-xs text-gray-300 text-center mt-1">⚠️ Firebase Auth 연동 후 실제 동작</p>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loginUser, setLoginUser]   = useState(null);
+
+  if(!isLoggedIn) {
+    return (
+      <LoginScreen onLogin={(user)=>{
+        setLoginUser(user);
+        setIsLoggedIn(true);
+      }}/>
+    );
+  }
+
+  return (
+    <Provider loginUser={loginUser} onLogout={()=>setIsLoggedIn(false)}>
       <AppInner/>
     </Provider>
   );
