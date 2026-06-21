@@ -1346,36 +1346,53 @@ function SideDrawer() {
               <span className="text-sm font-medium text-gray-700 flex-1 text-left">직원 관리</span>
             </button>
           )}
-          <button 
-            onClick={() => { setCurrentScreen("team_schedule"); setDrawer(false); }}
-            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
-            <Calendar size={20} className="text-indigo-500" />
-            <span className="text-sm font-medium text-gray-700 flex-1 text-left">팀별 일정</span>
-          </button>
-          <button 
-            onClick={() => { setCurrentScreen("dashboard"); setDrawer(false); }}
-            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
-            <PieChart size={20} className="text-blue-500" />
-            <span className="text-sm font-medium text-gray-700 flex-1 text-left">일정 요약</span>
-          </button>
-          <button 
+          {/* 팀별 일정 - 팀원 제외 */}
+          {currentUser.role !== "팀원" && (
+            <button
+              onClick={() => { setCurrentScreen("team_schedule"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <Calendar size={20} className="text-indigo-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">팀별 일정</span>
+            </button>
+          )}
+
+          {/* 대시보드 - 팀원 제외 */}
+          {currentUser.role !== "팀원" && (
+            <button
+              onClick={() => { setCurrentScreen("dashboard"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <PieChart size={20} className="text-blue-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">일정 요약</span>
+            </button>
+          )}
+
+          {/* 공지사항 - 전체 */}
+          <button
             onClick={() => { setCurrentScreen("notice"); setDrawer(false); }}
             className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
             <Bell size={20} className="text-orange-500" />
             <span className="text-sm font-medium text-gray-700 flex-1 text-left">팀 공지사항</span>
           </button>
-          <button 
-            onClick={() => { setCurrentScreen("activity_log"); setDrawer(false); }}
-            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
-            <History size={20} className="text-green-500" />
-            <span className="text-sm font-medium text-gray-700 flex-1 text-left">최근 작업 내역</span>
-          </button>
-          <button
-            onClick={() => { setCurrentScreen("report_history"); setDrawer(false); }}
-            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
-            <CheckSquare size={20} className="text-blue-500" />
-            <span className="text-sm font-medium text-gray-700 flex-1 text-left">완료 보고 내역</span>
-          </button>
+
+          {/* 변경 로그 - 최고관리자, 관리팀장만 */}
+          {(currentUser.role === "최고관리자" || currentUser.role === "관리팀장") && (
+            <button
+              onClick={() => { setCurrentScreen("activity_log"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <History size={20} className="text-green-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">변경 로그</span>
+            </button>
+          )}
+
+          {/* 완료 보고 내역 - 팀원 제외 */}
+          {currentUser.role !== "팀원" && (
+            <button
+              onClick={() => { setCurrentScreen("report_history"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <CheckSquare size={20} className="text-blue-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">완료 보고 내역</span>
+            </button>
+          )}
           <button 
             onClick={() => { setCurrentScreen("links"); setDrawer(false); }}
             className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
