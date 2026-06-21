@@ -14,8 +14,13 @@ import {
   Search, Plus, X, MapPin, Link2, RotateCcw, Clock,
   Calendar, AlignLeft, ChevronDown, ChevronLeft,
   ChevronRight, Menu, Settings, User, Edit3, Trash2,
-  PieChart, Bell, History, ExternalLink, Activity
+  PieChart, Bell, History, ExternalLink, Activity,
+  CheckSquare, FileText, Camera
 } from "lucide-react";
+
+import { auth, provider, db, secondaryAuth } from "./firebase";
+import { signInWithPopup, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
+import { collection, doc, setDoc, getDoc, getDocs, onSnapshot, query, orderBy, deleteDoc, serverTimestamp } from "firebase/firestore";
 
 // ── 캘린더 목록 ───────────────────────────────────────────────
 const CALS = [
@@ -300,9 +305,77 @@ function saveToStorage(key, value) {
 }
 
 function Provider({ children, loginUser, onLogout }) {
-  // 저장된 데이터 있으면 불러오고, 없으면 샘플 데이터
-  const [events,setEvents]     = useState(() => loadFromStorage(LS_KEY_EVENTS, makeSamples()));
-  const [cals,setCals]         = useState(() => loadFromStorage(LS_KEY_CALS, CALS));
+  const companyRef = doc(db, "companies", loginUser.companyId);
+
+  // Firestore 데이터
+  const [events, setEvents] = useState([]);
+  const [cals, setCals] = useState(CALS); // 기본 캘린더 목록
+  const [teams, setTeams] = useState(INIT_TEAMS);
+  const [users, setUsers] = useState(INIT_USERS);
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [notices, setNotices] = useState([]);
+  const [links, setLinks] = useState([]);
+
+  useEffect(() => {
+    const unsubEvents = onSnapshot(collection(companyRef, "events"), snap => {
+      setEvents(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    const unsubUsers = onSnapshot(collection(companyRef, "users"), snap => {
+      if(!snap.empty) setUsers(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    const unsubTeams = onSnapshot(collection(companyRef, "teams"), snap => {
+      if(!snap.empty) setTeams(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    const unsubLogs = onSnapshot(query(collection(companyRef, "activityLogs"), orderBy("time", "desc")), snap => {
+      setActivityLogs(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    const unsubNotices = onSnapshot(collection(companyRef, "notices"), snap => {
+      setNotices(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    const unsubLinks = onSnapshot(collection(companyRef, "links"), snap => {
+      setLinks(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    const unsubCals = onSnapshot(collection(companyRef, "cals"), snap => {
+      if (!snap.empty) setCals(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+
+    return () => {
+      unsubEvents(); unsubUsers(); unsubTeams(); unsubLogs(); unsubNotices(); unsubLinks(); unsubCals();
+    };
+  }, [loginUser.companyId]);
+
+  const addLog = useCallback((action, detail) => {
+    const newLogRef = doc(collection(companyRef, "activityLogs"));
+    setDoc(newLogRef, { time: new Date().toISOString(), user: loginUser, action, detail });
+  }, [loginUser, companyRef]);
+
+  const addEvent = useCallback(ev => {
+    const evRef = doc(collection(companyRef, "events"));
+    setDoc(evRef, { ...ev });
+    addLog("등록", `'${ev.title}' 일정을 등록했습니다.`);
+  }, [addLog, companyRef]);
+  
+  const updateEvent = useCallback(ev => {
+    setDoc(doc(companyRef, "events", ev.id), ev);
+    addLog("수정", `'${ev.title}' 일정을 수정했습니다.`);
+  }, [addLog, companyRef]);
+  
+  const deleteEvent = useCallback(id => {
+    const target = events.find(e => e.id === id);
+    deleteDoc(doc(companyRef, "events", id));
+    if (target) addLog("삭제", `'${target.title}' 일정을 삭제했습니다.`);
+  }, [events, addLog, companyRef]);
+  
+  const toggleCal = useCallback(id => {
+    const target = cals.find(c => c.id === id);
+    if(target) {
+      const nextCals = cals.map(c=>c.id===id?{...c,checked:!c.checked}:c);
+      setCals(nextCals);
+      nextCals.forEach(c => setDoc(doc(companyRef, "cals", c.id), c));
+    }
+  }, [cals, companyRef]);
+
+  // UI 상태
   const [modal,setModal]       = useState({open:false,date:null,editId:null});
   const [current,setCurrent]   = useState(() => {
     const d = new Date();
@@ -314,68 +387,28 @@ function Provider({ children, loginUser, onLogout }) {
   const [drawer,setDrawer]     = useState(false);
   const [searchOpen,setSearchOpen] = useState(false);
   const [searchQuery,setSearchQuery] = useState("");
-  // 0=full month bar, 1=half dot+sheet, 2=list only
-  const [sheetMode,setSheetMode] = useState(1); // 기본: 도트그리드+시트
-
-  // 직원 관리 상태
-  const [teams, setTeams] = useState(INIT_TEAMS);
+  const [sheetMode,setSheetMode] = useState(1);
   const [teamModal, setTeamModal] = useState(false);
-  const [users, setUsers] = useState(INIT_USERS);
-  const [currentUser, setCurrentUser] = useState(INIT_USERS[0]); 
-  const [currentScreen, setCurrentScreen] = useState("calendar"); // "calendar" | "employees"
+  const [currentScreen, setCurrentScreen] = useState("calendar");
   const [empModal, setEmpModal] = useState({ open: false, editId: null });
 
-  // 부가 기능 상태
-  const [activityLogs, setActivityLogs] = useState([]);
-  const [notices, setNotices] = useState([
-    { id: "n1", title: "이번 주말 작업 시 안전화 필수 착용", author: "김사장", date: "2026-06-18" }
-  ]);
-  const [links, setLinks] = useState([]); // 처음에는 빈 목록
+  const currentUser = loginUser;
 
-  const addLog = useCallback((action, detail) => {
-    setActivityLogs(p => [{ id: uid(), time: new Date().toISOString(), user: currentUser, action, detail }, ...p].slice(0, 100));
-  }, [currentUser]);
-
-  const addEvent    = useCallback(ev => {
-    setEvents(p => [...p, { ...ev, id: uid() }]);
-    addLog("등록", `'${ev.title}' 일정을 등록했습니다.`);
-  }, [addLog]);
-  
-  const updateEvent = useCallback(ev => {
-    setEvents(p => p.map(e => e.id === ev.id ? ev : e));
-    addLog("수정", `'${ev.title}' 일정을 수정했습니다.`);
-  }, [addLog]);
-  
-  const deleteEvent = useCallback(id => {
-    setEvents(p => {
-      const target = p.find(e => e.id === id);
-      if (target) addLog("삭제", `'${target.title}' 일정을 삭제했습니다.`);
-      return p.filter(e => e.id !== id);
-    });
-  }, [addLog]);
-  
   const openModal   = useCallback((date=null,editId=null)=>setModal({open:true,date,editId}),[]);
   const closeModal  = useCallback(()=>setModal({open:false,date:null,editId:null}),[]);
-  const toggleCal   = useCallback(id=>setCals(p=>p.map(c=>c.id===id?{...c,checked:!c.checked}:c)),[]);
-
-  // events 변경 시마다 localStorage 자동 저장
-  useEffect(()=>{ saveToStorage(LS_KEY_EVENTS, events); }, [events]);
-  // cals(캘린더 ON/OFF) 변경 시마다 저장
-  useEffect(()=>{ saveToStorage(LS_KEY_CALS, cals); }, [cals]);
 
   const checkedIds     = useMemo(()=>new Set(cals.filter(c=>c.checked).map(c=>c.id)),[cals]);
   const visibleEvents  = useMemo(()=>{
     let evs = events.filter(e=>checkedIds.has(e.calId));
-    // 청소팀 권한 체크: 사장/관리/영업팀이 아니면, 본인 팀과 관련된 캘린더만 열람 가능하도록 제한
-    if (!["사장", "관리팀", "영업팀"].includes(currentUser.team)) {
-      const myTeamKeyword = currentUser.team.replace("팀", ""); // 예: "정기청소"
+    if (!["사장", "관리팀", "영업팀"].includes(currentUser.team) && currentUser.role !== "최고관리자") {
+      const myTeamKeyword = currentUser.team.replace("팀", ""); 
       evs = evs.filter(e => {
         const cal = CALS.find(c=>c.id===e.calId);
         return cal && cal.label.includes(myTeamKeyword);
       });
     }
     return evs;
-  }, [events, checkedIds, currentUser.team]);
+  }, [events, checkedIds, currentUser.team, currentUser.role]);
 
   return (
     <Ctx.Provider value={{
@@ -392,12 +425,13 @@ function Provider({ children, loginUser, onLogout }) {
       sheetMode,setSheetMode,
       teams,setTeams,teamModal,setTeamModal,
       users,setUsers,
-      currentUser,setCurrentUser,onLogout,
+      currentUser,setCurrentUser: ()=>{},onLogout,
       currentScreen,setCurrentScreen,
       empModal,setEmpModal,
       activityLogs,setActivityLogs,
       notices,setNotices,
       links,setLinks,
+      companyId: loginUser.companyId
     }}>
       {children}
     </Ctx.Provider>
@@ -1771,7 +1805,7 @@ function EventModal() {
 
 // ── 상단 헤더 ─────────────────────────────────────────────────────
 function TopHeader() {
-  const { current, setCurrent, setDrawer, sheetMode, setSheetMode, selDate, setSelDate, setSearchOpen } = useC();
+  const { current, setCurrent, setDrawer, sheetMode, setSheetMode, selDate, setSelDate, setSearchOpen, currentUser } = useC();
   const y=current.getFullYear(), m=current.getMonth();
   const [picker,setPicker]=useState(false);
   const DAYS=["일","월","화","수","목","금","토"];
@@ -1779,11 +1813,20 @@ function TopHeader() {
 
   return (
     <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-100 relative">
-      {/* 왼쪽: 햄버거 or 뒤로가기 */}
-      {sheetMode===2
-        ? <button onClick={()=>setSheetMode(1)} className="p-1 -ml-1"><ChevronLeft size={22} className="text-gray-700"/></button>
-        : <button onClick={()=>setDrawer(true)} className="p-1 -ml-1"><Menu size={22} className="text-gray-700"/></button>
-      }
+      {/* 왼쪽: 회사명 or 뒤로가기 */}
+      <div className="flex items-center gap-3">
+        {sheetMode===2
+          ? <button onClick={()=>setSheetMode(1)} className="p-1 -ml-1"><ChevronLeft size={22} className="text-gray-700"/></button>
+          : <button onClick={()=>setDrawer(true)} className="p-1 -ml-1"><Menu size={22} className="text-gray-700"/></button>
+        }
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white shadow-sm"
+            style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
+            {currentUser?.companyName?.charAt(0) || "🏢"}
+          </div>
+          <span className="font-extrabold text-gray-900 text-lg">{currentUser?.companyName || "로딩중..."}</span>
+        </div>
+      </div>
 
       {/* 중앙 제목 */}
       {sheetMode===2
@@ -2203,14 +2246,6 @@ function ReportHistoryScreen() {
 }
 
 // ── 로그인 화면 ───────────────────────────────────────────────
-const STAFF_ACCOUNTS = [
-  {id:"clean1",  pw:"1234", name:"이팀장",  role:"팀장",      team:"청소 1팀", calId:"clean1"},
-  {id:"clean2",  pw:"1234", name:"박팀장",  role:"팀장",      team:"청소 2팀", calId:"clean2"},
-  {id:"sales01", pw:"abcd", name:"최영업",  role:"영업팀장",  team:"영업팀",   calId:null},
-  {id:"mgr01",   pw:"mgr1", name:"김관리",  role:"관리팀장",  team:"관리팀",   calId:null},
-  {id:"staff01", pw:"1111", name:"홍길동",  role:"팀원",      team:"청소 1팀", calId:"clean1"},
-];
-
 function LoginScreen({ onLogin }) {
   const [tab, setTab]         = useState("google");
   const [staffId, setStaffId] = useState("");
@@ -2219,23 +2254,28 @@ function LoginScreen({ onLogin }) {
   const [error, setError]     = useState("");
   const [showPw, setShowPw]   = useState(false);
 
-  const handleGoogle = () => {
+  const handleGoogle = async () => {
     setLoading(true); setError("");
-    setTimeout(()=>{
+    try {
+      await signInWithPopup(auth, provider);
+      // 성공하면 App의 onAuthStateChanged가 처리함
+    } catch (e) {
+      console.error(e);
+      setError("구글 로그인에 실패했습니다.");
       setLoading(false);
-      onLogin({name:"김대표", role:"최고관리자", team:"관리팀", calId:null});
-    }, 1600);
+    }
   };
 
-  const handleStaff = () => {
-    if(!staffId||!staffPw){ setError("아이디와 비밀번호를 입력하세요."); return; }
+  const handleStaff = async () => {
+    if(!staffId||!staffPw){ setError("이메일과 비밀번호를 입력하세요."); return; }
     setLoading(true); setError("");
-    setTimeout(()=>{
+    try {
+      await signInWithEmailAndPassword(auth, staffId, staffPw);
+    } catch (e) {
+      console.error(e);
+      setError("이메일 또는 비밀번호가 올바르지 않습니다.");
       setLoading(false);
-      const found = STAFF_ACCOUNTS.find(a=>a.id===staffId&&a.pw===staffPw);
-      if(found) onLogin(found);
-      else setError("아이디 또는 비밀번호가 올바르지 않습니다.");
-    }, 900);
+    }
   };
 
   return (
@@ -2243,12 +2283,12 @@ function LoginScreen({ onLogin }) {
       <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
         <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
           style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🧹</div>
-        <h1 className="text-3xl font-extrabold text-gray-900 mb-2">크린드림</h1>
+        <h1 className="text-3xl font-extrabold text-gray-900 mb-2">클린메니저</h1>
         <p className="text-sm text-gray-400">현장 관리 앱</p>
       </div>
       <div className="px-6 pb-12 flex flex-col gap-3">
         <div className="flex bg-gray-100 rounded-2xl p-1 gap-1 mb-1">
-          {[["google","👑 관리자"],["staff","👤 직원"]].map(([k,l])=>(
+          {[["google","👑 업체 등록 / 관리자"],["staff","👤 직원"]].map(([k,l])=>(
             <button key={k} onClick={()=>{setTab(k);setError("");}}
               className={"flex-1 py-2.5 rounded-xl text-sm font-bold transition-all " +
                 (tab===k?"bg-white shadow text-gray-900":"text-gray-400")}>
@@ -2259,8 +2299,8 @@ function LoginScreen({ onLogin }) {
         {tab==="google" && (
           <div className="flex flex-col gap-3">
             <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100">
-              <p className="text-sm font-bold text-blue-600 mb-1">최고관리자 전용</p>
-              <p className="text-xs text-gray-500 leading-relaxed">등록된 Gmail 계정으로만 로그인 가능합니다.</p>
+              <p className="text-sm font-bold text-blue-600 mb-1">최고관리자 / 신규 가입</p>
+              <p className="text-xs text-gray-500 leading-relaxed">Google 계정으로 로그인하여 업체를 등록하거나 관리자 계정으로 접속합니다.</p>
             </div>
             <button onClick={handleGoogle} disabled={loading}
               className="w-full py-4 rounded-2xl border border-gray-200 bg-white text-gray-700 text-sm font-bold flex items-center justify-center gap-3 shadow-sm"
@@ -2282,11 +2322,11 @@ function LoginScreen({ onLogin }) {
           <div className="flex flex-col gap-3">
             <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100">
               <p className="text-sm font-bold text-gray-700 mb-1">직원 로그인</p>
-              <p className="text-xs text-gray-400 leading-relaxed">관리자에게 받은 아이디/비밀번호로 로그인하세요.</p>
+              <p className="text-xs text-gray-400 leading-relaxed">관리자에게 받은 이메일/비밀번호로 로그인하세요.</p>
             </div>
             <div className="relative">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
-              <input placeholder="아이디" value={staffId} onChange={e=>{setStaffId(e.target.value);setError("");}}
+              <input type="email" placeholder="이메일" value={staffId} onChange={e=>{setStaffId(e.target.value);setError("");}}
                 className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
                   (error?"border-red-300":staffId?"border-blue-400":"border-gray-200")}/>
             </div>
@@ -2314,27 +2354,132 @@ function LoginScreen({ onLogin }) {
             </button>
           </div>
         )}
-        <p className="text-xs text-gray-300 text-center mt-1">⚠️ Firebase Auth 연동 후 실제 동작</p>
       </div>
     </div>
   );
 }
 
-export default function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [loginUser, setLoginUser]   = useState(null);
+// ── 신규 가입 화면 ───────────────────────────────────────────────
+function RegisterScreen({ user, onComplete }) {
+  const [companyName, setCompanyName] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  if(!isLoggedIn) {
-    return (
-      <LoginScreen onLogin={(user)=>{
-        setLoginUser(user);
-        setIsLoggedIn(true);
-      }}/>
-    );
+  const handleRegister = async () => {
+    if (!companyName.trim()) return alert("회사명을 입력해주세요.");
+    setLoading(true);
+    try {
+      const companyId = "c_" + Date.now().toString(36);
+      
+      // 회사 정보 생성
+      await setDoc(doc(db, "companies", companyId), {
+        name: companyName,
+        createdAt: serverTimestamp(),
+        ownerUid: user.uid
+      });
+      
+      // 관리자 계정 정보 생성
+      const adminData = {
+        email: user.email,
+        name: user.displayName || "최고관리자",
+        companyId: companyId,
+        role: "최고관리자",
+        team: "관리팀",
+        createdAt: serverTimestamp()
+      };
+      await setDoc(doc(db, "admins", user.uid), adminData);
+      
+      // 유저 정보에 company 이름도 담아서 onComplete
+      onComplete({ uid: user.uid, ...adminData, companyName });
+    } catch (e) {
+      console.error(e);
+      alert("가입 중 오류가 발생했습니다.");
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex-1 flex flex-col bg-white min-h-screen items-center justify-center px-8">
+      <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
+        style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🏢</div>
+      <h1 className="text-2xl font-extrabold text-gray-900 mb-2">회사 등록</h1>
+      <p className="text-sm text-gray-500 mb-8 text-center">환영합니다!<br/>앱을 사용할 회사(업체) 이름을 입력해주세요.</p>
+      
+      <input value={companyName} onChange={e=>setCompanyName(e.target.value)}
+        placeholder="회사명 (예: 클린메니저)"
+        className="w-full py-4 px-5 rounded-2xl bg-gray-50 border border-gray-200 text-base font-bold outline-none focus:border-blue-500 mb-4" />
+      
+      <button onClick={handleRegister} disabled={loading || !companyName.trim()}
+        className="w-full py-4 rounded-2xl text-white font-bold transition-opacity"
+        style={{background:companyName.trim()?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb", opacity: loading ? 0.7 : 1}}>
+        {loading ? "등록 중..." : "가입 완료"}
+      </button>
+    </div>
+  );
+}
+
+export default function App() {
+  const [authState, setAuthState] = useState("loading"); // "loading" | "login" | "register" | "app"
+  const [loginUser, setLoginUser] = useState(null);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          // 1. 최고관리자 확인
+          const adminDoc = await getDoc(doc(db, "admins", user.uid));
+          if (adminDoc.exists()) {
+            const data = adminDoc.data();
+            const compDoc = await getDoc(doc(db, "companies", data.companyId));
+            const companyName = compDoc.exists() ? compDoc.data().name : "클린메니저";
+            
+            setLoginUser({ uid: user.uid, email: user.email, name: data.name || user.displayName, companyId: data.companyId, companyName, role: data.role || "최고관리자", team: data.team || "관리팀" });
+            setAuthState("app");
+            return;
+          }
+          
+          // 2. 일반 직원 확인
+          const staffDoc = await getDoc(doc(db, "staffs", user.uid));
+          if (staffDoc.exists()) {
+            const data = staffDoc.data();
+            const compDoc = await getDoc(doc(db, "companies", data.companyId));
+            const companyName = compDoc.exists() ? compDoc.data().name : "클린메니저";
+            
+            setLoginUser({ uid: user.uid, email: user.email, name: data.name, companyId: data.companyId, companyName, role: data.role, team: data.team });
+            setAuthState("app");
+            return;
+          }
+
+          // 3. 둘 다 없으면 신규 가입
+          setLoginUser(user);
+          setAuthState("register");
+          
+        } catch(e) {
+          console.error(e);
+          setAuthState("login");
+        }
+      } else {
+        setLoginUser(null);
+        setAuthState("login");
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  if (authState === "loading") {
+    return <div className="flex-1 flex min-h-screen items-center justify-center bg-gray-50">로딩 중...</div>;
+  }
+  if (authState === "login") {
+    return <LoginScreen />;
+  }
+  if (authState === "register") {
+    return <RegisterScreen user={loginUser} onComplete={(user) => {
+      setLoginUser(user);
+      setAuthState("app");
+    }} />;
   }
 
   return (
-    <Provider loginUser={loginUser} onLogout={()=>setIsLoggedIn(false)}>
+    <Provider loginUser={loginUser} onLogout={() => signOut(auth)}>
       <AppInner/>
     </Provider>
   );
@@ -2393,38 +2538,78 @@ function EmployeeListScreen() {
 
 // ── 직원 등록/수정 모달 ───────────────────────────────────────────────
 function EmployeeFormModal() {
-  const { empModal, setEmpModal, users, setUsers, activityLogs, setActivityLogs, teams } = useC();
-  const [form, setForm] = useState({ name: "", phone: "", team: "입주청소팀", role: "팀원" });
+  const { empModal, setEmpModal, users, teams, companyId } = useC();
+  const [form, setForm] = useState({ name: "", phone: "", team: "입주청소팀", role: "팀원", email: "", password: "" });
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (empModal.open) {
       if (empModal.editId) {
         const u = users.find(x => x.id === empModal.editId);
-        if (u) setForm(u);
+        if (u) setForm({ ...u, password: "" });
       } else {
-        setForm({ name: "", phone: "", team: "입주청소팀", role: "팀원" });
+        setForm({ name: "", phone: "", team: "입주청소팀", role: "팀원", email: "", password: "" });
       }
     }
   }, [empModal.open, empModal.editId, users]);
 
   if (!empModal.open) return null;
 
-  const close = () => setEmpModal({open:false, editId:null});
-  const save = () => {
-    if (!form.name.trim()) return alert("이름을 입력하세요.");
-    if (empModal.editId) {
-      setUsers(p => p.map(u => u.id === empModal.editId ? { ...u, ...form } : u));
-    } else {
-      setUsers(p => [...p, { id: "u" + Date.now(), ...form }]);
-    }
-    close();
-  }
-  const del = () => {
-    if (confirm("정말 이 직원을 삭제하시겠습니까?")) {
-      setUsers(p => p.filter(u => u.id !== empModal.editId));
+  const close = () => { if(!loading) setEmpModal({open:false, editId:null}); };
+  
+  const save = async () => {
+    if (!form.name.trim() || !form.email.trim()) return alert("이름과 이메일은 필수입니다.");
+    if (!empModal.editId && !form.password) return alert("초기 비밀번호를 입력하세요.");
+    setLoading(true);
+    
+    try {
+      if (empModal.editId) {
+        // 기존 유저 수정
+        const { password, ...updateData } = form;
+        await setDoc(doc(db, "companies", companyId, "users", empModal.editId), updateData, { merge: true });
+        await setDoc(doc(db, "staffs", empModal.editId), { ...updateData, companyId }, { merge: true });
+      } else {
+        // 새 유저 생성 (secondaryAuth 이용, 메인 세션 유지)
+        const { user: newAuthUser } = await createUserWithEmailAndPassword(secondaryAuth, form.email, form.password);
+        const uid = newAuthUser.uid;
+        
+        const userData = {
+          name: form.name,
+          phone: form.phone,
+          team: form.team,
+          role: form.role,
+          email: form.email,
+          createdAt: serverTimestamp()
+        };
+        
+        await setDoc(doc(db, "companies", companyId, "users", uid), userData);
+        await setDoc(doc(db, "staffs", uid), { ...userData, companyId });
+        await signOut(secondaryAuth); // secondaryAuth 세션 정리
+      }
       close();
+    } catch (e) {
+      console.error(e);
+      alert("저장 중 오류가 발생했습니다: " + e.message);
+    } finally {
+      setLoading(false);
     }
-  }
+  };
+
+  const del = async () => {
+    if (confirm("정말 이 직원을 삭제하시겠습니까?")) {
+      setLoading(true);
+      try {
+        await deleteDoc(doc(db, "companies", companyId, "users", empModal.editId));
+        await deleteDoc(doc(db, "staffs", empModal.editId));
+        // Auth에서의 실제 계정 삭제는 Admin SDK 등 서버사이드 처리가 필요하므로 DB만 제거
+        close();
+      } catch(e) {
+        alert("삭제 실패");
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
 
   return (
     <div className="absolute inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
@@ -2434,6 +2619,16 @@ function EmployeeFormModal() {
           <button onClick={close} className="p-1 -mr-1 rounded-full hover:bg-gray-100"><X size={20} className="text-gray-500"/></button>
         </div>
         <div className="p-5 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">이메일 (아이디)</label>
+            <input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} disabled={!!empModal.editId} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800 disabled:bg-gray-100" placeholder="staff@company.com" />
+          </div>
+          {!empModal.editId && (
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">초기 비밀번호</label>
+              <input type="text" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800" placeholder="임시 비밀번호 입력" />
+            </div>
+          )}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1">이름</label>
             <input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800" placeholder="홍길동" />
@@ -2445,7 +2640,9 @@ function EmployeeFormModal() {
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1">소속 팀</label>
             <select value={form.team} onChange={e=>setForm({...form,team:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800">
-              {teams.map(t => <option key={t} value={t}>{t}</option>)}
+              {teams.length ? teams.map(t => (
+                <option key={t.id || t.name || t} value={t.name || t}>{t.name || t}</option>
+              )) : <option value="입주청소팀">입주청소팀</option>}
             </select>
           </div>
           <div>
@@ -2457,11 +2654,13 @@ function EmployeeFormModal() {
         </div>
         <div className="px-5 py-4 border-t border-gray-50 bg-gray-50 flex gap-2">
           {empModal.editId && (
-            <button onClick={del} className="px-4 py-2 text-sm font-bold text-red-500 bg-red-50 rounded-lg hover:bg-red-100">삭제</button>
+            <button onClick={del} disabled={loading} className="px-4 py-2 text-sm font-bold text-red-500 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-50">삭제</button>
           )}
           <div className="flex-1"></div>
-          <button onClick={close} className="px-4 py-2 text-sm font-bold text-gray-500 hover:bg-gray-200 rounded-lg">취소</button>
-          <button onClick={save} className="px-5 py-2 text-sm font-bold text-white bg-gray-900 hover:bg-black rounded-lg">저장</button>
+          <button onClick={close} disabled={loading} className="px-4 py-2 text-sm font-bold text-gray-500 hover:bg-gray-200 rounded-lg disabled:opacity-50">취소</button>
+          <button onClick={save} disabled={loading} className="px-5 py-2 text-sm font-bold text-white bg-gray-900 hover:bg-black rounded-lg flex items-center justify-center min-w-[80px]">
+            {loading ? <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin"/> : "저장"}
+          </button>
         </div>
       </div>
     </div>

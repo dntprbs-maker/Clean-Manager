@@ -19,3 +19,7 @@ const app = initializeApp(firebaseConfig);
 export const db       = getFirestore(app);
 export const auth     = getAuth(app);
 export const provider = new GoogleAuthProvider();
+
+// 직원 계정 생성용 Secondary App (관리자 세션 유지용)
+export const secondaryApp = initializeApp(firebaseConfig, "SecondaryApp");
+export const secondaryAuth = getAuth(secondaryApp);
