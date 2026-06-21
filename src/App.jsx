@@ -391,6 +391,7 @@ function Provider({ children, loginUser, onLogout }) {
   const [teamModal, setTeamModal] = useState(false);
   const [currentScreen, setCurrentScreen] = useState("calendar");
   const [empModal, setEmpModal] = useState({ open: false, editId: null });
+  const [companySettingsModal, setCompanySettingsModal] = useState(false);
 
   const currentUser = loginUser;
 
@@ -428,6 +429,7 @@ function Provider({ children, loginUser, onLogout }) {
       currentUser,setCurrentUser: ()=>{},onLogout,
       currentScreen,setCurrentScreen,
       empModal,setEmpModal,
+      companySettingsModal,setCompanySettingsModal,
       activityLogs,setActivityLogs,
       notices,setNotices,
       links,setLinks,
@@ -1355,6 +1357,9 @@ function SideDrawer() {
         <div className="px-4 pt-12 pb-4 border-b border-gray-100">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
+              <button onClick={() => { setDrawer(false); setCompanySettingsModal(true); }} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-800 rounded-full hover:bg-gray-100 transition-colors">
+                <Settings size={20} />
+              </button>
               <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-xl border border-blue-100">🏠</div>
               <div><p className="font-bold text-base">{currentUser.name}</p><p className="text-xs text-gray-500">{currentUser.team} · {currentUser.role}</p></div>
             </div>
@@ -1667,6 +1672,9 @@ function EventModal() {
           {/* 종일 토글 */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
+              <button onClick={() => { setDrawer(false); setCompanySettingsModal(true); }} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-800 rounded-full hover:bg-gray-100 transition-colors">
+                <Settings size={20} />
+              </button>
               <Clock size={18} className="text-gray-400"/>
               <span className="text-sm text-gray-700">종일</span>
             </div>
@@ -2458,6 +2466,7 @@ function AppInner() {
       <SearchModal/>
       <EmployeeFormModal/>
       <TeamManagementModal/>
+      <CompanySettingsModal/>
     </div>
   );
 }
@@ -3445,4 +3454,85 @@ function ExternalLinksScreen() {
   );
 }
 
+
+
+// ── 회사 정보 설정 모달 ───────────────────────────────────────────────
+function CompanySettingsModal() {
+  const { companySettingsModal, setCompanySettingsModal, currentUser } = useC();
+  const [companyName, setCompanyName] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (companySettingsModal) {
+      setCompanyName(currentUser?.companyName || "");
+      setLogoUrl(currentUser?.companyLogoUrl || "");
+    }
+  }, [companySettingsModal, currentUser]);
+
+  if (!companySettingsModal) return null;
+
+  const handleLogoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setLogoUrl(reader.result);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!companyName.trim()) return alert("회사명을 입력해주세요.");
+    setLoading(true);
+    try {
+      await window.alert("저장되었습니다. 새로고침 시 적용됩니다!");
+      // Firestore 문서 업데이트 로직은 실제 DB 연동 필요하므로 여기서는 시뮬레이션
+      // (기존 currentUser가 최상단 App 컴포넌트에서 관리되므로, 여기서는 새로고침 권장)
+      const { doc, updateDoc } = await import("firebase/firestore");
+      await updateDoc(doc(db, "companies", currentUser.companyId), {
+        name: companyName,
+        logoUrl: logoUrl
+      });
+      window.location.reload();
+    } catch (e) {
+      console.error(e);
+      alert("오류가 발생했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden flex flex-col shadow-2xl">
+        <div className="px-5 py-4 flex items-center justify-between border-b border-gray-100">
+          <h2 className="text-lg font-bold text-gray-900">회사 정보 설정</h2>
+          <button onClick={() => setCompanySettingsModal(false)} className="p-1 rounded-full hover:bg-gray-100">
+            <X size={20} className="text-gray-500" />
+          </button>
+        </div>
+        <div className="p-5 flex flex-col items-center">
+          <label className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl overflow-hidden cursor-pointer bg-gray-100 border-2 border-dashed border-gray-300 hover:border-blue-500 transition-colors"
+            style={{background: logoUrl ? "#fff" : "linear-gradient(135deg,#1a56db,#2563eb)"}}>
+            {logoUrl ? <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" /> : "🏢"}
+            <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
+          </label>
+          <p className="text-xs text-gray-400 -mt-4 mb-4 text-center">로고 이미지를 클릭하여 변경 (선택)</p>
+          
+          <div className="w-full mb-6">
+            <label className="block text-xs font-bold text-gray-500 mb-1">회사명</label>
+            <input value={companyName} onChange={e=>setCompanyName(e.target.value)}
+              className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm font-bold outline-none focus:border-blue-500" />
+          </div>
+          
+          <button onClick={handleSave} disabled={loading || !companyName.trim()}
+            className="w-full py-4 rounded-xl text-white font-bold transition-opacity"
+            style={{background:companyName.trim()?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb", opacity: loading ? 0.7 : 1}}>
+            {loading ? "저장 중..." : "저장하고 새로고침"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
