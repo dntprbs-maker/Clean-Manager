@@ -15,7 +15,7 @@ import {
   Calendar, AlignLeft, ChevronDown, ChevronLeft,
   ChevronRight, Menu, Settings, User, Edit3, Trash2,
   PieChart, Bell, History, ExternalLink, Activity,
-  CheckSquare, FileText, Camera
+  CheckSquare, FileText, Camera, Download
 } from "lucide-react";
 
 import { auth, provider, db, secondaryAuth } from "./firebase";
