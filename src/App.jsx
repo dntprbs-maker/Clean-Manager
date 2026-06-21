@@ -14,7 +14,8 @@ import {
   Search, Plus, X, MapPin, Link2, RotateCcw, Clock,
   Calendar, AlignLeft, ChevronDown, ChevronLeft,
   ChevronRight, Menu, Settings, User, Edit3, Trash2,
-  PieChart, Bell, History, ExternalLink, Activity
+  PieChart, Bell, History, ExternalLink, Activity,
+  CheckSquare, FileText, Camera
 } from "lucide-react";
 // Firebase Firestore 관련 함수 import
 import { db } from "./firebase";
@@ -2309,6 +2310,36 @@ function ReportHistoryScreen() {
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── 앱 메인 라우터 ───────────────────────────────────────────────
+function AppInner() {
+  const { currentScreen } = useC();
+  return (
+    <div className="h-screen flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none">
+      <style>{ANIM_CSS}</style>
+      <TopHeader/>
+      {currentScreen === "calendar" && (
+        <>
+          <CalendarView/>
+          <FloatingButtons/>
+        </>
+      )}
+      {currentScreen === "employees"    && <EmployeeListScreen/>}
+      {currentScreen === "team_schedule"&& <TeamScheduleScreen/>}
+      {currentScreen === "dashboard"    && <DashboardScreen/>}
+      {currentScreen === "notice"       && <NoticeScreen/>}
+      {currentScreen === "activity_log" && <ActivityLogScreen/>}
+      {currentScreen === "links"        && <ExternalLinksScreen/>}
+      {currentScreen === "report_history"&& <ReportHistoryScreen/>}
+      <SideDrawer/>
+      <DetailSheet/>
+      <EventModal/>
+      <SearchModal/>
+      <EmployeeFormModal/>
+      <TeamManagementModal/>
     </div>
   );
 }
