@@ -664,7 +664,15 @@ function ScheduleList({ selDate, compact=false }) {
           const c=calById(ev.calId);
           const isMulti=diff(ev.start,ev.end||ev.start)>0;
           return(
-            <div key={ev.id} onClick={()=>setDetEv(ev)}
+            <div key={ev.id}
+              onClick={()=>setDetEv(ev)}
+              onContextMenu={e=>{e.preventDefault();setLongPressEv(ev);}}
+              onTouchStart={e=>{
+                const t=setTimeout(()=>setLongPressEv(ev),500);
+                e.currentTarget._lpt=t;
+              }}
+              onTouchEnd={e=>clearTimeout(e.currentTarget._lpt)}
+              onTouchMove={e=>clearTimeout(e.currentTarget._lpt)}
               className="flex items-center px-4 py-1.5 border-b border-gray-50 cursor-pointer">
               {isMulti
                 ? <span className="text-sm px-2 py-0.5 rounded text-white font-medium mr-2 truncate max-w-[80%]"
@@ -1243,6 +1251,81 @@ function DetailSheet() {
   );
 }
 
+
+
+// ── 길게 누르기 메뉴 ───────────────────────────────────────────────
+function LongPressMenu({ ev, onClose, onEdit, onDelete }) {
+  if(!ev) return null;
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:300,display:"flex",alignItems:"flex-end",
+      justifyContent:"center",background:"rgba(0,0,0,.4)"}}
+      onClick={onClose}>
+      <div style={{background:"white",borderRadius:"24px 24px 0 0",width:"100%",maxWidth:430,
+        padding:"8px 0 32px",boxShadow:"0 -8px 32px rgba(0,0,0,.15)"}}
+        onClick={e=>e.stopPropagation()}>
+        {/* 핸들 */}
+        <div style={{width:36,height:4,borderRadius:99,background:"#e5e7eb",
+          margin:"8px auto 16px"}}/>
+        {/* 일정 제목 */}
+        <div style={{padding:"0 20px 16px",borderBottom:"1px solid #f3f4f6"}}>
+          <p style={{fontSize:13,color:"#9ca3af",marginBottom:4}}>선택된 일정</p>
+          <p style={{fontSize:16,fontWeight:800,color:"#111827"}}>{ev.title}</p>
+        </div>
+        {/* 버튼들 */}
+        <div style={{padding:"8px 12px"}}>
+          <button onClick={onEdit}
+            style={{width:"100%",padding:"14px 16px",borderRadius:14,border:"none",
+              background:"#f9fafb",cursor:"pointer",display:"flex",alignItems:"center",gap:12,
+              marginBottom:8,textAlign:"left"}}>
+            <span style={{fontSize:20}}>✏️</span>
+            <span style={{fontSize:15,fontWeight:700,color:"#111827"}}>수정</span>
+          </button>
+          <button onClick={onDelete}
+            style={{width:"100%",padding:"14px 16px",borderRadius:14,border:"none",
+              background:"#fef2f2",cursor:"pointer",display:"flex",alignItems:"center",gap:12,
+              textAlign:"left"}}>
+            <span style={{fontSize:20}}>🗑️</span>
+            <span style={{fontSize:15,fontWeight:700,color:"#ef4444"}}>삭제</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 삭제 확인 팝업 ───────────────────────────────────────────────
+function DeleteConfirmPopup({ ev, onCancel, onConfirm }) {
+  if(!ev) return null;
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:400,display:"flex",alignItems:"center",
+      justifyContent:"center",padding:"24px",background:"rgba(0,0,0,.5)"}}>
+      <div style={{background:"white",borderRadius:24,width:"100%",maxWidth:320,
+        padding:"24px",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+        <div style={{textAlign:"center",marginBottom:20}}>
+          <div style={{fontSize:40,marginBottom:12}}>🗑️</div>
+          <h3 style={{fontSize:18,fontWeight:800,color:"#111827",marginBottom:8}}>일정 삭제</h3>
+          <p style={{fontSize:13,color:"#6b7280",lineHeight:1.7}}>
+            <span style={{fontWeight:700,color:"#111827"}}>{ev.title}</span><br/>
+            이 일정을 삭제하시겠습니까?
+          </p>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={onCancel}
+            style={{flex:1,padding:"13px",borderRadius:14,border:"1.5px solid #e5e7eb",
+              background:"white",fontSize:14,fontWeight:700,color:"#6b7280",cursor:"pointer"}}>
+            취소
+          </button>
+          <button onClick={onConfirm}
+            style={{flex:1,padding:"13px",borderRadius:14,border:"none",
+              background:"linear-gradient(135deg,#ef4444,#dc2626)",
+              fontSize:14,fontWeight:700,color:"white",cursor:"pointer"}}>
+            삭제
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── 하단 탭바 ───────────────────────────────────────────────
 function BottomTabBar() {
