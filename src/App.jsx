@@ -2495,217 +2495,215 @@ function ImportCalendarScreen() {
 
 // ── 로그인 화면 ───────────────────────────────────────────────
 function LoginScreen({ onLogin }) {
-  const [tab, setTab]         = useState("google");
-  const [staffId, setStaffId] = useState("");
-  const [staffPw, setStaffPw] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState("");
-  const [showPw, setShowPw]   = useState(false);
+  const [mode, setMode]               = useState("login");
+  const [id, setId]                   = useState("");
+  const [pw, setPw]                   = useState("");
+  const [pw2, setPw2]                 = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [logoPreview, setLogoPreview] = useState(null);
+  const [showPw, setShowPw]           = useState(false);
+  const [loading, setLoading]         = useState(false);
+  const [error, setError]             = useState("");
 
-  const handleGoogle = async () => {
+  const handleLogin = async () => {
+    if(!id.trim()||!pw.trim()){ setError("아이디와 비밀번호를 입력하세요."); return; }
     setLoading(true); setError("");
     try {
-      // 팝업 문제로 인해 리다이렉트 방식으로 전면 교체
-      await signInWithPopup(auth, provider);
-    } catch (e) {
+      const { collection, query, where, getDocs, getDoc, doc } = await import("firebase/firestore");
+      const adminQ = query(collection(db, "admins"), where("id","==",id.trim()));
+      const adminSnap = await getDocs(adminQ);
+      if(!adminSnap.empty) {
+        const adminData = adminSnap.docs[0].data();
+        if(adminData.pw !== pw) { setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
+        const compDoc = await getDoc(doc(db, "companies", adminData.companyId));
+        const companyName = compDoc.exists() ? compDoc.data().name : "크린드림";
+        const user = {...adminData, uid:adminSnap.docs[0].id, companyName, role:"최고관리자"};
+        try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
+        onLogin(user);
+        return;
+      }
+      const staffQ = query(collection(db, "staffs"), where("id","==",id.trim()));
+      const staffSnap = await getDocs(staffQ);
+      if(!staffSnap.empty) {
+        const staffData = staffSnap.docs[0].data();
+        if(staffData.pw !== pw) { setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
+        const compDoc = await getDoc(doc(db, "companies", staffData.companyId));
+        const companyName = compDoc.exists() ? compDoc.data().name : "크린드림";
+        const user = {...staffData, uid:staffSnap.docs[0].id, companyName};
+        try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
+        onLogin(user);
+        return;
+      }
+      setError("등록되지 않은 아이디입니다.");
+    } catch(e) {
       console.error(e);
-      setError("구글 로그인으로 이동할 수 없습니다.");
+      setError("로그인 중 오류가 발생했습니다.");
+    } finally {
       setLoading(false);
     }
   };
 
-  const handleStaff = async () => {
-    if(!staffId||!staffPw){ setError("이메일과 비밀번호를 입력하세요."); return; }
+  const handleRegister = async () => {
+    if(!companyName||!id||!pw||!pw2){ setError("모든 항목을 입력하세요."); return; }
+    if(pw!==pw2){ setError("비밀번호가 일치하지 않습니다."); return; }
+    if(pw.length<4){ setError("비밀번호는 4자 이상이어야 합니다."); return; }
     setLoading(true); setError("");
     try {
-      await signInWithEmailAndPassword(auth, staffId, staffPw);
-    } catch (e) {
+      const { collection, query, where, getDocs, doc, setDoc } = await import("firebase/firestore");
+      const adminQ = query(collection(db, "admins"), where("id","==",id.trim()));
+      const adminSnap = await getDocs(adminQ);
+      if(!adminSnap.empty){ setError("이미 사용 중인 아이디입니다."); setLoading(false); return; }
+      const companyId = "c_" + Math.random().toString(36).slice(2,9);
+      const adminId   = "a_" + Math.random().toString(36).slice(2,9);
+      await setDoc(doc(db, "companies", companyId), {
+        name: companyName.trim(), companyId,
+        createdAt: new Date().toISOString(),
+      });
+      await setDoc(doc(db, "admins", adminId), {
+        id: id.trim(), pw,
+        name: id.trim(), companyId,
+        role: "최고관리자", team: "관리팀",
+        createdAt: new Date().toISOString(),
+      });
+      const user = {uid:adminId, id:id.trim(), name:id.trim(), companyId,
+        companyName:companyName.trim(), role:"최고관리자", team:"관리팀"};
+      try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
+      onLogin(user);
+    } catch(e) {
       console.error(e);
-      setError("이메일 또는 비밀번호가 올바르지 않습니다.");
+      setError("가입 중 오류가 발생했습니다.");
+    } finally {
       setLoading(false);
     }
   };
 
   return (
     <div className="flex-1 flex flex-col bg-white min-h-screen">
+      {/* 브랜딩 */}
       <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
         <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
           style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🧹</div>
-        <h1 className="text-3xl font-extrabold text-gray-900 mb-2">클린메니저</h1>
-        <p className="text-sm text-gray-400">현장 관리 앱</p>
+        <h1 className="text-3xl font-extrabold text-gray-900 mb-2">크린매니저</h1>
+        <p className="text-sm text-gray-400 font-medium">청소업체 관리 솔루션</p>
       </div>
+
       <div className="px-6 pb-12 flex flex-col gap-3">
-        <div className="flex bg-gray-100 rounded-2xl p-1 gap-1 mb-1">
-          {[["google","👑 업체 등록 / 관리자"],["staff","👤 직원"]].map(([k,l])=>(
-            <button key={k} onClick={()=>{setTab(k);setError("");}}
-              className={"flex-1 py-2.5 rounded-xl text-sm font-bold transition-all " +
-                (tab===k?"bg-white shadow text-gray-900":"text-gray-400")}>
-              {l}
-            </button>
-          ))}
-        </div>
-        {tab==="google" && (
-          <div className="flex flex-col gap-3">
-            <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100">
-              <p className="text-sm font-bold text-blue-600 mb-1">최고관리자 / 신규 가입</p>
-              <p className="text-xs text-gray-500 leading-relaxed">Google 계정으로 로그인하여 업체를 등록하거나 관리자 계정으로 접속합니다.</p>
-            </div>
-            <button onClick={handleGoogle} disabled={loading}
-              className="w-full py-4 rounded-2xl border border-gray-200 bg-white text-gray-700 text-sm font-bold flex items-center justify-center gap-3 shadow-sm"
-              style={{opacity:loading?0.7:1}}>
-              {loading
-                ? <div className="w-5 h-5 rounded-full border-2 border-gray-200 border-t-blue-500" style={{animation:"spin .7s linear infinite"}}/>
-                : <svg width="20" height="20" viewBox="0 0 48 48">
-                    <path fill="#FFC107" d="M43.6 20H24v8h11.3C33.6 33.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.7 1.1 7.8 2.9l5.7-5.7C33.9 6.5 29.2 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20c11 0 20-8.9 20-20 0-1.3-.1-2.7-.4-4z"/>
-                    <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.5 19 12 24 12c3 0 5.7 1.1 7.8 2.9l5.7-5.7C33.9 6.5 29.2 4 24 4 16.3 4 9.7 8.4 6.3 14.7z"/>
-                    <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.3 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.3 16.3 44 24 44z"/>
-                    <path fill="#1976D2" d="M43.6 20H24v8h11.3c-.9 2.7-2.7 4.9-5.1 6.4l6.2 5.2C40.5 36 44 30.4 44 24c0-1.3-.1-2.7-.4-4z"/>
-                  </svg>
-              }
-              {loading?"로그인 중...":"Google 계정으로 로그인"}
-            </button>
-          </div>
-        )}
-        {tab==="staff" && (
-          <div className="flex flex-col gap-3">
-            <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100">
-              <p className="text-sm font-bold text-gray-700 mb-1">직원 로그인</p>
-              <p className="text-xs text-gray-400 leading-relaxed">관리자에게 받은 이메일/비밀번호로 로그인하세요.</p>
-            </div>
+
+        {/* 로그인 */}
+        {mode==="login" && (
+          <>
             <div className="relative">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
-              <input type="email" placeholder="이메일" value={staffId} onChange={e=>{setStaffId(e.target.value);setError("");}}
+              <input placeholder="아이디" value={id}
+                onChange={e=>{setId(e.target.value);setError("");}}
                 className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (error?"border-red-300":staffId?"border-blue-400":"border-gray-200")}/>
+                  (id?"border-blue-400":"border-gray-200")}/>
             </div>
             <div className="relative">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
-              <input type={showPw?"text":"password"} placeholder="비밀번호" value={staffPw}
-                onChange={e=>{setStaffPw(e.target.value);setError("");}}
-                onKeyDown={e=>e.key==="Enter"&&handleStaff()}
+              <input type={showPw?"text":"password"} placeholder="비밀번호" value={pw}
+                onChange={e=>{setPw(e.target.value);setError("");}}
+                onKeyDown={e=>e.key==="Enter"&&handleLogin()}
                 className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (error?"border-red-300":staffPw?"border-blue-400":"border-gray-200")}/>
+                  (pw?"border-blue-400":"border-gray-200")}/>
               <button onClick={()=>setShowPw(p=>!p)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-base border-none bg-transparent cursor-pointer">
+                className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">
                 {showPw?"🙈":"👁️"}
               </button>
             </div>
-            {error && (
-              <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">
-                ⚠️ {error}
-              </div>
-            )}
-            <button onClick={handleStaff} disabled={loading}
+            {error && <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
+            <button onClick={handleLogin} disabled={loading}
               className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
-              style={{background:staffId&&staffPw?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",opacity:loading?0.7:1}}>
+              style={{background:id&&pw?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",opacity:loading?0.7:1}}>
               {loading?"로그인 중...":"로그인"}
             </button>
-          </div>
+            <p className="text-sm text-gray-400 text-center mt-1">
+              처음 사용하시나요?{" "}
+              <button onClick={()=>{setMode("register");setError("");}}
+                className="text-blue-500 font-bold border-none bg-transparent cursor-pointer text-sm">
+                회원가입
+              </button>
+            </p>
+          </>
+        )}
+
+        {/* 회원가입 */}
+        {mode==="register" && (
+          <>
+            <button onClick={()=>{setMode("login");setError("");}}
+              className="flex items-center gap-1 border-none bg-transparent cursor-pointer text-sm text-gray-500 font-semibold mb-1 p-0">
+              ‹ 로그인으로 돌아가기
+            </button>
+            <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 mb-1">
+              <p className="text-sm font-bold text-blue-600 mb-1">🏢 업체 대표 계정 만들기</p>
+              <p className="text-xs text-gray-500 leading-relaxed">직원 계정은 가입 후 직원 관리 메뉴에서 추가할 수 있어요.</p>
+            </div>
+
+            {/* 로고 + 회사명 */}
+            <div className="flex items-center gap-3">
+              <label className="cursor-pointer shrink-0">
+                <div className="w-14 h-14 rounded-2xl overflow-hidden flex items-center justify-center"
+                  style={{background:logoPreview?"transparent":"#f3f4f6",
+                    border:`2px dashed ${logoPreview?"#1a56db":"#d1d5db"}`}}>
+                  {logoPreview
+                    ? <img src={logoPreview} className="w-full h-full object-cover"/>
+                    : <div className="text-center">
+                        <div className="text-xl">📷</div>
+                        <div className="text-gray-400" style={{fontSize:9}}>로고</div>
+                      </div>
+                  }
+                </div>
+                <input type="file" accept="image/*"
+                  onChange={e=>{const f=e.target.files[0];if(f)setLogoPreview(URL.createObjectURL(f));}}
+                  className="hidden"/>
+              </label>
+              <input placeholder="회사명" value={companyName}
+                onChange={e=>{setCompanyName(e.target.value);setError("");}}
+                className={"flex-1 min-w-0 py-3.5 px-4 rounded-2xl text-sm outline-none bg-gray-50 border " +
+                  (companyName?"border-blue-400":"border-gray-200")}/>
+            </div>
+
+            <div className="h-px bg-gray-100"/>
+
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
+              <input placeholder="아이디" value={id}
+                onChange={e=>{setId(e.target.value);setError("");}}
+                className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
+                  (id?"border-blue-400":"border-gray-200")}/>
+            </div>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+              <input type={showPw?"text":"password"} placeholder="비밀번호 (4자 이상)" value={pw}
+                onChange={e=>{setPw(e.target.value);setError("");}}
+                className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
+                  (pw?"border-blue-400":"border-gray-200")}/>
+              <button onClick={()=>setShowPw(p=>!p)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">
+                {showPw?"🙈":"👁️"}
+              </button>
+            </div>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+              <input type={showPw?"text":"password"} placeholder="비밀번호 확인" value={pw2}
+                onChange={e=>{setPw2(e.target.value);setError("");}}
+                className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
+                  (pw2?(pw===pw2?"border-green-400":"border-red-400"):"border-gray-200")}/>
+              {pw2 && <span className="absolute right-4 top-1/2 -translate-y-1/2 text-base">{pw===pw2?"✅":"❌"}</span>}
+            </div>
+            {error && <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
+            <button onClick={handleRegister} disabled={loading}
+              className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
+              style={{background:id&&pw&&pw2&&companyName?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",
+                opacity:loading?0.7:1}}>
+              {loading?"가입 중...":"가입하기"}
+            </button>
+            <p className="text-xs text-gray-300 text-center mt-1 leading-relaxed">
+              가입 후 직원 계정은 직원 관리 메뉴에서 추가할 수 있어요.
+            </p>
+          </>
         )}
       </div>
-    </div>
-  );
-}
-
-// ── 신규 가입 화면 ───────────────────────────────────────────────
-function RegisterScreen({ user, onComplete }) {
-  const [companyName, setCompanyName] = useState("");
-  const [logoUrl, setLogoUrl] = useState("");
-  const [loading, setLoading] = useState(false);
-  
-  const handleLogoUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setLogoUrl(reader.result);
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleRegister = async () => {
-    if (!companyName.trim()) return alert("회사명을 입력해주세요.");
-    setLoading(true);
-    try {
-      const companyId = "c_" + Date.now().toString(36);
-      
-      // 회사 정보 생성
-      await setDoc(doc(db, "companies", companyId), {
-        name: companyName,
-        createdAt: serverTimestamp(),
-        ownerUid: user.uid
-      });
-      
-      // 관리자 계정 정보 생성
-      const adminData = {
-        email: user.email,
-        name: user.displayName || "최고관리자",
-        companyId: companyId,
-        role: "최고관리자",
-        team: "관리팀",
-        createdAt: serverTimestamp()
-      };
-      await setDoc(doc(db, "admins", user.uid), adminData);
-      
-      // 유저 정보에 company 이름도 담아서 onComplete
-      onComplete({ uid: user.uid, ...adminData, companyName, companyLogoUrl: logoUrl });
-    } catch (e) {
-      console.error(e);
-      alert("가입 중 오류가 발생했습니다.");
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="flex-1 flex flex-col bg-white min-h-screen items-center justify-center px-8">
-      <label className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl overflow-hidden cursor-pointer bg-gray-100 border-2 border-dashed border-gray-300 hover:border-blue-500 transition-colors"
-        style={{background: logoUrl ? "#fff" : "linear-gradient(135deg,#1a56db,#2563eb)"}}>
-        {logoUrl ? <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" /> : "🏢"}
-        <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
-      </label>
-      <p className="text-xs text-gray-400 -mt-4 mb-4 text-center">로고 이미지를 선택하세요 (선택)</p>
-      <h1 className="text-2xl font-extrabold text-gray-900 mb-2">회사 등록</h1>
-      <p className="text-sm text-gray-500 mb-8 text-center">환영합니다!<br/>앱을 사용할 회사(업체) 이름을 입력해주세요.</p>
-      
-      <input value={companyName} onChange={e=>setCompanyName(e.target.value)}
-        placeholder="회사명 (예: 클린메니저)"
-        className="w-full py-4 px-5 rounded-2xl bg-gray-50 border border-gray-200 text-base font-bold outline-none focus:border-blue-500 mb-4" />
-      
-      <button onClick={handleRegister} disabled={loading || !companyName.trim()}
-        className="w-full py-4 rounded-2xl text-white font-bold transition-opacity"
-        style={{background:companyName.trim()?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb", opacity: loading ? 0.7 : 1}}>
-        {loading ? "등록 중..." : "가입 완료"}
-      </button>
-    </div>
-  );
-}
-
-function AppInner() {
-  const { currentScreen } = useC();
-  return (
-    <div className="h-screen flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none">
-      <style>{ANIM_CSS}</style>
-      <TopHeader/>
-      {currentScreen === "calendar" && (
-        <>
-          <CalendarView/>
-          <FloatingButtons/>
-        </>
-      )}
-      {currentScreen === "employees"    && <EmployeeListScreen/>}
-      {currentScreen === "team_schedule"&& <TeamScheduleScreen/>}
-      {currentScreen === "dashboard"    && <DashboardScreen/>}
-      {currentScreen === "notice"       && <NoticeScreen/>}
-      {currentScreen === "activity_log" && <ActivityLogScreen/>}
-      {currentScreen === "links"        && <ExternalLinksScreen/>}
-      {currentScreen === "report_history"&& <ReportHistoryScreen/>}
-      {currentScreen === "import_calendar" && <ImportCalendarScreen/>}
-      <SideDrawer/>
-      <DetailSheet/>
-      <EventModal/>
-      <SearchModal/>
-      <EmployeeFormModal/>
-      <TeamManagementModal/>
-      <CompanySettingsModal/>
     </div>
   );
 }
