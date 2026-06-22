@@ -4038,6 +4038,64 @@ function ExternalLinksScreen() {
   const onDragOver=(e,id)=>{e.preventDefault();dragTo.current=id;setDragOverId(id);};
   const onDragEnd=()=>{reorder(dragFrom.current,dragTo.current);dragFrom.current=null;dragTo.current=null;setDraggingId(null);setDragOverId(null);};
 
+  // 카테고리 관리 화면
+  if(catModal) {
+    const moveCat = (idx, dir) => {
+      setCustomCats(p => {
+        const a = [...p], ni = idx + dir;
+        if(ni < 0 || ni >= a.length) return p;
+        [a[idx], a[ni]] = [a[ni], a[idx]]; return a;
+      });
+    };
+    return (
+      <div className="flex-1 flex flex-col bg-white min-h-screen">
+        <div className="flex items-center gap-3 px-5 pt-5 pb-4 border-b border-gray-100">
+          <button onClick={()=>{setCatModal(false);setNewCatName("");setEditCatIdx(null);}}
+            className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+            <ChevronLeft size={24} className="text-gray-700"/>
+          </button>
+          <h2 className="text-xl font-bold text-gray-900 flex-1">카테고리 관리</h2>
+        </div>
+        <div className="px-5 py-4 flex flex-col gap-2">
+          <p className="text-xs text-gray-400 mb-2">순서 변경, 추가/수정/삭제할 수 있어요.</p>
+          {customCats.map((cat, idx) => (
+            <div key={idx} className="flex items-center gap-2 bg-gray-50 rounded-2xl px-4 py-3">
+              <div className="flex flex-col gap-0.5 shrink-0 mr-1">
+                <button onClick={() => moveCat(idx, -1)}
+                  className="border-none bg-transparent cursor-pointer leading-none text-sm"
+                  style={{color: idx===0?"#d1d5db":"#6b7280"}}>▲</button>
+                <button onClick={() => moveCat(idx, 1)}
+                  className="border-none bg-transparent cursor-pointer leading-none text-sm"
+                  style={{color: idx===customCats.length-1?"#d1d5db":"#6b7280"}}>▼</button>
+              </div>
+              <span className="flex-1 text-sm font-bold text-gray-800">{cat}</span>
+              <button onClick={() => {setEditCatIdx(idx); setNewCatName(cat);}}
+                className="text-xs font-bold text-blue-500 border-none bg-transparent cursor-pointer px-2">수정</button>
+              <button onClick={() => deleteCat(idx)}
+                className="text-xs font-bold text-red-400 border-none bg-transparent cursor-pointer px-2">삭제</button>
+            </div>
+          ))}
+          <div className="h-px bg-gray-100 my-2"/>
+          <div className="flex gap-2">
+            <input placeholder={editCatIdx!==null?"카테고리 이름 수정":"새 카테고리 이름"}
+              value={newCatName} onChange={e=>setNewCatName(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&addCat()}
+              className="flex-1 px-4 py-3 rounded-2xl text-sm outline-none bg-gray-50 border border-gray-200"/>
+            <button onClick={addCat}
+              className="px-5 py-3 rounded-2xl text-white text-sm font-bold border-none cursor-pointer"
+              style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
+              {editCatIdx!==null?"수정":"추가"}
+            </button>
+          </div>
+          {editCatIdx!==null && (
+            <button onClick={()=>{setEditCatIdx(null);setNewCatName("");}}
+              className="text-sm text-gray-400 text-center border-none bg-transparent cursor-pointer">취소</button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
       {/* 헤더 */}
@@ -4049,6 +4107,13 @@ function ExternalLinksScreen() {
             </button>
             <div>
               <h2 className="text-xl font-bold text-gray-900">외부 링크</h2>
+              <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                자주 쓰는 링크 모음
+                <button onClick={()=>setCatModal(true)}
+                  className="ml-2 text-xs font-bold text-blue-500 border-none bg-transparent cursor-pointer">
+                  카테고리 관리
+                </button>
+              </p>
               <p className="text-xs text-gray-400 mt-0.5">자주 쓰는 링크 모음</p>
             </div>
           </div>
