@@ -20,7 +20,7 @@ import {
 
 import { auth, provider, db, secondaryAuth } from "./firebase";
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
-import { collection, doc, setDoc, getDoc, getDocs, onSnapshot, query, orderBy, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { collection, doc, setDoc, getDoc, getDocs, updateDoc, onSnapshot, query, where, orderBy, deleteDoc, serverTimestamp } from "firebase/firestore";
 
 // ── 캘린더 목록 ───────────────────────────────────────────────
 const CALS = [];
@@ -2773,7 +2773,6 @@ function LoginScreen({ onLogin }) {
     if(!id.trim()){ setError("아이디 또는 전화번호를 입력하세요."); return; }
     setLoading(true); setError("");
     try {
-      const { collection, query, where, getDocs, getDoc, doc } = await import("firebase/firestore");
       const isPhone = /^0\d{9,10}$/.test(id.trim().replace(/-/g,""));
 
       if(isPhone) {
@@ -2823,7 +2822,6 @@ function LoginScreen({ onLogin }) {
     if(pw.length<4){ setError("비밀번호는 4자 이상이어야 합니다."); return; }
     setLoading(true); setError("");
     try {
-      const { doc, updateDoc } = await import("firebase/firestore");
       await updateDoc(doc(db,"staffs",pendingUser.uid), { pw });
       const user = {...pendingUser, pw};
       try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
@@ -2841,7 +2839,6 @@ function LoginScreen({ onLogin }) {
     if(pw.length<4){ setError("비밀번호는 4자 이상이어야 합니다."); return; }
     setLoading(true); setError("");
     try {
-      const { collection, query, where, getDocs, doc, setDoc } = await import("firebase/firestore");
       const adminQ = query(collection(db,"admins"), where("id","==",id.trim()));
       const adminSnap = await getDocs(adminQ);
       if(!adminSnap.empty){ setError("이미 사용 중인 아이디입니다."); setLoading(false); return; }
@@ -4449,7 +4446,6 @@ function CompanySettingsModal() {
       await window.alert("저장되었습니다. 새로고침 시 적용됩니다!");
       // Firestore 문서 업데이트 로직은 실제 DB 연동 필요하므로 여기서는 시뮬레이션
       // (기존 currentUser가 최상단 App 컴포넌트에서 관리되므로, 여기서는 새로고침 권장)
-      const { doc, updateDoc } = await import("firebase/firestore");
       await updateDoc(doc(db, "companies", currentUser.companyId), {
         name: companyName,
         logoUrl: logoUrl
