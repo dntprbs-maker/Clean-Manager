@@ -3,7 +3,7 @@ import { getFirestore } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey:            "AIzaSyAz-Gt2CC0_6nOMA2UhR28sqbHKobVLDzc",
+  apiKey:            "AIzaSyAz-Gt2CC0_6nOMA2UhRZBsqbHKobVLDzc",
   authDomain:        "clean-manager-60bc9.firebaseapp.com",
   projectId:         "clean-manager-60bc9",
   storageBucket:     "clean-manager-60bc9.firebasestorage.app",
@@ -12,7 +12,6 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-// 직원 추가 시 메인 세션 유지를 위한 보조 앱 인스턴스
 const secondaryApp = initializeApp(firebaseConfig, "Secondary");
 
 export const db            = getFirestore(app);
