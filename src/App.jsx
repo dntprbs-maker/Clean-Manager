@@ -3163,20 +3163,36 @@ function TeamScheduleScreen() {
 
 // ── 대시보드 화면 ───────────────────────────────────────────────
 // 카드 선택형 대시보드
+// 대시보드 카드 카테고리
+const DASH_CARD_GROUPS = [
+  { id:"schedule", label:"📅 일정 관련" },
+  { id:"sales",    label:"💰 영업 관련" },
+  { id:"ops",      label:"🚨 운영 관련" },
+];
+
 const ALL_DASH_CARDS = [
-  {id:"today_count",   label:"오늘 일정",      icon:"📅", color:"#1a56db", bg:"#eff6ff", roles:["최고관리자","관리팀장","현장팀장"],
+  // ── 일정 관련 ──
+  {id:"today_count",    group:"schedule", label:"오늘 일정",      icon:"📅", color:"#1a56db", bg:"#eff6ff", roles:["최고관리자","관리팀장","현장팀장"],
     getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const t=fmt(new Date());return{value:f.filter(e=>e.start<=t&&(!e.end||e.end>=t)).length,unit:"건"};}},
-  {id:"tomorrow_count",label:"내일 일정",      icon:"🗓️", color:"#7c3aed", bg:"#f5f3ff", roles:["최고관리자","관리팀장","현장팀장"],
+  {id:"tomorrow_count", group:"schedule", label:"내일 일정",      icon:"🗓️", color:"#7c3aed", bg:"#f5f3ff", roles:["최고관리자","관리팀장","현장팀장"],
     getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const t=fmt(new Date(Date.now()+86400000));return{value:f.filter(e=>e.start<=t&&(!e.end||e.end>=t)).length,unit:"건"};}},
-  {id:"month_count",   label:"이번달 총",      icon:"📈", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","관리팀장","영업팀장","현장팀장"],
+  {id:"month_count",    group:"schedule", label:"이번달 총",      icon:"📈", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","관리팀장","영업팀장","현장팀장"],
     getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const m=fmt(new Date()).slice(0,7);return{value:f.filter(e=>e.start.startsWith(m)).length,unit:"건"};}},
-  {id:"complaint",     label:"미처리 컴플레인", icon:"🚨", color:"#ef4444", bg:"#fef2f2", roles:["최고관리자","관리팀장"],
-    getValue:()=>({value:0,unit:"건"})},
-  {id:"month_revenue", label:"이번달 매출",    icon:"💰", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","영업팀장"],
+  {id:"today_done",     group:"schedule", label:"오늘 완료 현장", icon:"✅", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","관리팀장","현장팀장"],
+    getValue:(_,__,___,reports)=>{const t=fmt(new Date());return{value:(reports||[]).filter(r=>r.date===t&&r.status==="완료").length,unit:"건"};}},
+  // ── 영업 관련 ──
+  {id:"month_revenue",  group:"sales",    label:"이번달 매출",    icon:"💰", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","영업팀장"],
     getValue:(ev)=>{const m=fmt(new Date()).slice(0,7);return{value:Math.round(ev.filter(e=>e.start.startsWith(m)).reduce((s,e)=>s+(e.price||0),0)/10000),unit:"만원"};}},
-  {id:"week_contract", label:"이번주 계약",    icon:"📋", color:"#7c3aed", bg:"#f5f3ff", roles:["최고관리자","영업팀장"],
+  {id:"week_contract",  group:"sales",    label:"이번주 계약",    icon:"📋", color:"#7c3aed", bg:"#f5f3ff", roles:["최고관리자","영업팀장"],
     getValue:(ev)=>{const d=new Date(),day=d.getDay(),ws=fmt(new Date(new Date().setDate(d.getDate()-day+(day===0?-6:1))));return{value:ev.filter(e=>e.start>=ws&&e.start<=fmt(new Date())).length,unit:"건"};}},
-  {id:"team_count",    label:"운영 팀 수",     icon:"🧹", color:"#ea580c", bg:"#fff7ed", roles:["최고관리자","관리팀장"],
+  {id:"today_revenue",  group:"sales",    label:"오늘 매출",      icon:"💵", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","영업팀장"],
+    getValue:(ev)=>{const t=fmt(new Date());return{value:Math.round(ev.filter(e=>e.start===t).reduce((s,e)=>s+(e.price||0),0)/10000),unit:"만원"};}},
+  // ── 운영 관련 ──
+  {id:"complaint",      group:"ops",      label:"미처리 컴플레인",icon:"🚨", color:"#ef4444", bg:"#fef2f2", roles:["최고관리자","관리팀장"],
+    getValue:()=>({value:0,unit:"건"})},
+  {id:"special",        group:"ops",      label:"미확인 특이사항",icon:"⚠️", color:"#f59e0b", bg:"#fffbeb", roles:["최고관리자","관리팀장"],
+    getValue:()=>({value:0,unit:"건"})},
+  {id:"team_count",     group:"ops",      label:"운영 팀 수",     icon:"🧹", color:"#ea580c", bg:"#fff7ed", roles:["최고관리자","관리팀장"],
     getValue:(_,__,cals)=>({value:cals?.length||0,unit:"팀"})},
 ];
 
@@ -3226,26 +3242,37 @@ function DashboardScreen() {
         {/* 편집 모드 */}
         {editing ? (
           <>
-            <p className="text-sm text-gray-500 leading-relaxed">보여줄 카드를 선택하세요.</p>
-            {available.map(card=>{
-              const checked = selectedIds.includes(card.id);
-              const {value,unit} = card.getValue(visibleEvents, currentUser, cals);
+            <p className="text-sm text-gray-500 leading-relaxed mb-2">보여줄 카드를 선택하세요.</p>
+            {DASH_CARD_GROUPS.map(group=>{
+              const groupCards = available.filter(c=>c.group===group.id);
+              if(groupCards.length===0) return null;
               return (
-                <button key={card.id} onClick={()=>toggle(card.id)}
-                  className="flex items-center gap-4 p-4 rounded-2xl text-left transition-all"
-                  style={{background:"white", border:`2px solid ${checked?card.color:"#f3f4f6"}`,
-                    boxShadow:checked?`0 0 0 3px ${card.color}22`:"none"}}>
-                  <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center"
-                    style={{border:`2px solid ${checked?card.color:"#d1d5db"}`, background:checked?card.color:"white"}}>
-                    {checked && <span style={{color:"white",fontSize:12,fontWeight:800}}>✓</span>}
+                <div key={group.id} className="mb-4">
+                  <p className="text-xs font-bold text-gray-400 mb-2 px-1">{group.label}</p>
+                  <div className="flex flex-col gap-2">
+                    {groupCards.map(card=>{
+                      const checked = selectedIds.includes(card.id);
+                      const {value,unit} = card.getValue(visibleEvents, currentUser, cals, []);
+                      return (
+                        <button key={card.id} onClick={()=>toggle(card.id)}
+                          className="flex items-center gap-4 p-4 rounded-2xl text-left transition-all"
+                          style={{background:"white", border:`2px solid ${checked?card.color:"#f3f4f6"}`,
+                            boxShadow:checked?`0 0 0 3px ${card.color}22`:"none"}}>
+                          <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center"
+                            style={{border:`2px solid ${checked?card.color:"#d1d5db"}`, background:checked?card.color:"white"}}>
+                            {checked && <span style={{color:"white",fontSize:12,fontWeight:800}}>✓</span>}
+                          </div>
+                          <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-xl shrink-0"
+                            style={{background:card.bg}}>{card.icon}</div>
+                          <div className="flex-1">
+                            <p className="text-sm font-bold text-gray-900">{card.label}</p>
+                            <p className="text-xs text-gray-400 mt-0.5">현재 <span className="font-bold" style={{color:card.color}}>{value}{unit}</span></p>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
-                  <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-xl shrink-0"
-                    style={{background:card.bg}}>{card.icon}</div>
-                  <div className="flex-1">
-                    <p className="text-sm font-bold text-gray-900">{card.label}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">현재 <span className="font-bold" style={{color:card.color}}>{value}{unit}</span></p>
-                  </div>
-                </button>
+                </div>
               );
             })}
           </>
