@@ -1,5 +1,5 @@
 /**
- * 클린메니저 — 네이버 캘린더 완전 재현
+ * 클린메니져 — 네이버 캘린더 완전 재현
  * 3단계 스와이프 모드:
  *   MODE 0 (full)  → 월간 그리드 전체 (이벤트 텍스트 바 표시)
  *   MODE 1 (half)  → 상단 도트 그리드 + 하단 시간표 시트
@@ -23,20 +23,7 @@ import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuth
 import { collection, doc, setDoc, getDoc, getDocs, onSnapshot, query, orderBy, deleteDoc, serverTimestamp } from "firebase/firestore";
 
 // ── 캘린더 목록 ───────────────────────────────────────────────
-const CALS = [
-  { id:"friends", label:"더친구들",    color:"#4285F4", checked:true  },
-  { id:"lh",      label:"전일 LH",     color:"#0F9D58", checked:true  },
-  { id:"elec",    label:"전국동시",    color:"#EA4335", checked:true  },
-  { id:"clean0",  label:"청소 0팀",    color:"#F4B400", checked:true  },
-  { id:"import",  label:"중요한약속",  color:"#EA4335", checked:true  },
-  { id:"manus",   label:"마누스",      color:"#4285F4", checked:true  },
-  { id:"outer",   label:"청소 외주",   color:"#0F9D58", checked:true  },
-  { id:"cancel",  label:"취소,변경",   color:"#607D8B", checked:true  },
-  { id:"cr",      label:"클린메니저춘계",color:"#4285F4", checked:true  },
-  { id:"uwork",   label:"우용준 일",   color:"#EA4335", checked:true  },
-  { id:"popmart", label:"팝마트",      color:"#9C27B0", checked:true  },
-  { id:"nabi",    label:"나비엠알",    color:"#9C27B0", checked:true  },
-];
+const CALS = [];
 
 // ── 직원 관리 ───────────────────────────────────────────────
 const INIT_TEAMS = ["사장", "관리팀", "영업팀", "입주청소팀", "정기청소팀", "에어컨청소팀"];
@@ -208,81 +195,7 @@ let _i=1; const uid=()=>`e${_i++}`;
 
 // ── 샘플 데이터 (사진 실제 내용 기반) ────────────────────────
 const makeSamples = () => {
-  const y=2026, m="06";
-  return [
-    // 1일 주
-    {id:uid(),title:"더친구들",calId:"friends",start:`${y}-${m}-01`,end:`${y}-${m}-01`,allDay:true, startTime:"",endTime:"",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"전일 LH",calId:"lh",     start:`${y}-${m}-01`,end:`${y}-${m}-04`,allDay:true, startTime:"",endTime:"",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"오후 마포",calId:"clean0",start:`${y}-${m}-01`,end:`${y}-${m}-01`,allDay:false,startTime:"13:00",endTime:"15:00",place:"마포",description:"",repeat:"none"},
-    {id:uid(),title:"정기청소",calId:"regular",start:`${y}-${m}-01`,end:`${y}-${m}-01`,allDay:false,startTime:"15:00",endTime:"17:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"리버뷰 정기청소",calId:"review",start:`${y}-${m}-01`,end:`${y}-${m}-01`,allDay:false,startTime:"17:00",endTime:"19:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"SK 쉴더",calId:"sk",    start:`${y}-${m}-01`,end:`${y}-${m}-01`,allDay:false,startTime:"09:00",endTime:"10:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"전국동시",calId:"elec",  start:`${y}-${m}-03`,end:`${y}-${m}-03`,allDay:true, startTime:"",endTime:"",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"오후 리버",calId:"clean0",start:`${y}-${m}-03`,end:`${y}-${m}-03`,allDay:false,startTime:"14:00",endTime:"16:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"플랜아이",calId:"import",start:`${y}-${m}-02`,end:`${y}-${m}-02`,allDay:false,startTime:"11:00",endTime:"12:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"오후 광명",calId:"clean0",start:`${y}-${m}-02`,end:`${y}-${m}-02`,allDay:false,startTime:"14:00",endTime:"16:00",place:"광명",description:"",repeat:"none"},
-    {id:uid(),title:"숨고 고수",calId:"manus",start:`${y}-${m}-02`,end:`${y}-${m}-02`,allDay:false,startTime:"10:00",endTime:"11:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"현충일",calId:"import",  start:`${y}-${m}-06`,end:`${y}-${m}-06`,allDay:true, startTime:"",endTime:"",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"망종",calId:"import",    start:`${y}-${m}-06`,end:`${y}-${m}-06`,allDay:true, startTime:"",endTime:"",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"리버뷰 입",calId:"review",start:`${y}-${m}-06`,end:`${y}-${m}-06`,allDay:false,startTime:"17:00",endTime:"19:00",place:"",description:"",repeat:"none"},
-    // 7~13일
-    {id:uid(),title:"에어몰 쇼",calId:"outer",  start:`${y}-${m}-07`,end:`${y}-${m}-07`,allDay:false,startTime:"09:00",endTime:"10:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"전월 수입",calId:"manus",  start:`${y}-${m}-07`,end:`${y}-${m}-07`,allDay:false,startTime:"10:00",endTime:"11:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"리버뷰 정기",calId:"review",start:`${y}-${m}-07`,end:`${y}-${m}-07`,allDay:false,startTime:"17:00",endTime:"19:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"이발",calId:"import",      start:`${y}-${m}-07`,end:`${y}-${m}-07`,allDay:false,startTime:"14:00",endTime:"15:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"Netlify",calId:"netlify",  start:`${y}-${m}-08`,end:`${y}-${m}-08`,allDay:true, startTime:"",endTime:"",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"러버블 작",calId:"clean0", start:`${y}-${m}-08`,end:`${y}-${m}-08`,allDay:false,startTime:"10:00",endTime:"12:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"리버뷰 감",calId:"review", start:`${y}-${m}-08`,end:`${y}-${m}-08`,allDay:false,startTime:"13:00",endTime:"15:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"소포우편",calId:"manus",   start:`${y}-${m}-09`,end:`${y}-${m}-09`,allDay:false,startTime:"10:00",endTime:"11:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"소공동 정",calId:"regular",start:`${y}-${m}-09`,end:`${y}-${m}-09`,allDay:false,startTime:"17:00",endTime:"19:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"전일 LH",calId:"lh",       start:`${y}-${m}-11`,end:`${y}-${m}-11`,allDay:true, startTime:"",endTime:"",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"숨고 고수",calId:"manus",  start:`${y}-${m}-11`,end:`${y}-${m}-11`,allDay:false,startTime:"10:00",endTime:"11:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"소공동 정",calId:"regular",start:`${y}-${m}-11`,end:`${y}-${m}-11`,allDay:false,startTime:"17:00",endTime:"19:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"리버뷰 정",calId:"review", start:`${y}-${m}-11`,end:`${y}-${m}-11`,allDay:false,startTime:"19:00",endTime:"21:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"팝마트 홍",calId:"popmart",start:`${y}-${m}-11`,end:`${y}-${m}-11`,allDay:false,startTime:"20:00",endTime:"22:00",place:"홍대",description:"",repeat:"none"},
-    {id:uid(),title:"청소기 2",calId:"clean0",  start:`${y}-${m}-12`,end:`${y}-${m}-12`,allDay:false,startTime:"10:00",endTime:"12:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"전일 천호",calId:"lh",      start:`${y}-${m}-12`,end:`${y}-${m}-12`,allDay:true, startTime:"",endTime:"",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"이유래 김",calId:"import",  start:`${y}-${m}-12`,end:`${y}-${m}-12`,allDay:false,startTime:"14:00",endTime:"15:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"윈드클린",calId:"outer",    start:`${y}-${m}-12`,end:`${y}-${m}-12`,allDay:false,startTime:"09:00",endTime:"11:00",place:"",description:"",repeat:"none"},
-    // 14~20
-    {id:uid(),title:"전일 삼성",calId:"lh",      start:`${y}-${m}-13`,end:`${y}-${m}-14`,allDay:true, startTime:"",endTime:"",place:"삼성",description:"",repeat:"none"},
-    {id:uid(),title:"러브에이",calId:"import",   start:`${y}-${m}-13`,end:`${y}-${m}-13`,allDay:true, startTime:"",endTime:"",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"오전 은평",calId:"clean0",  start:`${y}-${m}-13`,end:`${y}-${m}-13`,allDay:false,startTime:"09:00",endTime:"11:00",place:"은평",description:"",repeat:"none"},
-    {id:uid(),title:"전일 조민",calId:"lh",      start:`${y}-${m}-13`,end:`${y}-${m}-13`,allDay:true, startTime:"",endTime:"",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"청소119",calId:"clean0",    start:`${y}-${m}-14`,end:`${y}-${m}-14`,allDay:false,startTime:"09:00",endTime:"11:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"클린메니저 춘계 아유회",calId:"cr",start:`${y}-${m}-16`,end:`${y}-${m}-17`,allDay:true,startTime:"",endTime:"",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"소공동 정",calId:"regular", start:`${y}-${m}-16`,end:`${y}-${m}-16`,allDay:false,startTime:"17:00",endTime:"19:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"오후 중화",calId:"clean0",  start:`${y}-${m}-17`,end:`${y}-${m}-17`,allDay:false,startTime:"14:00",endTime:"16:00",place:"중화",description:"",repeat:"none"},
-    {id:uid(),title:"인천 서구",calId:"clean0",  start:`${y}-${m}-17`,end:`${y}-${m}-17`,allDay:false,startTime:"10:00",endTime:"12:00",place:"인천",description:"",repeat:"none"},
-    {id:uid(),title:"강서 에스",calId:"clean0",  start:`${y}-${m}-17`,end:`${y}-${m}-17`,allDay:false,startTime:"16:00",endTime:"18:00",place:"강서",description:"",repeat:"none"},
-    // 오늘 (15일) 일정
-    {id:uid(),title:"오전 망우 (브로클린)(2명)",calId:"clean0",start:`${y}-${m}-15`,end:`${y}-${m}-15`,allDay:false,startTime:"09:00",endTime:"11:00",place:"망우",description:"",repeat:"none"},
-    {id:uid(),title:"LH 청구",calId:"import",    start:`${y}-${m}-15`,end:`${y}-${m}-15`,allDay:false,startTime:"12:00",endTime:"13:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"오후 회기동 원룸(윈드클린)",calId:"clean0",start:`${y}-${m}-15`,end:`${y}-${m}-15`,allDay:false,startTime:"14:00",endTime:"15:00",place:"회기동",description:"",repeat:"none"},
-    {id:uid(),title:"직원급여",calId:"import",   start:`${y}-${m}-15`,end:`${y}-${m}-15`,allDay:false,startTime:"17:00",endTime:"18:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"사무실 지출",calId:"manus", start:`${y}-${m}-15`,end:`${y}-${m}-15`,allDay:false,startTime:"18:00",endTime:"19:00",place:"",description:"",repeat:"none"},
-    // 18~25
-    {id:uid(),title:"소공동 정",calId:"regular", start:`${y}-${m}-18`,end:`${y}-${m}-18`,allDay:false,startTime:"17:00",endTime:"19:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"리버뷰 정",calId:"review",  start:`${y}-${m}-18`,end:`${y}-${m}-18`,allDay:false,startTime:"19:00",endTime:"21:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"팝마트 홍",calId:"popmart", start:`${y}-${m}-18`,end:`${y}-${m}-18`,allDay:false,startTime:"20:00",endTime:"22:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"단오",calId:"import",       start:`${y}-${m}-19`,end:`${y}-${m}-19`,allDay:true, startTime:"",endTime:"",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"윈드클린",calId:"outer",    start:`${y}-${m}-19`,end:`${y}-${m}-19`,allDay:false,startTime:"09:00",endTime:"11:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"종일 부천",calId:"lh",      start:`${y}-${m}-20`,end:`${y}-${m}-20`,allDay:true, startTime:"",endTime:"",place:"부천",description:"",repeat:"none"},
-    {id:uid(),title:"나비엠알",calId:"nabi",     start:`${y}-${m}-20`,end:`${y}-${m}-20`,allDay:false,startTime:"14:00",endTime:"16:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"팝마트코",calId:"popmart",  start:`${y}-${m}-20`,end:`${y}-${m}-20`,allDay:false,startTime:"16:00",endTime:"18:00",place:"",description:"",repeat:"none"},
-    // 25일 (사진 3 기반)
-    {id:uid(),title:"조절 인천 만수동 서근범 소장님",calId:"clean0",start:`${y}-${m}-25`,end:`${y}-${m}-25`,allDay:false,startTime:"09:00",endTime:"10:00",place:"인천 만수동",description:"",repeat:"none"},
-    {id:uid(),title:"통일로컨테이너 창고 임대",calId:"import",start:`${y}-${m}-25`,end:`${y}-${m}-25`,allDay:false,startTime:"10:00",endTime:"11:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"소공동 정기 청소",calId:"regular",start:`${y}-${m}-25`,end:`${y}-${m}-25`,allDay:false,startTime:"19:00",endTime:"20:00",place:"소공동",description:"",repeat:"none"},
-    {id:uid(),title:"리버뷰 정기청소",calId:"review",start:`${y}-${m}-25`,end:`${y}-${m}-25`,allDay:false,startTime:"20:00",endTime:"21:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"리버뷰 퇴실청소 청구",calId:"import",start:`${y}-${m}-25`,end:`${y}-${m}-25`,allDay:false,startTime:"22:00",endTime:"23:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"팝마트 홍대매장청소",calId:"popmart",start:`${y}-${m}-25`,end:`${y}-${m}-25`,allDay:false,startTime:"22:00",endTime:"23:00",place:"홍대",description:"",repeat:"none"},
-    // 29~30
-    {id:uid(),title:"우용준 휴가",calId:"uwork", start:`${y}-${m}-29`,end:`${y}-07-03`,allDay:true, startTime:"",endTime:"",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"소공동 정",calId:"regular", start:`${y}-${m}-30`,end:`${y}-${m}-30`,allDay:false,startTime:"17:00",endTime:"19:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"정기청소",calId:"regular",  start:`${y}-${m}-30`,end:`${y}-${m}-30`,allDay:false,startTime:"19:00",endTime:"21:00",place:"",description:"",repeat:"none"},
-    {id:uid(),title:"팝마트 홍",calId:"popmart", start:`${y}-${m}-30`,end:`${y}-${m}-30`,allDay:false,startTime:"20:00",endTime:"22:00",place:"",description:"",repeat:"none"},
-  ];
+  return [];
 };
 
 // ── localStorage 저장/불러오기 헬퍼 ─────────────────────────────
@@ -393,7 +306,8 @@ function Provider({ children, loginUser, onLogout }) {
   const [empModal, setEmpModal] = useState({ open: false, editId: null });
   const [companySettingsModal, setCompanySettingsModal] = useState(false);
 
-  const currentUser = loginUser;
+  const [currentUser, setCurrentUser] = useState(loginUser);
+  useEffect(() => { setCurrentUser(loginUser); }, [loginUser]);
 
   const openModal   = useCallback((date=null,editId=null)=>setModal({open:true,date,editId}),[]);
   const closeModal  = useCallback(()=>setModal({open:false,date:null,editId:null}),[]);
@@ -401,7 +315,7 @@ function Provider({ children, loginUser, onLogout }) {
   const checkedIds     = useMemo(()=>new Set(cals.filter(c=>c.checked).map(c=>c.id)),[cals]);
   const visibleEvents  = useMemo(()=>{
     let evs = events.filter(e=>checkedIds.has(e.calId));
-    if (!["사장", "관리팀", "영업팀"].includes(currentUser.team) && currentUser.role !== "최고관리자") {
+    if (!["관리팀", "영업팀"].includes(currentUser.team) && currentUser.role !== "최고관리자") {
       const myTeamKeyword = currentUser.team.replace("팀", ""); 
       evs = evs.filter(e => {
         const cal = CALS.find(c=>c.id===e.calId);
@@ -426,7 +340,7 @@ function Provider({ children, loginUser, onLogout }) {
       sheetMode,setSheetMode,
       teams,setTeams,teamModal,setTeamModal,
       users,setUsers,
-      currentUser,setCurrentUser: ()=>{},onLogout,
+      currentUser,setCurrentUser,loginUser,onLogout,
       currentScreen,setCurrentScreen,
       empModal,setEmpModal,
       companySettingsModal,setCompanySettingsModal,
@@ -1383,7 +1297,7 @@ function BottomTabBar() {
 
 // ── 사이드 드로어 (스와이프 열기/닫기 지원) ───────────────────────
 function SideDrawer() {
-  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, setCurrentScreen, users } = useC();
+  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices } = useC();
 
   // 드래그 상태
   const startX   = useRef(null);
@@ -1502,8 +1416,8 @@ function SideDrawer() {
               <div><p className="font-bold text-base">{currentUser.name}</p><p className="text-xs text-gray-500">{currentUser.team} · {currentUser.role}</p></div>
             </div>
             {/* 테스트용 계정 전환 (디버깅) */}
-            <select className="text-[10px] border border-gray-200 text-gray-500 p-1 rounded outline-none" onChange={e => setCurrentUser(users.find(u=>u.id===e.target.value))} value={currentUser.id}>
-              {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.team})</option>)}
+            <select className="text-[10px] border border-gray-200 text-gray-500 p-1 rounded outline-none" onChange={e => setCurrentUser([loginUser, ...users].find(u=>u.id===e.target.value))} value={currentUser.id}>
+              {[loginUser, ...users.filter(u=>u.id!==loginUser.id)].map(u => <option key={u.id} value={u.id}>{u.name} ({u.team})</option>)}
             </select>
           </div>
           <div className="flex mt-3">
@@ -1515,7 +1429,7 @@ function SideDrawer() {
 
         {/* 전체 메뉴 */}
         <div className="flex-1 overflow-y-auto bg-gray-50 py-3">
-          {(currentUser.team === "사장" || currentUser.team === "관리팀") && (
+          {(currentUser.team === "관리팀" || currentUser.team === "사장") && (
             <button 
               onClick={() => { setCurrentScreen("employees"); setDrawer(false); }}
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
@@ -2292,7 +2206,7 @@ function FieldReportScreen({ ev, onClose }) {
         <div className="flex-1 flex flex-col overflow-hidden" style={{background:"#030712"}}>
           <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-800">
             <div className="w-2 h-2 rounded-full bg-green-400" style={{animation:"pulse 1.5s infinite"}}/>
-            <span className="text-xs text-gray-400 font-medium">크린드림 AI 관리실 · 실시간 처리 중</span>
+            <span className="text-xs text-gray-400 font-medium">클린메니져 AI 관리실 · 실시간 처리 중</span>
           </div>
           <div ref={logBodyRef} className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
             {logs.map((log, i) => (
@@ -2873,14 +2787,14 @@ function LoginScreen({ onLogin }) {
         // 첫 로그인 (비밀번호 없음)
         if(!staffData.pw) {
           const compDoc = await getDoc(doc(db,"companies",staffData.companyId));
-          setPendingUser({...staffData, uid:staffId, companyName:compDoc.exists()?compDoc.data().name:"크린드림"});
+          setPendingUser({...staffData, uid:staffId, companyName:compDoc.exists()?compDoc.data().name:"클린메니져"});
           setMode("setPw"); setLoading(false); return;
         }
         // 비밀번호 확인
         if(!pw.trim()){ setError("비밀번호를 입력하세요."); setLoading(false); return; }
         if(staffData.pw !== pw){ setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
         const compDoc = await getDoc(doc(db,"companies",staffData.companyId));
-        const user = {...staffData, uid:staffId, companyName:compDoc.exists()?compDoc.data().name:"크린드림"};
+        const user = {...staffData, uid:staffId, companyName:compDoc.exists()?compDoc.data().name:"클린메니져"};
         try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
         onLogin(user); return;
       } else {
@@ -2892,7 +2806,7 @@ function LoginScreen({ onLogin }) {
         const adminData = adminSnap.docs[0].data();
         if(adminData.pw !== pw){ setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
         const compDoc = await getDoc(doc(db,"companies",adminData.companyId));
-        const user = {...adminData, uid:adminSnap.docs[0].id, companyName:compDoc.exists()?compDoc.data().name:"크린드림", role:"최고관리자"};
+        const user = {...adminData, uid:adminSnap.docs[0].id, companyName:compDoc.exists()?compDoc.data().name:"클린메니져", role:"최고관리자"};
         try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
         onLogin(user); return;
       }
@@ -2934,8 +2848,8 @@ function LoginScreen({ onLogin }) {
       const companyId = "c_" + Math.random().toString(36).slice(2,9);
       const adminId   = "a_" + Math.random().toString(36).slice(2,9);
       await setDoc(doc(db,"companies",companyId), { name:companyName.trim(), companyId, createdAt:new Date().toISOString() });
-      await setDoc(doc(db,"admins",adminId), { id:id.trim(), pw, name:id.trim(), companyId, role:"최고관리자", team:"관리팀", createdAt:new Date().toISOString() });
-      const user = {uid:adminId, id:id.trim(), name:id.trim(), companyId, companyName:companyName.trim(), role:"최고관리자", team:"관리팀"};
+      await setDoc(doc(db,"admins",adminId), { id:id.trim(), pw, name:id.trim(), companyId, role:"최고관리자", team:"사장", createdAt:new Date().toISOString() });
+      const user = {uid:adminId, id:id.trim(), name:id.trim(), companyId, companyName:companyName.trim(), role:"최고관리자", team:"사장"};
       try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
       onLogin(user);
     } catch(e) {
@@ -2995,7 +2909,8 @@ function LoginScreen({ onLogin }) {
         <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
           <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
             style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🧹</div>
-          <h1 className="text-3xl font-extrabold text-gray-900 mb-2">크린매니저</h1>
+          <h1 className="text-3xl font-extrabold text-gray-900 mb-1">클린메니져</h1>
+          <p className="text-base font-bold text-blue-600 mb-2 tracking-widest uppercase">clean-manager</p>
           <p className="text-sm text-gray-400 font-medium">청소업체 관리 솔루션</p>
         </div>
         <div className="px-6 pb-12 flex flex-col gap-3">
@@ -3055,7 +2970,8 @@ function LoginScreen({ onLogin }) {
       <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
         <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
           style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🧹</div>
-        <h1 className="text-3xl font-extrabold text-gray-900 mb-2">크린매니저</h1>
+        <h1 className="text-3xl font-extrabold text-gray-900 mb-1">클린메니져</h1>
+        <p className="text-base font-bold text-blue-600 mb-2 tracking-widest uppercase">clean-manager</p>
         <p className="text-sm text-gray-400 font-medium">청소업체 관리 솔루션</p>
       </div>
       <div className="px-6 pb-12 flex flex-col gap-3">
@@ -3096,6 +3012,36 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+// ── 앱 내부 뼈대 (로그인 후 메인 화면 라우팅) ───────────────────────────────────────────────
+function AppInner() {
+  const { currentScreen } = useC();
+  return (
+    <div className="h-screen flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none">
+      <style>{ANIM_CSS}</style>
+      <TopHeader/>
+      {currentScreen === "calendar" && (
+        <>
+          <CalendarView/>
+          <FloatingButtons/>
+        </>
+      )}
+      {currentScreen === "employees"     && <EmployeeListScreen/>}
+      {currentScreen === "team_schedule" && <TeamScheduleScreen/>}
+      {currentScreen === "dashboard"     && <DashboardScreen/>}
+      {currentScreen === "notice"        && <NoticeScreen/>}
+      {currentScreen === "activity_log"  && <ActivityLogScreen/>}
+      {currentScreen === "links"         && <ExternalLinksScreen/>}
+      {currentScreen === "report_history"&& <ReportHistoryScreen/>}
+      <SideDrawer/>
+      <DetailSheet/>
+      <EventModal/>
+      <SearchModal/>
+      <EmployeeFormModal/>
+      <TeamManagementModal/>
+    </div>
+  );
+}
+
 export default function App() {
   const [authState, setAuthState] = useState("loading"); // "loading" | "login" | "register" | "app"
   const [loginUser, setLoginUser] = useState(null);
@@ -3119,7 +3065,7 @@ export default function App() {
           if (adminDoc.exists()) {
             const data = adminDoc.data();
             const compDoc = await getDoc(doc(db, "companies", data.companyId));
-            const companyName = compDoc.exists() ? compDoc.data().name : "클린메니저";
+            const companyName = compDoc.exists() ? compDoc.data().name : "클린메니져";
             const companyLogoUrl = compDoc.exists() ? compDoc.data().logoUrl : null;
             
             setLoginUser({ uid: user.uid, email: user.email, name: data.name || user.displayName, companyId: data.companyId, companyName, companyLogoUrl, role: data.role || "최고관리자", team: data.team || "관리팀" });
@@ -3132,7 +3078,7 @@ export default function App() {
           if (staffDoc.exists()) {
             const data = staffDoc.data();
             const compDoc = await getDoc(doc(db, "companies", data.companyId));
-            const companyName = compDoc.exists() ? compDoc.data().name : "클린메니저";
+            const companyName = compDoc.exists() ? compDoc.data().name : "클린메니져";
             const companyLogoUrl = compDoc.exists() ? compDoc.data().logoUrl : null;
             
             setLoginUser({ uid: user.uid, email: user.email, name: data.name, companyId: data.companyId, companyName, companyLogoUrl, role: data.role, team: data.team });
@@ -3160,7 +3106,11 @@ export default function App() {
     return <div className="flex-1 flex min-h-screen items-center justify-center bg-gray-50">로딩 중...</div>;
   }
   if (authState === "login") {
-    return <LoginScreen />;
+    return <LoginScreen onLogin={(user) => {
+      setLoginUser(user);
+      if (user.role) setAuthState("app");
+      else setAuthState("register");
+    }} />;
   }
   if (authState === "register") {
     return <RegisterScreen user={loginUser} onComplete={(user) => {
@@ -3176,49 +3126,92 @@ export default function App() {
   );
 }
 
-// ── 직원 관리 메인 화면 ───────────────────────────────────────────────
+// ── 직원 관리 메인 화면 (아코디언 방식) ───────────────────────────────────────────────
 function EmployeeListScreen() {
   const { users, setEmpModal, teams, setTeamModal } = useC();
-  const [filter, setFilter] = useState("전체");
+  // 처음엔 모든 팀이 접힌 상태
+  const [openTeams, setOpenTeams] = useState(() => new Set());
 
-  const filtered = filter === "전체" ? users : users.filter(u => u.team === filter);
+  // 팀 토글
+  const toggle = (team) => {
+    setOpenTeams(prev => {
+      const next = new Set(prev);
+      next.has(team) ? next.delete(team) : next.add(team);
+      return next;
+    });
+  };
+
+  // 팀 목록 (팀 없는 직원은 "기타" 그룹, 멤버 없는 팀 숨김)
+  const allTeams = teams.length ? teams.filter(t => t !== "사장") : ["기타"];
+  const grouped = allTeams.map(team => ({
+    team,
+    members: users.filter(u => u.team === team),
+  })).filter(g => g.members.length > 0); // 멤버 없는 팀 제외
+  const noTeam = users.filter(u => !teams.includes(u.team));
+  if (noTeam.length) grouped.push({ team: "기타", members: noTeam });
 
   return (
     <div className="flex-1 bg-gray-50 flex flex-col relative overflow-hidden">
-      {/* 상단 버튼 영역 (헤더) */}
+      {/* 헤더 */}
       <div className="bg-white px-4 py-3 border-b border-gray-100 flex items-center justify-between z-10 shrink-0">
         <h2 className="text-xl font-bold text-gray-900">직원 관리</h2>
-        <button onClick={() => setTeamModal(true)} className="px-3 py-1.5 text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">
-          팀 관리
-        </button>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400">총 {users.length}명</span>
+          <button onClick={() => setTeamModal(true)} className="px-3 py-1.5 text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">
+            팀 관리
+          </button>
+        </div>
       </div>
 
-      {/* 필터 영역: 스크롤 안 되고 상단에 고정 */}
-      <div className="px-4 py-3 bg-white border-b border-gray-100 flex gap-2 overflow-x-auto whitespace-nowrap hide-scrollbar shrink-0 z-10 shadow-sm relative">
-        <button onClick={()=>setFilter("전체")} className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-colors ${filter==="전체" ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-500 border-gray-200"}`}>전체</button>
-        {teams.map(t => (
-          <button key={t} onClick={()=>setFilter(t)} className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-colors ${filter===t ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-500 border-gray-200"}`}>{t}</button>
-        ))}
-      </div>
-      
-      {/* 리스트 영역: 여기만 스크롤 */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-24">
-        {filtered.map(u => (
-          <div key={u.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="font-bold text-gray-900 text-base">{u.name}</span>
-                <span className="text-[11px] px-2 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">{u.role}</span>
+      {/* 아코디언 리스트 */}
+      <div className="flex-1 overflow-y-auto pb-24">
+        {grouped.map(({ team, members }) => (
+          <div key={team} className="border-b border-gray-100 last:border-b-0">
+            {/* 팀 헤더 (클릭하면 토글) */}
+            <button
+              onClick={() => toggle(team)}
+              className="w-full flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50 active:bg-gray-100 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-gray-800 text-sm">{team}</span>
+                <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{members.length}명</span>
               </div>
-              <div className="text-sm text-gray-500 mb-0.5">{u.team}</div>
-              <div className="text-xs text-gray-400">📞 {u.phone}</div>
-            </div>
-            <button onClick={() => setEmpModal({open:true, editId:u.id})} className="p-2 text-gray-400 hover:text-gray-800 hover:bg-gray-50 rounded-full">
-              <Edit3 size={18}/>
+              {/* 화살표 아이콘 */}
+              <span
+                className="text-gray-400 text-xs transition-transform duration-200"
+                style={{ transform: openTeams.has(team) ? "rotate(180deg)" : "rotate(0deg)" }}
+              >
+                ▼
+              </span>
             </button>
+
+            {/* 팀 멤버 (펼쳐질 때만 표시) */}
+            {openTeams.has(team) && (
+              <div className="bg-gray-50 px-4 pb-2 space-y-2">
+                {members.length === 0 ? (
+                  <p className="text-xs text-gray-400 py-3 text-center">등록된 직원이 없습니다.</p>
+                ) : (
+                  members.map(u => (
+                    <div key={u.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="font-bold text-gray-900 text-sm">{u.name}</span>
+                          <span className="text-[11px] px-2 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">{u.role}</span>
+                        </div>
+                        <div className="text-xs text-gray-400">📞 {u.phone}</div>
+                      </div>
+                      <button onClick={() => setEmpModal({open:true, editId:u.id})} className="p-2 text-gray-400 hover:text-gray-800 hover:bg-gray-100 rounded-full">
+                        <Edit3 size={16}/>
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
+
       {/* FAB 추가 버튼 */}
       <button onClick={() => setEmpModal({open:true, editId:null})} className="absolute bottom-6 right-6 w-14 h-14 bg-gray-900 rounded-full flex items-center justify-center shadow-lg shadow-gray-400/50 hover:bg-black transition-transform active:scale-95 z-10">
         <Plus size={28} className="text-white" />
@@ -3230,7 +3223,7 @@ function EmployeeListScreen() {
 // ── 직원 등록/수정 모달 ───────────────────────────────────────────────
 function EmployeeFormModal() {
   const { empModal, setEmpModal, users, teams, companyId } = useC();
-  const [form, setForm] = useState({ name: "", phone: "", team: "입주청소팀", role: "팀원", email: "", password: "" });
+  const [form, setForm] = useState({ name: "", phone: "", team: "", role: "" });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -3239,7 +3232,7 @@ function EmployeeFormModal() {
         const u = users.find(x => x.id === empModal.editId);
         if (u) setForm({ ...u, password: "" });
       } else {
-        setForm({ name: "", phone: "", team: "입주청소팀", role: "팀원", email: "", password: "" });
+        setForm({ name: "", phone: "", team: "", role: "" });
       }
     }
   }, [empModal.open, empModal.editId, users]);
@@ -3249,33 +3242,32 @@ function EmployeeFormModal() {
   const close = () => { if(!loading) setEmpModal({open:false, editId:null}); };
   
   const save = async () => {
-    if (!form.name.trim() || !form.email.trim()) return alert("이름과 이메일은 필수입니다.");
-    if (!empModal.editId && !form.password) return alert("초기 비밀번호를 입력하세요.");
+    if (!form.name.trim() || !form.phone.trim()) return alert("이름과 연락처는 필수입니다.");
+    if (!form.team || !form.role) return alert("소속 팀과 직급을 선택해주세요.");
     setLoading(true);
     
     try {
       if (empModal.editId) {
         // 기존 유저 수정
-        const { password, ...updateData } = form;
+        const { password, email, ...updateData } = form;
         await setDoc(doc(db, "companies", companyId, "users", empModal.editId), updateData, { merge: true });
         await setDoc(doc(db, "staffs", empModal.editId), { ...updateData, companyId }, { merge: true });
       } else {
-        // 새 유저 생성 (secondaryAuth 이용, 메인 세션 유지)
-        const { user: newAuthUser } = await createUserWithEmailAndPassword(secondaryAuth, form.email, form.password);
-        const uid = newAuthUser.uid;
+        // 새 유저 생성 (Firestore 직접 저장 - 이메일 인증 사용안함)
+        const newDocRef = doc(collection(db, "staffs"));
+        const uid = newDocRef.id;
         
         const userData = {
           name: form.name,
           phone: form.phone,
           team: form.team,
           role: form.role,
-          email: form.email,
+          pw: "", // 로그인 시 본인이 직접 설정하도록 비워둠
           createdAt: serverTimestamp()
         };
         
         await setDoc(doc(db, "companies", companyId, "users", uid), userData);
         await setDoc(doc(db, "staffs", uid), { ...userData, companyId });
-        await signOut(secondaryAuth); // secondaryAuth 세션 정리
       }
       close();
     } catch (e) {
@@ -3311,34 +3303,36 @@ function EmployeeFormModal() {
         </div>
         <div className="p-5 space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1">이메일 (아이디)</label>
-            <input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} disabled={!!empModal.editId} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800 disabled:bg-gray-100" placeholder="staff@company.com" />
-          </div>
-          {!empModal.editId && (
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 mb-1">초기 비밀번호</label>
-              <input type="text" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800" placeholder="임시 비밀번호 입력" />
-            </div>
-          )}
-          <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1">이름</label>
             <input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800" placeholder="홍길동" />
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1">연락처</label>
-            <input value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800" placeholder="010-0000-0000" />
+            <input value={form.phone}
+              onChange={e => {
+                // 숫자만 추출 후 하이픈 자동 삽입
+                const digits = e.target.value.replace(/\D/g, "").slice(0, 11);
+                const formatted = digits.length <= 3 ? digits
+                  : digits.length <= 7 ? `${digits.slice(0,3)}-${digits.slice(3)}`
+                  : `${digits.slice(0,3)}-${digits.slice(3,7)}-${digits.slice(7)}`;
+                setForm({...form, phone: formatted});
+              }}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800" placeholder="010-0000-0000" />
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1">소속 팀</label>
             <select value={form.team} onChange={e=>setForm({...form,team:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800">
+              <option value="" disabled>소속 팀을 선택하세요</option>
+              <option value="미정">미정</option>
               {teams.length ? teams.map(t => (
                 <option key={t.id || t.name || t} value={t.name || t}>{t.name || t}</option>
-              )) : <option value="입주청소팀">입주청소팀</option>}
+              )) : null}
             </select>
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1">직급</label>
             <select value={form.role} onChange={e=>setForm({...form,role:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800">
+              <option value="" disabled>직급을 선택하세요</option>
               {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
           </div>
@@ -3361,19 +3355,28 @@ function EmployeeFormModal() {
 // ── 팀 관리 모달 ───────────────────────────────────────────────
 function TeamManagementModal() {
   const { teamModal, setTeamModal, teams, setTeams, users, setUsers } = useC();
-  const [newTeam, setNewTeam] = useState("");
+  const [newTeam, setNewTeam]   = useState("");
+  const [editIdx, setEditIdx]   = useState(null);
+  const [editName, setEditName] = useState("");
+  const [dragIdx, setDragIdx]   = useState(null);
+  const [overIdx, setOverIdx]   = useState(null);
+  // 모든 useRef는 early return 전에 선언해야 함 (React 훅 규칙)
+  const longPressTimer = useRef(null);
+  const touchDragIdx   = useRef(null);
+  const touchStartY    = useRef(null);
+  const itemRefs       = useRef([]);
 
   if (!teamModal) return null;
 
-  const close = () => setTeamModal(false);
+  const close = () => { setTeamModal(false); setEditIdx(null); };
+
+  const visibleTeams = teams.filter(t => t !== "사장");
 
   const handleAdd = () => {
-    if (!newTeam.trim()) return;
-    if (teams.includes(newTeam.trim())) {
-      alert("이미 존재하는 팀입니다.");
-      return;
-    }
-    setTeams([...teams, newTeam.trim()]);
+    const name = newTeam.trim();
+    if (!name) return;
+    if (teams.includes(name)) { alert("이미 존재하는 팀입니다."); return; }
+    setTeams([...teams, name]);
     setNewTeam("");
   };
 
@@ -3382,6 +3385,92 @@ function TeamManagementModal() {
       setUsers(users.map(u => u.team === targetTeam ? { ...u, team: "미정" } : u));
       setTeams(teams.filter(t => t !== targetTeam));
     }
+  };
+
+  const handleRename = (oldName) => {
+    const name = editName.trim();
+    if (!name || name === oldName) { setEditIdx(null); return; }
+    if (teams.includes(name)) { alert("이미 존재하는 팀입니다."); return; }
+    setTeams(teams.map(t => t === oldName ? name : t));
+    setUsers(users.map(u => u.team === oldName ? { ...u, team: name } : u));
+    setEditIdx(null);
+  };
+
+  const move = (team, dir) => {
+    const vIdx = visibleTeams.indexOf(team);
+    const targetVIdx = vIdx + dir;
+    if (targetVIdx < 0 || targetVIdx >= visibleTeams.length) return;
+    
+    const targetTeam = visibleTeams[targetVIdx];
+    const idx = teams.indexOf(team);
+    const targetIdx = teams.indexOf(targetTeam);
+    
+    const newTeams = [...teams];
+    [newTeams[idx], newTeams[targetIdx]] = [newTeams[targetIdx], newTeams[idx]];
+    setTeams(newTeams);
+  };
+
+  // ── 드래그앤드롭 (HTML5) ──
+  const onDragStart = (e, i) => {
+    setDragIdx(i);
+    e.dataTransfer.effectAllowed = "move";
+  };
+  const onDragOver = (e, i) => {
+    e.preventDefault();
+    setOverIdx(i);
+  };
+  const onDrop = (e, i) => {
+    e.preventDefault();
+    if (dragIdx === null || dragIdx === i) { setDragIdx(null); setOverIdx(null); return; }
+    // visibleTeams 인덱스 → teams 인덱스로 변환 후 swap
+    const fromTeam = visibleTeams[dragIdx];
+    const toTeam   = visibleTeams[i];
+    const fromIdx  = teams.indexOf(fromTeam);
+    const toIdx    = teams.indexOf(toTeam);
+    const newTeams = [...teams];
+    newTeams.splice(fromIdx, 1);
+    newTeams.splice(toIdx, 0, fromTeam);
+    setTeams(newTeams);
+    setDragIdx(null); setOverIdx(null);
+  };
+  const onDragEnd = () => { setDragIdx(null); setOverIdx(null); };
+
+  // ── 터치 롱프레스 드래그 (모바일) ──
+
+  const onTouchStart = (e, i) => {
+    touchStartY.current = e.touches[0].clientY;
+    longPressTimer.current = setTimeout(() => {
+      touchDragIdx.current = i;
+      // 진동 피드백 (지원하는 기기)
+      if (navigator.vibrate) navigator.vibrate(40);
+    }, 400); // 400ms 롱프레스
+  };
+  const onTouchMove = (e) => {
+    if (touchDragIdx.current === null) { clearTimeout(longPressTimer.current); return; }
+    // e.preventDefault() 는 React passive 이벤트에서 사용 불가 → 제거
+    const y = e.touches[0].clientY;
+    // 현재 Y 위치에 해당하는 아이템 인덱스 계산
+    const idx = itemRefs.current.findIndex(el => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      return y >= rect.top && y <= rect.bottom;
+    });
+    if (idx !== -1) setOverIdx(idx);
+  };
+  const onTouchEnd = () => {
+    clearTimeout(longPressTimer.current);
+    if (touchDragIdx.current !== null && overIdx !== null && touchDragIdx.current !== overIdx) {
+      const fromTeam = visibleTeams[touchDragIdx.current];
+      const toTeam   = visibleTeams[overIdx];
+      const fromIdx  = teams.indexOf(fromTeam);
+      const toIdx    = teams.indexOf(toTeam);
+      const newTeams = [...teams];
+      newTeams.splice(fromIdx, 1);
+      newTeams.splice(toIdx, 0, fromTeam);
+      setTeams(newTeams);
+    }
+    touchDragIdx.current = null;
+    setDragIdx(null); setOverIdx(null);
   };
 
   return (
@@ -3395,12 +3484,14 @@ function TeamManagementModal() {
           </button>
         </div>
 
+        {/* 새 팀 추가 */}
         <div className="p-5 flex gap-2 border-b border-gray-50">
-          <input 
-            type="text" 
-            placeholder="새 팀 이름 (예: 특수청소팀)" 
-            value={newTeam} 
+          <input
+            type="text"
+            placeholder="새 팀 이름 (예: 특수청소팀)"
+            value={newTeam}
             onChange={e => setNewTeam(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleAdd()}
             className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-sm outline-none focus:border-blue-500 transition-colors"
           />
           <button onClick={handleAdd} className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors">
@@ -3408,16 +3499,75 @@ function TeamManagementModal() {
           </button>
         </div>
 
+        {/* 팀 목록 */}
         <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-3 bg-gray-50">
-          {teams.map(t => (
-            <div key={t} className="flex items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-              <span className="font-bold text-gray-800">{t}</span>
-              <button onClick={() => handleDelete(t)} className="text-gray-400 hover:text-red-500 transition-colors p-2 -mr-2 rounded-full hover:bg-red-50">
-                <Trash2 size={18}/>
+          <p className="text-xs text-gray-400 text-center">≡ 핸들을 길게 누르면 드래그로 순서 변경</p>
+          {visibleTeams.map((t, i) => (
+            <div
+              key={t}
+              ref={el => itemRefs.current[i] = el}
+              draggable
+              onDragStart={e => onDragStart(e, i)}
+              onDragOver={e => onDragOver(e, i)}
+              onDrop={e => onDrop(e, i)}
+              onDragEnd={onDragEnd}
+              className={`flex items-center gap-2 bg-white p-3 rounded-xl shadow-sm border transition-all
+                ${overIdx === i && dragIdx !== i ? "border-blue-400 bg-blue-50 scale-[1.02]" : "border-gray-100"}
+                ${dragIdx === i ? "opacity-40" : "opacity-100"}
+              `}
+            >
+              {/* 드래그 핸들 (▲▼ 클릭 + 롱프레스 드래그) */}
+              <div
+                className="flex flex-col items-center cursor-grab active:cursor-grabbing px-1 select-none touch-none"
+                onTouchStart={e => onTouchStart(e, i)}
+                onTouchMove={onTouchMove}
+                onTouchEnd={onTouchEnd}
+              >
+                {/* 위 버튼 */}
+                <button
+                  onClick={e => { e.stopPropagation(); move(t, -1); }}
+                  disabled={i === 0}
+                  className="text-gray-300 hover:text-gray-600 disabled:opacity-20 text-[10px] leading-none"
+                >▲</button>
+                {/* 드래그 핸들 아이콘 */}
+                <span className="text-gray-300 text-sm leading-none select-none">≡</span>
+                {/* 아래 버튼 */}
+                <button
+                  onClick={e => { e.stopPropagation(); move(t, 1); }}
+                  disabled={i === visibleTeams.length - 1}
+                  className="text-gray-300 hover:text-gray-600 disabled:opacity-20 text-[10px] leading-none"
+                >▼</button>
+              </div>
+
+              {/* 팀명 */}
+              {editIdx === i ? (
+                <input
+                  autoFocus
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  onKeyDown={e => { if(e.key==="Enter") handleRename(t); if(e.key==="Escape") setEditIdx(null); }}
+                  className="flex-1 border-b-2 border-blue-500 outline-none text-sm font-bold text-gray-800 bg-transparent px-1"
+                />
+              ) : (
+                <span className="flex-1 font-bold text-gray-800 text-sm">{t}</span>
+              )}
+
+              {/* 수정 / 저장 */}
+              {editIdx === i ? (
+                <button onClick={() => handleRename(t)} className="text-xs text-blue-600 font-bold px-2 py-1 hover:bg-blue-50 rounded-lg">저장</button>
+              ) : (
+                <button onClick={() => { setEditIdx(i); setEditName(t); }} className="text-gray-400 hover:text-blue-500 p-1.5 rounded-full hover:bg-blue-50 transition-colors">
+                  <Edit3 size={15}/>
+                </button>
+              )}
+
+              {/* 삭제 */}
+              <button onClick={() => handleDelete(t)} className="text-gray-400 hover:text-red-500 p-1.5 rounded-full hover:bg-red-50 transition-colors">
+                <Trash2 size={15}/>
               </button>
             </div>
           ))}
-          {teams.length === 0 && (
+          {visibleTeams.length === 0 && (
             <div className="py-10 text-center text-gray-400 text-sm">등록된 팀이 없습니다.</div>
           )}
         </div>
@@ -3425,6 +3575,7 @@ function TeamManagementModal() {
     </div>
   );
 }
+
 
 // ── 팀별 일정 화면 ───────────────────────────────────────────────
 function TeamScheduleScreen() {
@@ -3702,7 +3853,7 @@ function NoticeScreen() {
   const [important, setImportant] = useState(false);
   const [readIds, setReadIds]     = useState(()=>JSON.parse(localStorage.getItem("readNotices")||"[]"));
 
-  const isAdmin = currentUser.role === "최고관리자" || currentUser.team === "사장" || currentUser.team === "관리팀";
+  const isAdmin = currentUser.role === "최고관리자" || currentUser.team === "관리팀" || currentUser.team === "사장";
 
   const markRead = (id) => {
     if(readIds.includes(id)) return;
