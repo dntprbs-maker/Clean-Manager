@@ -1447,6 +1447,20 @@ function SideDrawer() {
               <span className="text-sm font-medium text-gray-700 flex-1 text-left">📥 캘린더 가져오기</span>
             </button>
           )}
+
+          {/* 로그아웃 버튼 */}
+          <div className="px-4 pt-2 pb-4 mt-2 border-t border-gray-100">
+            <button
+              onClick={() => {
+                localStorage.removeItem("loginUser");
+                onLogout();
+                setDrawer(false);
+              }}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-red-50 hover:bg-red-100 transition-colors">
+              <span className="text-red-500 text-lg">🚪</span>
+              <span className="text-sm font-bold text-red-500 flex-1 text-left">로그아웃</span>
+            </button>
+          </div>
         </div>
       </div>
     </>
