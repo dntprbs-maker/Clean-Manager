@@ -2331,6 +2331,7 @@ function ImportCalendarScreen() {
   const [step, setStep]                 = useState("upload");
   const [parsedEvents, setParsedEvents] = useState([]);
   const [selectedIds, setSelectedIds]   = useState([]);
+  const [selectedCal, setSelectedCal]   = useState("unassigned"); // 팀 배정
   const [fileName, setFileName]         = useState("");
   const [error, setError]               = useState("");
   const [importing, setImporting]       = useState(false);
@@ -2414,7 +2415,7 @@ function ImportCalendarScreen() {
       addEvent({
         ...ev,
         id: uid(),
-        calId: cals[0]?.id || "clean1",
+        calId: selectedCal,
         end: ev.end || ev.start,
         startTime: ev.startTime || "09:00",
         endTime: ev.endTime || "10:00",
@@ -2460,6 +2461,29 @@ function ImportCalendarScreen() {
           </div>
           <p className="text-xs text-gray-400 ml-10">{fileName}</p>
         </div>
+        {/* 팀 배정 선택 */}
+        <div className="bg-white border-b border-gray-100 px-4 py-3">
+          <p className="text-xs font-bold text-gray-500 mb-2">📌 가져올 팀 선택 (일괄 배정)</p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            <button onClick={()=>setSelectedCal("unassigned")}
+              className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
+              style={{background:selectedCal==="unassigned"?"#111827":"white",
+                color:selectedCal==="unassigned"?"white":"#6b7280",
+                borderColor:selectedCal==="unassigned"?"#111827":"#e5e7eb"}}>
+              미정
+            </button>
+            {cals.map(cal=>(
+              <button key={cal.id} onClick={()=>setSelectedCal(cal.id)}
+                className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
+                style={{background:selectedCal===cal.id?cal.color:"white",
+                  color:selectedCal===cal.id?"white":"#6b7280",
+                  borderColor:selectedCal===cal.id?cal.color:"#e5e7eb"}}>
+                {cal.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="px-4 py-3 flex items-center gap-3 bg-white border-b border-gray-100">
           <button
             onClick={() => setSelectedIds(
