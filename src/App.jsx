@@ -1411,6 +1411,13 @@ function SideDrawer() {
             className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
             <Bell size={20} className="text-orange-500" />
             <span className="text-sm font-medium text-gray-700 flex-1 text-left">팀 공지사항</span>
+            {(() => {
+              const readIds = JSON.parse(localStorage.getItem("readNotices")||"[]");
+              const unread = notices.filter(n=>!readIds.includes(n.id)).length;
+              return unread > 0
+                ? <span className="text-xs font-bold text-white bg-red-500 rounded-full w-5 h-5 flex items-center justify-center shrink-0">{unread}</span>
+                : null;
+            })()}
           </button>
 
           {/* 변경 로그 - 최고관리자, 관리팀장만 */}
@@ -2264,6 +2271,59 @@ function ReportHistoryScreen() {
   );
 }
 
+
+
+// ── 중요 공지 팝업 ───────────────────────────────────────────────
+function NoticePopup() {
+  const { noticePopup, closePopup, setCurrentScreen } = useC();
+  if(!noticePopup) return null;
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:"24px",
+      background:"rgba(0,0,0,.5)"}}>
+      <div style={{background:"white",borderRadius:24,width:"100%",maxWidth:360,
+        boxShadow:"0 20px 60px rgba(0,0,0,.3)",animation:"fadeIn .3s ease"}}>
+        {/* 헤더 */}
+        <div style={{padding:"20px 20px 0",display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:36,height:36,borderRadius:12,background:"#fef2f2",
+            display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>
+            📌
+          </div>
+          <div style={{flex:1}}>
+            <p style={{fontSize:11,fontWeight:700,color:"#ef4444",marginBottom:2}}>중요 공지사항</p>
+            <p style={{fontSize:15,fontWeight:800,color:"#111827",lineHeight:1.3}}>{noticePopup.title}</p>
+          </div>
+        </div>
+        {/* 내용 */}
+        <div style={{padding:"16px 20px",maxHeight:200,overflowY:"auto"}}>
+          <p style={{fontSize:13,color:"#6b7280",lineHeight:1.8,whiteSpace:"pre-wrap"}}>
+            {noticePopup.body || "내용이 없습니다."}
+          </p>
+        </div>
+        {/* 작성자/날짜 */}
+        <div style={{padding:"0 20px 16px",display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#9ca3af"}}>
+          <span style={{fontWeight:700,color:"#6b7280"}}>{noticePopup.author}</span>
+          <span>·</span>
+          <span>{noticePopup.date}</span>
+        </div>
+        {/* 버튼 */}
+        <div style={{padding:"0 16px 16px",display:"flex",gap:8}}>
+          <button onClick={()=>{ closePopup(); setCurrentScreen("notice"); }}
+            style={{flex:1,padding:"12px",borderRadius:14,border:"1.5px solid #f3f4f6",
+              background:"white",fontSize:13,fontWeight:700,color:"#6b7280",cursor:"pointer"}}>
+            공지 전체보기
+          </button>
+          <button onClick={closePopup}
+            style={{flex:1,padding:"12px",borderRadius:14,border:"none",
+              background:"linear-gradient(135deg,#1a56db,#2563eb)",
+              fontSize:13,fontWeight:700,color:"white",cursor:"pointer"}}>
+            확인
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── 캘린더 가져오기 화면 (.ics) ───────────────────────────────────────────────
 function ImportCalendarScreen() {
