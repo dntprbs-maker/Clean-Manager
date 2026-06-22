@@ -658,7 +658,7 @@ function ScheduleList({ selDate, compact=false }) {
       </div>
 
       {/* 이벤트 목록 */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto pb-16">
         {/* 종일 */}
         {allDayEvts.map(ev=>{
           const c=calById(ev.calId);
@@ -1239,6 +1239,61 @@ function DetailSheet() {
             </div>
           )}
         </div>
+    </div>
+  );
+}
+
+
+// ── 하단 탭바 ───────────────────────────────────────────────
+function BottomTabBar() {
+  const { currentScreen, setCurrentScreen, setDrawer, currentUser, notices } = useC();
+
+  const readIds = (() => { try { return JSON.parse(localStorage.getItem("readNotices")||"[]"); } catch{ return []; } })();
+  const unreadCount = notices.filter(n=>!readIds.includes(n.id)).length;
+
+  const tabs = currentUser?.role === "팀원"
+    ? [
+        { icon: "📅", label: "캘린더",   screen: "calendar" },
+        { icon: "🔔", label: "공지",      screen: "notice" },
+        { icon: "🔗", label: "링크",      screen: "links" },
+        { icon: "☰",  label: "더보기",    screen: "drawer" },
+      ]
+    : [
+        { icon: "📅", label: "캘린더",   screen: "calendar" },
+        { icon: "📊", label: "대시보드", screen: "dashboard" },
+        { icon: "🔔", label: "공지",      screen: "notice" },
+        { icon: "☰",  label: "더보기",    screen: "drawer" },
+      ];
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50"
+      style={{maxWidth:430, margin:"0 auto", paddingBottom:"env(safe-area-inset-bottom)"}}>
+      <div className="flex items-center">
+        {tabs.map(tab => {
+          const isActive = tab.screen !== "drawer" && currentScreen === tab.screen;
+          const isDrawer = tab.screen === "drawer";
+          return (
+            <button key={tab.screen}
+              onClick={() => isDrawer ? setDrawer(true) : setCurrentScreen(tab.screen)}
+              className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 relative border-none bg-transparent cursor-pointer">
+              <div className="relative">
+                <span className="text-xl leading-none">{tab.icon}</span>
+                {tab.screen === "notice" && unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 text-xs font-bold text-white bg-red-500 rounded-full w-4 h-4 flex items-center justify-center"
+                    style={{fontSize:9}}>{unreadCount}</span>
+                )}
+              </div>
+              <span className="text-xs font-bold"
+                style={{color: isActive ? "#1a56db" : "#9ca3af"}}>
+                {tab.label}
+              </span>
+              {isActive && (
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-blue-500"/>
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
