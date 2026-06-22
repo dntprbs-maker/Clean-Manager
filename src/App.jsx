@@ -3250,85 +3250,157 @@ function TeamManagementModal() {
 
 // ── 팀별 일정 화면 ───────────────────────────────────────────────
 function TeamScheduleScreen() {
-  const { visibleEvents, setCurrentScreen, teams } = useC();
-  // 팀별 일정 개수 계산
-  const teamStats = {};
-  teams.forEach(t => teamStats[t] = 0);
-  visibleEvents.forEach(e => {
-    const cal = calById(e.calId);
-    teams.forEach(t => {
-      const keyword = t.replace("팀", "");
-      if (cal.label.includes(keyword)) teamStats[t]++;
-    });
-  });
+  const { visibleEvents, setCurrentScreen, cals } = useC();
+  const [selectedCal, setSelectedCal] = useState(null);
+  const [dateOffset, setDateOffset]   = useState(0);
+  const touchStartX = useRef(null);
+
+  const getDate = (offset) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return d.toISOString().slice(0,10);
+  };
+
+  const formatDate = (offset) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    const month = d.getMonth() + 1;
+    const day   = d.getDate();
+    const weekdays = ["일","월","화","수","목","금","토"];
+    const wd = weekdays[d.getDay()];
+    if(offset === 0)  return { main:"오늘",  sub:`${month}/${day} (${wd})` };
+    if(offset === 1)  return { main:"내일",  sub:`${month}/${day} (${wd})` };
+    if(offset === -1) return { main:"어제",  sub:`${month}/${day} (${wd})` };
+    return { main:`${month}/${day}`, sub:`(${wd})` };
+  };
+
+  const dateLabel = getDate(dateOffset);
+  const curr = formatDate(dateOffset);
+  const prev = formatDate(dateOffset - 1);
+  const next = formatDate(dateOffset + 1);
+
+  const onTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
+  const onTouchEnd   = (e) => {
+    if(touchStartX.current === null) return;
+    const diff = touchStartX.current - e.changedTouches[0].clientX;
+    if(Math.abs(diff) > 40) setDateOffset(p => diff > 0 ? p+1 : p-1);
+    touchStartX.current = null;
+  };
+
+  const filtered = visibleEvents.filter(e =>
+    (!selectedCal || e.calId === selectedCal) && e.start === dateLabel
+  );
+
+  const fmtTime = (t) => {
+    if(!t) return "";
+    const [h,m] = t.split(":");
+    const hr = parseInt(h);
+    return `${hr<12?"오전":"오후"} ${hr>12?hr-12:hr}:${m}`;
+  };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col p-5 gap-5 relative">
-      <div className="flex items-center gap-3 mb-2">
-        <button onClick={() => setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
-          <ChevronLeft size={24} className="text-gray-700"/>
-        </button>
-        <h2 className="text-xl font-bold text-gray-900">팀별 일정 현황</h2>
-      </div>
-      <div className="flex flex-col gap-3">
-        {teams.map(team => (
-          <div key={team} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex items-center justify-between hover:border-blue-200 transition-colors cursor-pointer">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center shrink-0">
-                <User size={20} className="text-indigo-600"/>
-              </div>
-              <span className="font-bold text-gray-800">{team}</span>
-            </div>
-            <span className="text-sm font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded-full">{teamStats[team] || 0}건</span>
+    <div className="flex-1 flex flex-col bg-gray-50 min-h-screen">
+      {/* 헤더 */}
+      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-0">
+        <div className="flex items-center gap-3 mb-4">
+          <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+            <ChevronLeft size={24} className="text-gray-700"/>
+          </button>
+          <h2 className="text-xl font-bold text-gray-900 flex-1">팀별 일정</h2>
+        </div>
+
+        {/* 날짜 슬라이더 */}
+        <div
+          onTouchStart={onTouchStart}
+          onTouchEnd={onTouchEnd}
+          className="flex items-center mb-4 select-none">
+          {/* 이전 날짜 */}
+          <button onClick={()=>setDateOffset(p=>p-1)}
+            className="flex-1 py-2 border-none bg-transparent cursor-pointer text-center opacity-40">
+            <div className="text-xs font-semibold text-gray-400">{prev.main}</div>
+            <div className="text-xs text-gray-300">{prev.sub}</div>
+          </button>
+          {/* 현재 날짜 */}
+          <div className="flex-2 py-3 text-center rounded-2xl border"
+            style={{flex:2, background:"#f0fdf4", borderColor:"#86efac"}}>
+            <div className="text-base font-extrabold text-gray-900">{curr.main}</div>
+            <div className="text-xs font-semibold text-green-600">{curr.sub}</div>
           </div>
-        ))}
+          {/* 다음 날짜 */}
+          <button onClick={()=>setDateOffset(p=>p+1)}
+            className="flex-1 py-2 border-none bg-transparent cursor-pointer text-center opacity-40">
+            <div className="text-xs font-semibold text-gray-400">{next.main}</div>
+            <div className="text-xs text-gray-300">{next.sub}</div>
+          </button>
+        </div>
+      </div>
+
+      {/* 팀 카드 필터 4개 한 줄 */}
+      <div className="px-4 py-3 grid gap-2" style={{gridTemplateColumns:"repeat(4,1fr)"}}>
+        {/* 전체 */}
+        <button onClick={()=>setSelectedCal(null)}
+          className="bg-white rounded-2xl py-3 text-center border cursor-pointer transition-all"
+          style={{borderColor:!selectedCal?"#111827":"#f3f4f6",
+            boxShadow:!selectedCal?"0 0 0 3px rgba(0,0,0,.08)":"0 1px 4px rgba(0,0,0,.04)"}}>
+          <div className="text-xs font-bold text-gray-400 mb-1">전체</div>
+          <div className="text-xl font-extrabold leading-none"
+            style={{color:!selectedCal?"#111827":"#d1d5db"}}>
+            {visibleEvents.filter(e=>e.start===dateLabel).length}
+          </div>
+          <div className="text-xs text-gray-400 mt-1">건</div>
+        </button>
+        {/* 팀별 카드 */}
+        {cals.map(cal=>{
+          const cnt = visibleEvents.filter(e=>e.calId===cal.id&&e.start===dateLabel).length;
+          const active = selectedCal===cal.id;
+          return (
+            <button key={cal.id} onClick={()=>setSelectedCal(active?null:cal.id)}
+              className="bg-white rounded-2xl py-3 text-center border cursor-pointer transition-all"
+              style={{borderColor:active?cal.color:"#f3f4f6",
+                boxShadow:active?`0 0 0 3px ${cal.color}22`:"0 1px 4px rgba(0,0,0,.04)"}}>
+              <div className="text-xs font-bold mb-1 overflow-hidden"
+                style={{color:active?cal.color:"#9ca3af",
+                  textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                {cal.label||cal.name}
+              </div>
+              <div className="text-xl font-extrabold leading-none"
+                style={{color:cnt>0?cal.color:"#d1d5db"}}>{cnt}</div>
+              <div className="text-xs text-gray-400 mt-1">건</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 일정 목록 */}
+      <div className="flex-1 overflow-y-auto px-4 pb-16 flex flex-col gap-2">
+        {filtered.length===0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-gray-400 text-sm">
+            {curr.main} 일정이 없습니다
+          </div>
+        ) : filtered.map(ev=>{
+          const cal = cals.find(c=>c.id===ev.calId);
+          return (
+            <div key={ev.id} className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 shadow-sm">
+              <div className="w-1 self-stretch rounded-full shrink-0" style={{background:cal?.color||"#1a56db"}}/>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-gray-900 truncate">{ev.title}</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {ev.allDay?"종일":`${fmtTime(ev.startTime)} ~ ${fmtTime(ev.endTime)}`}
+                  {ev.place?` · ${ev.place}`:""}
+                </p>
+              </div>
+              <div className="text-xs font-bold px-2 py-1 rounded-full shrink-0"
+                style={{background:(cal?.color||"#1a56db")+"22",color:cal?.color||"#1a56db"}}>
+                {cal?.label||cal?.name}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-// ── 대시보드 화면 ───────────────────────────────────────────────
-// 카드 선택형 대시보드
-// 대시보드 카드 카테고리
-const DASH_CARD_GROUPS = [
-  { id:"schedule", label:"📅 일정 관련" },
-  { id:"sales",    label:"💰 영업 관련" },
-  { id:"ops",      label:"🚨 운영 관련" },
-];
-
-const ALL_DASH_CARDS = [
-  // ── 일정 관련 ──
-  {id:"today_count",    group:"schedule", label:"오늘 일정",      icon:"📅", color:"#1a56db", bg:"#eff6ff", roles:["최고관리자","관리팀장","현장팀장"],
-    getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const t=fmt(new Date());return{value:f.filter(e=>e.start<=t&&(!e.end||e.end>=t)).length,unit:"건"};}},
-  {id:"tomorrow_count", group:"schedule", label:"내일 일정",      icon:"🗓️", color:"#7c3aed", bg:"#f5f3ff", roles:["최고관리자","관리팀장","현장팀장"],
-    getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const t=fmt(new Date(Date.now()+86400000));return{value:f.filter(e=>e.start<=t&&(!e.end||e.end>=t)).length,unit:"건"};}},
-  {id:"month_count",    group:"schedule", label:"이번달 총",      icon:"📈", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","관리팀장","영업팀장","현장팀장"],
-    getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const m=fmt(new Date()).slice(0,7);return{value:f.filter(e=>e.start.startsWith(m)).length,unit:"건"};}},
-  {id:"today_done",     group:"schedule", label:"오늘 완료 현장", icon:"✅", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","관리팀장","현장팀장"],
-    getValue:(_,__,___,reports)=>{const t=fmt(new Date());return{value:(reports||[]).filter(r=>r.date===t&&r.status==="완료").length,unit:"건"};}},
-  // ── 영업 관련 ──
-  {id:"month_revenue",  group:"sales",    label:"이번달 매출",    icon:"💰", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","영업팀장"],
-    getValue:(ev)=>{const m=fmt(new Date()).slice(0,7);return{value:Math.round(ev.filter(e=>e.start.startsWith(m)).reduce((s,e)=>s+(e.price||0),0)/10000),unit:"만원"};}},
-  {id:"week_contract",  group:"sales",    label:"이번주 계약",    icon:"📋", color:"#7c3aed", bg:"#f5f3ff", roles:["최고관리자","영업팀장"],
-    getValue:(ev)=>{const d=new Date(),day=d.getDay(),ws=fmt(new Date(new Date().setDate(d.getDate()-day+(day===0?-6:1))));return{value:ev.filter(e=>e.start>=ws&&e.start<=fmt(new Date())).length,unit:"건"};}},
-  {id:"today_revenue",  group:"sales",    label:"오늘 매출",      icon:"💵", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","영업팀장"],
-    getValue:(ev)=>{const t=fmt(new Date());return{value:Math.round(ev.filter(e=>e.start===t).reduce((s,e)=>s+(e.price||0),0)/10000),unit:"만원"};}},
-  // ── 운영 관련 ──
-  {id:"complaint",      group:"ops",      label:"미처리 컴플레인",icon:"🚨", color:"#ef4444", bg:"#fef2f2", roles:["최고관리자","관리팀장"],
-    getValue:()=>({value:0,unit:"건"})},
-  {id:"special",        group:"ops",      label:"미확인 특이사항",icon:"⚠️", color:"#f59e0b", bg:"#fffbeb", roles:["최고관리자","관리팀장"],
-    getValue:()=>({value:0,unit:"건"})},
-  {id:"team_count",     group:"ops",      label:"운영 팀 수",     icon:"🧹", color:"#ea580c", bg:"#fff7ed", roles:["최고관리자","관리팀장"],
-    getValue:(_,__,cals)=>({value:cals?.length||0,unit:"팀"})},
-];
-
-const DEFAULT_DASH_CARDS = {
-  "최고관리자": ["today_count","month_revenue","complaint","team_count"],
-  "관리팀장":   ["today_count","tomorrow_count","complaint","team_count"],
-  "영업팀장":   ["week_contract","month_revenue"],
-  "현장팀장":   ["today_count","tomorrow_count","month_count"],
-  "팀원":       ["today_count","tomorrow_count"],
-};
 
 function DashboardScreen() {
   const { visibleEvents, setCurrentScreen, cals, currentUser } = useC();
