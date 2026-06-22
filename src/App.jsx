@@ -658,13 +658,21 @@ function ScheduleList({ selDate, compact=false }) {
       </div>
 
       {/* 이벤트 목록 */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto pb-16">
         {/* 종일 */}
         {allDayEvts.map(ev=>{
           const c=calById(ev.calId);
           const isMulti=diff(ev.start,ev.end||ev.start)>0;
           return(
-            <div key={ev.id} onClick={()=>setDetEv(ev)}
+            <div key={ev.id}
+              onClick={()=>setDetEv(ev)}
+              onContextMenu={e=>{e.preventDefault();setLongPressEv(ev);}}
+              onTouchStart={e=>{
+                const t=setTimeout(()=>setLongPressEv(ev),500);
+                e.currentTarget._lpt=t;
+              }}
+              onTouchEnd={e=>clearTimeout(e.currentTarget._lpt)}
+              onTouchMove={e=>clearTimeout(e.currentTarget._lpt)}
               className="flex items-center px-4 py-1.5 border-b border-gray-50 cursor-pointer">
               {isMulti
                 ? <span className="text-sm px-2 py-0.5 rounded text-white font-medium mr-2 truncate max-w-[80%]"
@@ -1239,6 +1247,136 @@ function DetailSheet() {
             </div>
           )}
         </div>
+    </div>
+  );
+}
+
+
+
+// ── 길게 누르기 메뉴 ───────────────────────────────────────────────
+function LongPressMenu({ ev, onClose, onEdit, onDelete }) {
+  if(!ev) return null;
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:300,display:"flex",alignItems:"flex-end",
+      justifyContent:"center",background:"rgba(0,0,0,.4)"}}
+      onClick={onClose}>
+      <div style={{background:"white",borderRadius:"24px 24px 0 0",width:"100%",maxWidth:430,
+        padding:"8px 0 32px",boxShadow:"0 -8px 32px rgba(0,0,0,.15)"}}
+        onClick={e=>e.stopPropagation()}>
+        {/* 핸들 */}
+        <div style={{width:36,height:4,borderRadius:99,background:"#e5e7eb",
+          margin:"8px auto 16px"}}/>
+        {/* 일정 제목 */}
+        <div style={{padding:"0 20px 16px",borderBottom:"1px solid #f3f4f6"}}>
+          <p style={{fontSize:13,color:"#9ca3af",marginBottom:4}}>선택된 일정</p>
+          <p style={{fontSize:16,fontWeight:800,color:"#111827"}}>{ev.title}</p>
+        </div>
+        {/* 버튼들 */}
+        <div style={{padding:"8px 12px"}}>
+          <button onClick={onEdit}
+            style={{width:"100%",padding:"14px 16px",borderRadius:14,border:"none",
+              background:"#f9fafb",cursor:"pointer",display:"flex",alignItems:"center",gap:12,
+              marginBottom:8,textAlign:"left"}}>
+            <span style={{fontSize:20}}>✏️</span>
+            <span style={{fontSize:15,fontWeight:700,color:"#111827"}}>수정</span>
+          </button>
+          <button onClick={onDelete}
+            style={{width:"100%",padding:"14px 16px",borderRadius:14,border:"none",
+              background:"#fef2f2",cursor:"pointer",display:"flex",alignItems:"center",gap:12,
+              textAlign:"left"}}>
+            <span style={{fontSize:20}}>🗑️</span>
+            <span style={{fontSize:15,fontWeight:700,color:"#ef4444"}}>삭제</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 삭제 확인 팝업 ───────────────────────────────────────────────
+function DeleteConfirmPopup({ ev, onCancel, onConfirm }) {
+  if(!ev) return null;
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:400,display:"flex",alignItems:"center",
+      justifyContent:"center",padding:"24px",background:"rgba(0,0,0,.5)"}}>
+      <div style={{background:"white",borderRadius:24,width:"100%",maxWidth:320,
+        padding:"24px",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+        <div style={{textAlign:"center",marginBottom:20}}>
+          <div style={{fontSize:40,marginBottom:12}}>🗑️</div>
+          <h3 style={{fontSize:18,fontWeight:800,color:"#111827",marginBottom:8}}>일정 삭제</h3>
+          <p style={{fontSize:13,color:"#6b7280",lineHeight:1.7}}>
+            <span style={{fontWeight:700,color:"#111827"}}>{ev.title}</span><br/>
+            이 일정을 삭제하시겠습니까?
+          </p>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={onCancel}
+            style={{flex:1,padding:"13px",borderRadius:14,border:"1.5px solid #e5e7eb",
+              background:"white",fontSize:14,fontWeight:700,color:"#6b7280",cursor:"pointer"}}>
+            취소
+          </button>
+          <button onClick={onConfirm}
+            style={{flex:1,padding:"13px",borderRadius:14,border:"none",
+              background:"linear-gradient(135deg,#ef4444,#dc2626)",
+              fontSize:14,fontWeight:700,color:"white",cursor:"pointer"}}>
+            삭제
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 하단 탭바 ───────────────────────────────────────────────
+function BottomTabBar() {
+  const { currentScreen, setCurrentScreen, setDrawer, currentUser, notices } = useC();
+
+  const readIds = (() => { try { return JSON.parse(localStorage.getItem("readNotices")||"[]"); } catch{ return []; } })();
+  const unreadCount = notices.filter(n=>!readIds.includes(n.id)).length;
+
+  const tabs = currentUser?.role === "팀원"
+    ? [
+        { icon: "📅", label: "캘린더",   screen: "calendar" },
+        { icon: "🔔", label: "공지",      screen: "notice" },
+        { icon: "🔗", label: "링크",      screen: "links" },
+        { icon: "☰",  label: "더보기",    screen: "drawer" },
+      ]
+    : [
+        { icon: "📅", label: "캘린더",   screen: "calendar" },
+        { icon: "📊", label: "대시보드", screen: "dashboard" },
+        { icon: "🔔", label: "공지",      screen: "notice" },
+        { icon: "☰",  label: "더보기",    screen: "drawer" },
+      ];
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50"
+      style={{maxWidth:430, margin:"0 auto", paddingBottom:"env(safe-area-inset-bottom)"}}>
+      <div className="flex items-center">
+        {tabs.map(tab => {
+          const isActive = tab.screen !== "drawer" && currentScreen === tab.screen;
+          const isDrawer = tab.screen === "drawer";
+          return (
+            <button key={tab.screen}
+              onClick={() => isDrawer ? setDrawer(true) : setCurrentScreen(tab.screen)}
+              className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 relative border-none bg-transparent cursor-pointer">
+              <div className="relative">
+                <span className="text-xl leading-none">{tab.icon}</span>
+                {tab.screen === "notice" && unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 text-xs font-bold text-white bg-red-500 rounded-full w-4 h-4 flex items-center justify-center"
+                    style={{fontSize:9}}>{unreadCount}</span>
+                )}
+              </div>
+              <span className="text-xs font-bold"
+                style={{color: isActive ? "#1a56db" : "#9ca3af"}}>
+                {tab.label}
+              </span>
+              {isActive && (
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-blue-500"/>
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -2705,7 +2843,7 @@ function ImportCalendarScreen() {
 
 // ── 로그인 화면 ───────────────────────────────────────────────
 function LoginScreen({ onLogin }) {
-  const [mode, setMode]               = useState("login");
+  const [mode, setMode]               = useState("login");  // login | register | setPw
   const [id, setId]                   = useState("");
   const [pw, setPw]                   = useState("");
   const [pw2, setPw2]                 = useState("");
@@ -2714,45 +2852,75 @@ function LoginScreen({ onLogin }) {
   const [showPw, setShowPw]           = useState(false);
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState("");
+  const [pendingUser, setPendingUser] = useState(null);
 
+  // 로그인 - 아이디/전화번호 자동 구분
   const handleLogin = async () => {
-    if(!id.trim()||!pw.trim()){ setError("아이디와 비밀번호를 입력하세요."); return; }
+    if(!id.trim()){ setError("아이디 또는 전화번호를 입력하세요."); return; }
     setLoading(true); setError("");
     try {
       const { collection, query, where, getDocs, getDoc, doc } = await import("firebase/firestore");
-      const adminQ = query(collection(db, "admins"), where("id","==",id.trim()));
-      const adminSnap = await getDocs(adminQ);
-      if(!adminSnap.empty) {
-        const adminData = adminSnap.docs[0].data();
-        if(adminData.pw !== pw) { setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
-        const compDoc = await getDoc(doc(db, "companies", adminData.companyId));
-        const companyName = compDoc.exists() ? compDoc.data().name : "크린드림";
-        const user = {...adminData, uid:adminSnap.docs[0].id, companyName, role:"최고관리자"};
-        try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
-        onLogin(user);
-        return;
-      }
-      const staffQ = query(collection(db, "staffs"), where("id","==",id.trim()));
-      const staffSnap = await getDocs(staffQ);
-      if(!staffSnap.empty) {
+      const isPhone = /^0\d{9,10}$/.test(id.trim().replace(/-/g,""));
+
+      if(isPhone) {
+        // 직원 (전화번호로 조회)
+        const phone = id.trim().replace(/-/g,"");
+        const staffQ = query(collection(db,"staffs"), where("phone","==",phone));
+        const staffSnap = await getDocs(staffQ);
+        if(staffSnap.empty){ setError("등록되지 않은 전화번호입니다."); setLoading(false); return; }
         const staffData = staffSnap.docs[0].data();
-        if(staffData.pw !== pw) { setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
-        const compDoc = await getDoc(doc(db, "companies", staffData.companyId));
-        const companyName = compDoc.exists() ? compDoc.data().name : "크린드림";
-        const user = {...staffData, uid:staffSnap.docs[0].id, companyName};
+        const staffId   = staffSnap.docs[0].id;
+        // 첫 로그인 (비밀번호 없음)
+        if(!staffData.pw) {
+          const compDoc = await getDoc(doc(db,"companies",staffData.companyId));
+          setPendingUser({...staffData, uid:staffId, companyName:compDoc.exists()?compDoc.data().name:"크린드림"});
+          setMode("setPw"); setLoading(false); return;
+        }
+        // 비밀번호 확인
+        if(!pw.trim()){ setError("비밀번호를 입력하세요."); setLoading(false); return; }
+        if(staffData.pw !== pw){ setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
+        const compDoc = await getDoc(doc(db,"companies",staffData.companyId));
+        const user = {...staffData, uid:staffId, companyName:compDoc.exists()?compDoc.data().name:"크린드림"};
         try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
-        onLogin(user);
-        return;
+        onLogin(user); return;
+      } else {
+        // 관리자 (아이디로 조회)
+        if(!pw.trim()){ setError("비밀번호를 입력하세요."); setLoading(false); return; }
+        const adminQ = query(collection(db,"admins"), where("id","==",id.trim()));
+        const adminSnap = await getDocs(adminQ);
+        if(adminSnap.empty){ setError("등록되지 않은 아이디입니다."); setLoading(false); return; }
+        const adminData = adminSnap.docs[0].data();
+        if(adminData.pw !== pw){ setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
+        const compDoc = await getDoc(doc(db,"companies",adminData.companyId));
+        const user = {...adminData, uid:adminSnap.docs[0].id, companyName:compDoc.exists()?compDoc.data().name:"크린드림", role:"최고관리자"};
+        try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
+        onLogin(user); return;
       }
-      setError("등록되지 않은 아이디입니다.");
     } catch(e) {
       console.error(e);
       setError("로그인 중 오류가 발생했습니다.");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
+  // 첫 로그인 비밀번호 설정
+  const handleSetPw = async () => {
+    if(!pw||!pw2){ setError("비밀번호를 입력하세요."); return; }
+    if(pw!==pw2){ setError("비밀번호가 일치하지 않습니다."); return; }
+    if(pw.length<4){ setError("비밀번호는 4자 이상이어야 합니다."); return; }
+    setLoading(true); setError("");
+    try {
+      const { doc, updateDoc } = await import("firebase/firestore");
+      await updateDoc(doc(db,"staffs",pendingUser.uid), { pw });
+      const user = {...pendingUser, pw};
+      try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
+      onLogin(user);
+    } catch(e) {
+      console.error(e);
+      setError("비밀번호 설정 중 오류가 발생했습니다.");
+    } finally { setLoading(false); }
+  };
+
+  // 업체 가입
   const handleRegister = async () => {
     if(!companyName||!id||!pw||!pw2){ setError("모든 항목을 입력하세요."); return; }
     if(pw!==pw2){ setError("비밀번호가 일치하지 않습니다."); return; }
@@ -2760,159 +2928,169 @@ function LoginScreen({ onLogin }) {
     setLoading(true); setError("");
     try {
       const { collection, query, where, getDocs, doc, setDoc } = await import("firebase/firestore");
-      const adminQ = query(collection(db, "admins"), where("id","==",id.trim()));
+      const adminQ = query(collection(db,"admins"), where("id","==",id.trim()));
       const adminSnap = await getDocs(adminQ);
       if(!adminSnap.empty){ setError("이미 사용 중인 아이디입니다."); setLoading(false); return; }
       const companyId = "c_" + Math.random().toString(36).slice(2,9);
       const adminId   = "a_" + Math.random().toString(36).slice(2,9);
-      await setDoc(doc(db, "companies", companyId), {
-        name: companyName.trim(), companyId,
-        createdAt: new Date().toISOString(),
-      });
-      await setDoc(doc(db, "admins", adminId), {
-        id: id.trim(), pw,
-        name: id.trim(), companyId,
-        role: "최고관리자", team: "관리팀",
-        createdAt: new Date().toISOString(),
-      });
-      const user = {uid:adminId, id:id.trim(), name:id.trim(), companyId,
-        companyName:companyName.trim(), role:"최고관리자", team:"관리팀"};
+      await setDoc(doc(db,"companies",companyId), { name:companyName.trim(), companyId, createdAt:new Date().toISOString() });
+      await setDoc(doc(db,"admins",adminId), { id:id.trim(), pw, name:id.trim(), companyId, role:"최고관리자", team:"관리팀", createdAt:new Date().toISOString() });
+      const user = {uid:adminId, id:id.trim(), name:id.trim(), companyId, companyName:companyName.trim(), role:"최고관리자", team:"관리팀"};
       try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
       onLogin(user);
     } catch(e) {
       console.error(e);
       setError("가입 중 오류가 발생했습니다.");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
+  // ── 비밀번호 설정 화면 (첫 로그인) ──
+  if(mode==="setPw") {
+    return (
+      <div className="flex-1 flex flex-col bg-white min-h-screen">
+        <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
+          <div className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mb-6 shadow-xl"
+            style={{background:"linear-gradient(135deg,#16a34a,#15803d)"}}>👋</div>
+          <h1 className="text-2xl font-extrabold text-gray-900 mb-2">처음 오셨군요!</h1>
+          <p className="text-sm text-gray-500 text-center leading-relaxed">
+            <span className="font-bold text-gray-800">{pendingUser?.name}</span>님,<br/>
+            사용할 비밀번호를 설정해주세요.
+          </p>
+        </div>
+        <div className="px-6 pb-12 flex flex-col gap-3">
+          <div className="p-4 rounded-2xl bg-green-50 border border-green-100 mb-1">
+            <p className="text-sm font-bold text-green-600 mb-1">📱 로그인 정보</p>
+            <p className="text-xs text-gray-500">전화번호: <span className="font-bold text-gray-800">{id}</span></p>
+            <p className="text-xs text-gray-400 mt-1">다음부터 이 번호 + 비밀번호로 로그인해요.</p>
+          </div>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+            <input type={showPw?"text":"password"} placeholder="새 비밀번호 (4자 이상)" value={pw}
+              onChange={e=>{setPw(e.target.value);setError("");}}
+              className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(pw?"border-green-400":"border-gray-200")}/>
+            <button onClick={()=>setShowPw(p=>!p)} className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">{showPw?"🙈":"👁️"}</button>
+          </div>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+            <input type={showPw?"text":"password"} placeholder="비밀번호 확인" value={pw2}
+              onChange={e=>{setPw2(e.target.value);setError("");}}
+              className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(pw2?(pw===pw2?"border-green-400":"border-red-400"):"border-gray-200")}/>
+            {pw2&&<span className="absolute right-4 top-1/2 -translate-y-1/2 text-base">{pw===pw2?"✅":"❌"}</span>}
+          </div>
+          {error&&<div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
+          <button onClick={handleSetPw} disabled={loading}
+            className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
+            style={{background:pw&&pw2?"linear-gradient(135deg,#16a34a,#15803d)":"#e5e7eb",opacity:loading?0.7:1}}>
+            {loading?"설정 중...":"비밀번호 설정하고 시작하기"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── 업체 가입 화면 ──
+  if(mode==="register") {
+    return (
+      <div className="flex-1 flex flex-col bg-white min-h-screen">
+        <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
+          <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
+            style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🧹</div>
+          <h1 className="text-3xl font-extrabold text-gray-900 mb-2">크린매니저</h1>
+          <p className="text-sm text-gray-400 font-medium">청소업체 관리 솔루션</p>
+        </div>
+        <div className="px-6 pb-12 flex flex-col gap-3">
+          <button onClick={()=>{setMode("login");setError("");}}
+            className="flex items-center gap-1 border-none bg-transparent cursor-pointer text-sm text-gray-500 font-semibold mb-1 p-0">
+            ‹ 로그인으로 돌아가기
+          </button>
+          <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 mb-1">
+            <p className="text-sm font-bold text-blue-600 mb-1">🏢 업체 대표 계정 만들기</p>
+            <p className="text-xs text-gray-500 leading-relaxed">직원 계정은 가입 후 직원 관리 메뉴에서 추가할 수 있어요.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="cursor-pointer shrink-0">
+              <div className="w-14 h-14 rounded-2xl overflow-hidden flex items-center justify-center"
+                style={{background:logoPreview?"transparent":"#f3f4f6",border:`2px dashed ${logoPreview?"#1a56db":"#d1d5db"}`}}>
+                {logoPreview
+                  ? <img src={logoPreview} className="w-full h-full object-cover"/>
+                  : <div className="text-center"><div className="text-xl">📷</div><div className="text-gray-400" style={{fontSize:9}}>로고</div></div>}
+              </div>
+              <input type="file" accept="image/*" onChange={e=>{const f=e.target.files[0];if(f)setLogoPreview(URL.createObjectURL(f));}} className="hidden"/>
+            </label>
+            <input placeholder="회사명" value={companyName} onChange={e=>{setCompanyName(e.target.value);setError("");}}
+              className={"flex-1 min-w-0 py-3.5 px-4 rounded-2xl text-sm outline-none bg-gray-50 border "+(companyName?"border-blue-400":"border-gray-200")}/>
+          </div>
+          <div className="h-px bg-gray-100"/>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
+            <input placeholder="아이디" value={id} onChange={e=>{setId(e.target.value);setError("");}}
+              className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(id?"border-blue-400":"border-gray-200")}/>
+          </div>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+            <input type={showPw?"text":"password"} placeholder="비밀번호 (4자 이상)" value={pw} onChange={e=>{setPw(e.target.value);setError("");}}
+              className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(pw?"border-blue-400":"border-gray-200")}/>
+            <button onClick={()=>setShowPw(p=>!p)} className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">{showPw?"🙈":"👁️"}</button>
+          </div>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+            <input type={showPw?"text":"password"} placeholder="비밀번호 확인" value={pw2} onChange={e=>{setPw2(e.target.value);setError("");}}
+              className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(pw2?(pw===pw2?"border-green-400":"border-red-400"):"border-gray-200")}/>
+            {pw2&&<span className="absolute right-4 top-1/2 -translate-y-1/2 text-base">{pw===pw2?"✅":"❌"}</span>}
+          </div>
+          {error&&<div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
+          <button onClick={handleRegister} disabled={loading}
+            className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
+            style={{background:id&&pw&&pw2&&companyName?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",opacity:loading?0.7:1}}>
+            {loading?"가입 중...":"가입하기"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── 로그인 화면 ──
   return (
     <div className="flex-1 flex flex-col bg-white min-h-screen">
-      {/* 브랜딩 */}
       <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
         <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
           style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🧹</div>
         <h1 className="text-3xl font-extrabold text-gray-900 mb-2">크린매니저</h1>
         <p className="text-sm text-gray-400 font-medium">청소업체 관리 솔루션</p>
       </div>
-
       <div className="px-6 pb-12 flex flex-col gap-3">
-
-        {/* 로그인 */}
-        {mode==="login" && (
-          <>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
-              <input placeholder="아이디" value={id}
-                onChange={e=>{setId(e.target.value);setError("");}}
-                className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (id?"border-blue-400":"border-gray-200")}/>
-            </div>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
-              <input type={showPw?"text":"password"} placeholder="비밀번호" value={pw}
-                onChange={e=>{setPw(e.target.value);setError("");}}
-                onKeyDown={e=>e.key==="Enter"&&handleLogin()}
-                className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (pw?"border-blue-400":"border-gray-200")}/>
-              <button onClick={()=>setShowPw(p=>!p)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">
-                {showPw?"🙈":"👁️"}
-              </button>
-            </div>
-            {error && <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
-            <button onClick={handleLogin} disabled={loading}
-              className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
-              style={{background:id&&pw?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",opacity:loading?0.7:1}}>
-              {loading?"로그인 중...":"로그인"}
-            </button>
-            <p className="text-sm text-gray-400 text-center mt-1">
-              처음 사용하시나요?{" "}
-              <button onClick={()=>{setMode("register");setError("");}}
-                className="text-blue-500 font-bold border-none bg-transparent cursor-pointer text-sm">
-                회원가입
-              </button>
-            </p>
-          </>
+        {/* 아이디/전화번호 */}
+        <div className="relative">
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
+          <input placeholder="아이디 또는 전화번호" value={id}
+            onChange={e=>{setId(e.target.value);setError("");setPw("");}}
+            className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(id?"border-blue-400":"border-gray-200")}/>
+        </div>
+        {/* 전화번호 아니면 비밀번호 바로 표시, 전화번호면 10자 이상 입력 후 표시 */}
+        {(id && (!/^0\d/.test(id) || id.replace(/-/g,"").length >= 10)) && (
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+            <input type={showPw?"text":"password"}
+              placeholder={/^0\d/.test(id)?"비밀번호 (처음이면 비워두세요)":"비밀번호"}
+              value={pw} onChange={e=>{setPw(e.target.value);setError("");}}
+              onKeyDown={e=>e.key==="Enter"&&handleLogin()}
+              className="w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border border-gray-200"/>
+            <button onClick={()=>setShowPw(p=>!p)} className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">{showPw?"🙈":"👁️"}</button>
+          </div>
         )}
-
-        {/* 회원가입 */}
-        {mode==="register" && (
-          <>
-            <button onClick={()=>{setMode("login");setError("");}}
-              className="flex items-center gap-1 border-none bg-transparent cursor-pointer text-sm text-gray-500 font-semibold mb-1 p-0">
-              ‹ 로그인으로 돌아가기
-            </button>
-            <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 mb-1">
-              <p className="text-sm font-bold text-blue-600 mb-1">🏢 업체 대표 계정 만들기</p>
-              <p className="text-xs text-gray-500 leading-relaxed">직원 계정은 가입 후 직원 관리 메뉴에서 추가할 수 있어요.</p>
-            </div>
-
-            {/* 로고 + 회사명 */}
-            <div className="flex items-center gap-3">
-              <label className="cursor-pointer shrink-0">
-                <div className="w-14 h-14 rounded-2xl overflow-hidden flex items-center justify-center"
-                  style={{background:logoPreview?"transparent":"#f3f4f6",
-                    border:`2px dashed ${logoPreview?"#1a56db":"#d1d5db"}`}}>
-                  {logoPreview
-                    ? <img src={logoPreview} className="w-full h-full object-cover"/>
-                    : <div className="text-center">
-                        <div className="text-xl">📷</div>
-                        <div className="text-gray-400" style={{fontSize:9}}>로고</div>
-                      </div>
-                  }
-                </div>
-                <input type="file" accept="image/*"
-                  onChange={e=>{const f=e.target.files[0];if(f)setLogoPreview(URL.createObjectURL(f));}}
-                  className="hidden"/>
-              </label>
-              <input placeholder="회사명" value={companyName}
-                onChange={e=>{setCompanyName(e.target.value);setError("");}}
-                className={"flex-1 min-w-0 py-3.5 px-4 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (companyName?"border-blue-400":"border-gray-200")}/>
-            </div>
-
-            <div className="h-px bg-gray-100"/>
-
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
-              <input placeholder="아이디" value={id}
-                onChange={e=>{setId(e.target.value);setError("");}}
-                className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (id?"border-blue-400":"border-gray-200")}/>
-            </div>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
-              <input type={showPw?"text":"password"} placeholder="비밀번호 (4자 이상)" value={pw}
-                onChange={e=>{setPw(e.target.value);setError("");}}
-                className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (pw?"border-blue-400":"border-gray-200")}/>
-              <button onClick={()=>setShowPw(p=>!p)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">
-                {showPw?"🙈":"👁️"}
-              </button>
-            </div>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
-              <input type={showPw?"text":"password"} placeholder="비밀번호 확인" value={pw2}
-                onChange={e=>{setPw2(e.target.value);setError("");}}
-                className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (pw2?(pw===pw2?"border-green-400":"border-red-400"):"border-gray-200")}/>
-              {pw2 && <span className="absolute right-4 top-1/2 -translate-y-1/2 text-base">{pw===pw2?"✅":"❌"}</span>}
-            </div>
-            {error && <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
-            <button onClick={handleRegister} disabled={loading}
-              className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
-              style={{background:id&&pw&&pw2&&companyName?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",
-                opacity:loading?0.7:1}}>
-              {loading?"가입 중...":"가입하기"}
-            </button>
-            <p className="text-xs text-gray-300 text-center mt-1 leading-relaxed">
-              가입 후 직원 계정은 직원 관리 메뉴에서 추가할 수 있어요.
-            </p>
-          </>
-        )}
+        {error&&<div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
+        <button onClick={handleLogin} disabled={loading}
+          className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
+          style={{background:id?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",opacity:loading?0.7:1}}>
+          {loading?"확인 중...":"로그인"}
+        </button>
+        <p className="text-sm text-gray-400 text-center mt-1">
+          처음 사용하시나요?{" "}
+          <button onClick={()=>{setMode("register");setError("");setId("");setPw("");}}
+            className="text-blue-500 font-bold border-none bg-transparent cursor-pointer text-sm">
+            회원가입
+          </button>
+        </p>
       </div>
     </div>
   );
@@ -3250,85 +3428,157 @@ function TeamManagementModal() {
 
 // ── 팀별 일정 화면 ───────────────────────────────────────────────
 function TeamScheduleScreen() {
-  const { visibleEvents, setCurrentScreen, teams } = useC();
-  // 팀별 일정 개수 계산
-  const teamStats = {};
-  teams.forEach(t => teamStats[t] = 0);
-  visibleEvents.forEach(e => {
-    const cal = calById(e.calId);
-    teams.forEach(t => {
-      const keyword = t.replace("팀", "");
-      if (cal.label.includes(keyword)) teamStats[t]++;
-    });
-  });
+  const { visibleEvents, setCurrentScreen, cals } = useC();
+  const [selectedCal, setSelectedCal] = useState(null);
+  const [dateOffset, setDateOffset]   = useState(0);
+  const touchStartX = useRef(null);
+
+  const getDate = (offset) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return d.toISOString().slice(0,10);
+  };
+
+  const formatDate = (offset) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    const month = d.getMonth() + 1;
+    const day   = d.getDate();
+    const weekdays = ["일","월","화","수","목","금","토"];
+    const wd = weekdays[d.getDay()];
+    if(offset === 0)  return { main:"오늘",  sub:`${month}/${day} (${wd})` };
+    if(offset === 1)  return { main:"내일",  sub:`${month}/${day} (${wd})` };
+    if(offset === -1) return { main:"어제",  sub:`${month}/${day} (${wd})` };
+    return { main:`${month}/${day}`, sub:`(${wd})` };
+  };
+
+  const dateLabel = getDate(dateOffset);
+  const curr = formatDate(dateOffset);
+  const prev = formatDate(dateOffset - 1);
+  const next = formatDate(dateOffset + 1);
+
+  const onTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
+  const onTouchEnd   = (e) => {
+    if(touchStartX.current === null) return;
+    const diff = touchStartX.current - e.changedTouches[0].clientX;
+    if(Math.abs(diff) > 40) setDateOffset(p => diff > 0 ? p+1 : p-1);
+    touchStartX.current = null;
+  };
+
+  const filtered = visibleEvents.filter(e =>
+    (!selectedCal || e.calId === selectedCal) && e.start === dateLabel
+  );
+
+  const fmtTime = (t) => {
+    if(!t) return "";
+    const [h,m] = t.split(":");
+    const hr = parseInt(h);
+    return `${hr<12?"오전":"오후"} ${hr>12?hr-12:hr}:${m}`;
+  };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col p-5 gap-5 relative">
-      <div className="flex items-center gap-3 mb-2">
-        <button onClick={() => setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
-          <ChevronLeft size={24} className="text-gray-700"/>
-        </button>
-        <h2 className="text-xl font-bold text-gray-900">팀별 일정 현황</h2>
-      </div>
-      <div className="flex flex-col gap-3">
-        {teams.map(team => (
-          <div key={team} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex items-center justify-between hover:border-blue-200 transition-colors cursor-pointer">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center shrink-0">
-                <User size={20} className="text-indigo-600"/>
-              </div>
-              <span className="font-bold text-gray-800">{team}</span>
-            </div>
-            <span className="text-sm font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded-full">{teamStats[team] || 0}건</span>
+    <div className="flex-1 flex flex-col bg-gray-50 min-h-screen">
+      {/* 헤더 */}
+      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-0">
+        <div className="flex items-center gap-3 mb-4">
+          <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+            <ChevronLeft size={24} className="text-gray-700"/>
+          </button>
+          <h2 className="text-xl font-bold text-gray-900 flex-1">팀별 일정</h2>
+        </div>
+
+        {/* 날짜 슬라이더 */}
+        <div
+          onTouchStart={onTouchStart}
+          onTouchEnd={onTouchEnd}
+          className="flex items-center mb-4 select-none">
+          {/* 이전 날짜 */}
+          <button onClick={()=>setDateOffset(p=>p-1)}
+            className="flex-1 py-2 border-none bg-transparent cursor-pointer text-center opacity-40">
+            <div className="text-xs font-semibold text-gray-400">{prev.main}</div>
+            <div className="text-xs text-gray-300">{prev.sub}</div>
+          </button>
+          {/* 현재 날짜 */}
+          <div className="flex-2 py-3 text-center rounded-2xl border"
+            style={{flex:2, background:"#f0fdf4", borderColor:"#86efac"}}>
+            <div className="text-base font-extrabold text-gray-900">{curr.main}</div>
+            <div className="text-xs font-semibold text-green-600">{curr.sub}</div>
           </div>
-        ))}
+          {/* 다음 날짜 */}
+          <button onClick={()=>setDateOffset(p=>p+1)}
+            className="flex-1 py-2 border-none bg-transparent cursor-pointer text-center opacity-40">
+            <div className="text-xs font-semibold text-gray-400">{next.main}</div>
+            <div className="text-xs text-gray-300">{next.sub}</div>
+          </button>
+        </div>
+      </div>
+
+      {/* 팀 카드 필터 4개 한 줄 */}
+      <div className="px-4 py-3 grid gap-2" style={{gridTemplateColumns:"repeat(4,1fr)"}}>
+        {/* 전체 */}
+        <button onClick={()=>setSelectedCal(null)}
+          className="bg-white rounded-2xl py-3 text-center border cursor-pointer transition-all"
+          style={{borderColor:!selectedCal?"#111827":"#f3f4f6",
+            boxShadow:!selectedCal?"0 0 0 3px rgba(0,0,0,.08)":"0 1px 4px rgba(0,0,0,.04)"}}>
+          <div className="text-xs font-bold text-gray-400 mb-1">전체</div>
+          <div className="text-xl font-extrabold leading-none"
+            style={{color:!selectedCal?"#111827":"#d1d5db"}}>
+            {visibleEvents.filter(e=>e.start===dateLabel).length}
+          </div>
+          <div className="text-xs text-gray-400 mt-1">건</div>
+        </button>
+        {/* 팀별 카드 */}
+        {cals.map(cal=>{
+          const cnt = visibleEvents.filter(e=>e.calId===cal.id&&e.start===dateLabel).length;
+          const active = selectedCal===cal.id;
+          return (
+            <button key={cal.id} onClick={()=>setSelectedCal(active?null:cal.id)}
+              className="bg-white rounded-2xl py-3 text-center border cursor-pointer transition-all"
+              style={{borderColor:active?cal.color:"#f3f4f6",
+                boxShadow:active?`0 0 0 3px ${cal.color}22`:"0 1px 4px rgba(0,0,0,.04)"}}>
+              <div className="text-xs font-bold mb-1 overflow-hidden"
+                style={{color:active?cal.color:"#9ca3af",
+                  textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                {cal.label||cal.name}
+              </div>
+              <div className="text-xl font-extrabold leading-none"
+                style={{color:cnt>0?cal.color:"#d1d5db"}}>{cnt}</div>
+              <div className="text-xs text-gray-400 mt-1">건</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 일정 목록 */}
+      <div className="flex-1 overflow-y-auto px-4 pb-16 flex flex-col gap-2">
+        {filtered.length===0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-gray-400 text-sm">
+            {curr.main} 일정이 없습니다
+          </div>
+        ) : filtered.map(ev=>{
+          const cal = cals.find(c=>c.id===ev.calId);
+          return (
+            <div key={ev.id} className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 shadow-sm">
+              <div className="w-1 self-stretch rounded-full shrink-0" style={{background:cal?.color||"#1a56db"}}/>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-gray-900 truncate">{ev.title}</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {ev.allDay?"종일":`${fmtTime(ev.startTime)} ~ ${fmtTime(ev.endTime)}`}
+                  {ev.place?` · ${ev.place}`:""}
+                </p>
+              </div>
+              <div className="text-xs font-bold px-2 py-1 rounded-full shrink-0"
+                style={{background:(cal?.color||"#1a56db")+"22",color:cal?.color||"#1a56db"}}>
+                {cal?.label||cal?.name}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-// ── 대시보드 화면 ───────────────────────────────────────────────
-// 카드 선택형 대시보드
-// 대시보드 카드 카테고리
-const DASH_CARD_GROUPS = [
-  { id:"schedule", label:"📅 일정 관련" },
-  { id:"sales",    label:"💰 영업 관련" },
-  { id:"ops",      label:"🚨 운영 관련" },
-];
-
-const ALL_DASH_CARDS = [
-  // ── 일정 관련 ──
-  {id:"today_count",    group:"schedule", label:"오늘 일정",      icon:"📅", color:"#1a56db", bg:"#eff6ff", roles:["최고관리자","관리팀장","현장팀장"],
-    getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const t=fmt(new Date());return{value:f.filter(e=>e.start<=t&&(!e.end||e.end>=t)).length,unit:"건"};}},
-  {id:"tomorrow_count", group:"schedule", label:"내일 일정",      icon:"🗓️", color:"#7c3aed", bg:"#f5f3ff", roles:["최고관리자","관리팀장","현장팀장"],
-    getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const t=fmt(new Date(Date.now()+86400000));return{value:f.filter(e=>e.start<=t&&(!e.end||e.end>=t)).length,unit:"건"};}},
-  {id:"month_count",    group:"schedule", label:"이번달 총",      icon:"📈", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","관리팀장","영업팀장","현장팀장"],
-    getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const m=fmt(new Date()).slice(0,7);return{value:f.filter(e=>e.start.startsWith(m)).length,unit:"건"};}},
-  {id:"today_done",     group:"schedule", label:"오늘 완료 현장", icon:"✅", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","관리팀장","현장팀장"],
-    getValue:(_,__,___,reports)=>{const t=fmt(new Date());return{value:(reports||[]).filter(r=>r.date===t&&r.status==="완료").length,unit:"건"};}},
-  // ── 영업 관련 ──
-  {id:"month_revenue",  group:"sales",    label:"이번달 매출",    icon:"💰", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","영업팀장"],
-    getValue:(ev)=>{const m=fmt(new Date()).slice(0,7);return{value:Math.round(ev.filter(e=>e.start.startsWith(m)).reduce((s,e)=>s+(e.price||0),0)/10000),unit:"만원"};}},
-  {id:"week_contract",  group:"sales",    label:"이번주 계약",    icon:"📋", color:"#7c3aed", bg:"#f5f3ff", roles:["최고관리자","영업팀장"],
-    getValue:(ev)=>{const d=new Date(),day=d.getDay(),ws=fmt(new Date(new Date().setDate(d.getDate()-day+(day===0?-6:1))));return{value:ev.filter(e=>e.start>=ws&&e.start<=fmt(new Date())).length,unit:"건"};}},
-  {id:"today_revenue",  group:"sales",    label:"오늘 매출",      icon:"💵", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","영업팀장"],
-    getValue:(ev)=>{const t=fmt(new Date());return{value:Math.round(ev.filter(e=>e.start===t).reduce((s,e)=>s+(e.price||0),0)/10000),unit:"만원"};}},
-  // ── 운영 관련 ──
-  {id:"complaint",      group:"ops",      label:"미처리 컴플레인",icon:"🚨", color:"#ef4444", bg:"#fef2f2", roles:["최고관리자","관리팀장"],
-    getValue:()=>({value:0,unit:"건"})},
-  {id:"special",        group:"ops",      label:"미확인 특이사항",icon:"⚠️", color:"#f59e0b", bg:"#fffbeb", roles:["최고관리자","관리팀장"],
-    getValue:()=>({value:0,unit:"건"})},
-  {id:"team_count",     group:"ops",      label:"운영 팀 수",     icon:"🧹", color:"#ea580c", bg:"#fff7ed", roles:["최고관리자","관리팀장"],
-    getValue:(_,__,cals)=>({value:cals?.length||0,unit:"팀"})},
-];
-
-const DEFAULT_DASH_CARDS = {
-  "최고관리자": ["today_count","month_revenue","complaint","team_count"],
-  "관리팀장":   ["today_count","tomorrow_count","complaint","team_count"],
-  "영업팀장":   ["week_contract","month_revenue"],
-  "현장팀장":   ["today_count","tomorrow_count","month_count"],
-  "팀원":       ["today_count","tomorrow_count"],
-};
 
 function DashboardScreen() {
   const { visibleEvents, setCurrentScreen, cals, currentUser } = useC();
@@ -3738,8 +3988,29 @@ function ExternalLinksScreen() {
   const dragFrom = useRef(null);
   const dragTo   = useRef(null);
 
-  const EMOJIS    = ["🔗","📍","📞","💰","🧹","📋","🏢","🚗","📦","🛠️","🌐","📱","💬","📧","🗺️","📸"];
-  const CATEGORIES = ["전체","업무","지도","연락처","기타"];
+  const EMOJIS = ["🔗","📍","📞","💰","🧹","📋","🏢","🚗","📦","🛠️","🌐","📱","💬","📧","🗺️","📸"];
+  const [customCats, setCustomCats] = useState(["업무","지도","연락처","기타"]);
+  const [catModal, setCatModal]     = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [editCatIdx, setEditCatIdx] = useState(null);
+  const CATEGORIES = ["전체", ...customCats];
+
+  const addCat = () => {
+    if(!newCatName.trim()) return;
+    if(editCatIdx !== null) {
+      setCustomCats(p=>p.map((c,i)=>i===editCatIdx?newCatName.trim():c));
+      setEditCatIdx(null);
+    } else {
+      setCustomCats(p=>[...p, newCatName.trim()]);
+    }
+    setNewCatName(""); setCatModal(false);
+  };
+
+  const deleteCat = (idx) => {
+    const name = customCats[idx];
+    setCustomCats(p=>p.filter((_,i)=>i!==idx));
+    setLinks(p=>p.map(l=>l.category===name?{...l,category:"기타"}:l));
+  };
 
   const filtered = category==="전체" ? links : links.filter(l=>l.category===category);
 
@@ -3767,6 +4038,64 @@ function ExternalLinksScreen() {
   const onDragOver=(e,id)=>{e.preventDefault();dragTo.current=id;setDragOverId(id);};
   const onDragEnd=()=>{reorder(dragFrom.current,dragTo.current);dragFrom.current=null;dragTo.current=null;setDraggingId(null);setDragOverId(null);};
 
+  // 카테고리 관리 화면
+  if(catModal) {
+    const moveCat = (idx, dir) => {
+      setCustomCats(p => {
+        const a = [...p], ni = idx + dir;
+        if(ni < 0 || ni >= a.length) return p;
+        [a[idx], a[ni]] = [a[ni], a[idx]]; return a;
+      });
+    };
+    return (
+      <div className="flex-1 flex flex-col bg-white min-h-screen">
+        <div className="flex items-center gap-3 px-5 pt-5 pb-4 border-b border-gray-100">
+          <button onClick={()=>{setCatModal(false);setNewCatName("");setEditCatIdx(null);}}
+            className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+            <ChevronLeft size={24} className="text-gray-700"/>
+          </button>
+          <h2 className="text-xl font-bold text-gray-900 flex-1">카테고리 관리</h2>
+        </div>
+        <div className="px-5 py-4 flex flex-col gap-2">
+          <p className="text-xs text-gray-400 mb-2">순서 변경, 추가/수정/삭제할 수 있어요.</p>
+          {customCats.map((cat, idx) => (
+            <div key={idx} className="flex items-center gap-2 bg-gray-50 rounded-2xl px-4 py-3">
+              <div className="flex flex-col gap-0.5 shrink-0 mr-1">
+                <button onClick={() => moveCat(idx, -1)}
+                  className="border-none bg-transparent cursor-pointer leading-none text-sm"
+                  style={{color: idx===0?"#d1d5db":"#6b7280"}}>▲</button>
+                <button onClick={() => moveCat(idx, 1)}
+                  className="border-none bg-transparent cursor-pointer leading-none text-sm"
+                  style={{color: idx===customCats.length-1?"#d1d5db":"#6b7280"}}>▼</button>
+              </div>
+              <span className="flex-1 text-sm font-bold text-gray-800">{cat}</span>
+              <button onClick={() => {setEditCatIdx(idx); setNewCatName(cat);}}
+                className="text-xs font-bold text-blue-500 border-none bg-transparent cursor-pointer px-2">수정</button>
+              <button onClick={() => deleteCat(idx)}
+                className="text-xs font-bold text-red-400 border-none bg-transparent cursor-pointer px-2">삭제</button>
+            </div>
+          ))}
+          <div className="h-px bg-gray-100 my-2"/>
+          <div className="flex gap-2">
+            <input placeholder={editCatIdx!==null?"카테고리 이름 수정":"새 카테고리 이름"}
+              value={newCatName} onChange={e=>setNewCatName(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&addCat()}
+              className="flex-1 px-4 py-3 rounded-2xl text-sm outline-none bg-gray-50 border border-gray-200"/>
+            <button onClick={addCat}
+              className="px-5 py-3 rounded-2xl text-white text-sm font-bold border-none cursor-pointer"
+              style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
+              {editCatIdx!==null?"수정":"추가"}
+            </button>
+          </div>
+          {editCatIdx!==null && (
+            <button onClick={()=>{setEditCatIdx(null);setNewCatName("");}}
+              className="text-sm text-gray-400 text-center border-none bg-transparent cursor-pointer">취소</button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
       {/* 헤더 */}
@@ -3778,6 +4107,13 @@ function ExternalLinksScreen() {
             </button>
             <div>
               <h2 className="text-xl font-bold text-gray-900">외부 링크</h2>
+              <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                자주 쓰는 링크 모음
+                <button onClick={()=>setCatModal(true)}
+                  className="ml-2 text-xs font-bold text-blue-500 border-none bg-transparent cursor-pointer">
+                  카테고리 관리
+                </button>
+              </p>
               <p className="text-xs text-gray-400 mt-0.5">자주 쓰는 링크 모음</p>
             </div>
           </div>
