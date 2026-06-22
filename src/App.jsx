@@ -2174,19 +2174,62 @@ function FieldReportScreen({ ev, onClose }) {
 
 // ── 완료 보고 히스토리 화면 ───────────────────────────────────────────────
 function ReportHistoryScreen() {
-  const { setCurrentScreen, events, cals, currentUser } = useC();
+  const { setCurrentScreen, cals } = useC();
 
-  // 샘플 보고 데이터 (Firebase 연동 전 목업)
   const sampleReports = [
-    {id:"r1", title:"강남구 OO동 입주청소 30평", date:"2026-06-20", startTime:"09:00", teamName:"청소 1팀", teamColor:"#1a56db", status:"완료", memo:"주방 기름때 심했으나 완료. 베란다 청소 추가 진행.", price:"400,000"},
-    {id:"r2", title:"마포구 아현동 이사청소 25평", date:"2026-06-19", startTime:"13:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음. 깔끔하게 완료.", price:"320,000"},
-    {id:"r3", title:"송파구 잠실 정기청소", date:"2026-06-18", startTime:"10:00", teamName:"청소 1팀", teamColor:"#1a56db", status:"완료", memo:"에어컨 필터 청소 추가 요청. 처리 완료.", price:"150,000"},
+    {id:"r1", title:"강남구 OO동 입주청소 30평",    date:"2026-06-20", startTime:"09:00", teamName:"청소 1팀", teamColor:"#1a56db", status:"완료", memo:"주방 기름때 심했으나 완료. 베란다 청소 추가 진행.", price:"400,000"},
+    {id:"r2", title:"마포구 아현동 이사청소 25평",   date:"2026-06-19", startTime:"13:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음. 깔끔하게 완료.", price:"320,000"},
+    {id:"r3", title:"송파구 잠실 정기청소",          date:"2026-06-18", startTime:"10:00", teamName:"청소 1팀", teamColor:"#1a56db", status:"완료", memo:"에어컨 필터 청소 추가 요청. 처리 완료.", price:"150,000"},
     {id:"r4", title:"동대문구 전농동 입주청소 33평", date:"2026-06-17", startTime:"09:30", teamName:"청소 3팀", teamColor:"#ea580c", status:"완료", memo:"인테리어 후 입주 청소. 실리콘 작업 흔적 제거 완료.", price:"450,000"},
-    {id:"r5", title:"서초구 방배동 이사청소 28평", date:"2026-06-16", startTime:"14:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음.", price:"350,000"},
+    {id:"r5", title:"서초구 방배동 이사청소 28평",   date:"2026-06-16", startTime:"14:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음.", price:"350,000"},
+    {id:"r6", title:"노원구 LH 입주청소 28평",       date:"2026-06-15", startTime:"11:00", teamName:"LH",      teamColor:"#7c3aed", status:"완료", memo:"LH 표준 청소 완료.", price:"280,000"},
+    {id:"r7", title:"마포구 공덕 정기청소",          date:"2026-06-14", startTime:"14:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음.", price:"150,000"},
   ];
 
   const [selected, setSelected] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dateFilter, setDateFilter]   = useState("전체");
+  const [teamFilter, setTeamFilter]   = useState("전체");
+  const [showSearch, setShowSearch]   = useState(false);
 
+  // 날짜 필터 옵션
+  const today = fmt(new Date());
+  const weekAgo = fmt(new Date(Date.now() - 86400000 * 7));
+  const monthAgo = fmt(new Date(Date.now() - 86400000 * 30));
+
+  const DATE_FILTERS = [
+    {label:"전체", value:"전체"},
+    {label:"오늘", value:"today"},
+    {label:"이번주", value:"week"},
+    {label:"이번달", value:"month"},
+  ];
+
+  // 필터 적용
+  const filtered = sampleReports.filter(r => {
+    const matchDate = dateFilter === "전체" ? true
+      : dateFilter === "today" ? r.date === today
+      : dateFilter === "week"  ? r.date >= weekAgo
+      : r.date >= monthAgo;
+    const matchTeam   = teamFilter === "전체" || r.teamName === teamFilter;
+    const matchSearch = !searchQuery || r.title.includes(searchQuery) || r.memo.includes(searchQuery);
+    return matchDate && matchTeam && matchSearch;
+  });
+
+  // 날짜별 그룹
+  const grouped = filtered.reduce((acc, r) => {
+    if(!acc[r.date]) acc[r.date] = [];
+    acc[r.date].push(r);
+    return acc;
+  }, {});
+  const dates = Object.keys(grouped).sort((a,b)=>b.localeCompare(a));
+
+  const dateLabel = (d) => {
+    if(d === today) return "오늘";
+    if(d === fmt(new Date(Date.now()-86400000))) return "어제";
+    return d.slice(5).replace("-",".");
+  };
+
+  // 상세 화면
   if(selected) {
     return (
       <div className="flex-1 overflow-y-auto bg-white flex flex-col">
@@ -2194,40 +2237,35 @@ function ReportHistoryScreen() {
           <button onClick={()=>setSelected(null)} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
             <ChevronLeft size={24} className="text-gray-700"/>
           </button>
-          <h2 className="text-base font-bold text-gray-900 flex-1 line-clamp-1">보고서 상세</h2>
-        </div>
-        {/* 히어로 */}
-        <div className="px-5 py-5" style={{background:`linear-gradient(135deg,${selected.teamColor},${selected.teamColor}cc)`}}>
-          <p className="text-xs font-bold text-white/70 mb-1">{selected.teamName}</p>
-          <p className="text-lg font-extrabold text-white leading-snug">{selected.title}</p>
-          <p className="text-xs text-white/80 mt-2">📅 {selected.date} · {selected.startTime.replace(":","시 ")}분 시작</p>
+          <h2 className="text-base font-bold text-gray-900 flex-1 line-clamp-1">{selected.title}</h2>
         </div>
         <div className="px-5 py-4 flex flex-col gap-4">
-          {/* Before/After 사진 영역 */}
+          <div className="flex items-center gap-3">
+            <div className="w-2 h-2 rounded-full" style={{background:selected.teamColor}}/>
+            <span className="text-sm font-bold" style={{color:selected.teamColor}}>{selected.teamName}</span>
+            <span className="text-sm text-gray-400">·</span>
+            <span className="text-sm text-gray-400">{selected.date} {selected.startTime}</span>
+          </div>
+          <div className="h-px bg-gray-100"/>
           <div>
-            <p className="text-xs font-bold text-gray-500 mb-2">📸 현장 사진</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="aspect-square rounded-2xl bg-gray-100 flex flex-col items-center justify-center border-2 border-dashed border-gray-200">
-                <span className="text-2xl mb-1">📷</span>
-                <p className="text-xs text-gray-400 font-medium">Before</p>
-                <p className="text-[10px] text-gray-300 mt-0.5">Firebase 연동 후</p>
-              </div>
-              <div className="aspect-square rounded-2xl bg-gray-100 flex flex-col items-center justify-center border-2 border-dashed border-gray-200">
-                <span className="text-2xl mb-1">📷</span>
-                <p className="text-xs text-gray-400 font-medium">After</p>
-                <p className="text-[10px] text-gray-300 mt-0.5">Firebase 연동 후</p>
-              </div>
-            </div>
-          </div>
-          {/* 금액 */}
-          <div className="bg-green-50 rounded-2xl p-4 flex items-center justify-between">
-            <span className="text-sm font-bold text-green-700">💰 확정 금액</span>
-            <span className="text-lg font-extrabold text-green-600">{selected.price}원</span>
-          </div>
-          {/* 메모 */}
-          <div className="bg-gray-50 rounded-2xl p-4">
-            <p className="text-xs font-bold text-gray-500 mb-2">📝 현장 메모</p>
+            <p className="text-xs font-bold text-gray-400 mb-2">완료 메모</p>
             <p className="text-sm text-gray-700 leading-relaxed">{selected.memo}</p>
+          </div>
+          <div className="bg-gray-50 rounded-2xl p-4 flex items-center justify-between">
+            <span className="text-sm font-bold text-gray-500">청소 금액</span>
+            <span className="text-base font-extrabold text-blue-600">{selected.price}원</span>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1 bg-gray-100 rounded-2xl p-4 text-center">
+              <p className="text-xs text-gray-400 mb-1">Before</p>
+              <p className="text-2xl">📷</p>
+              <p className="text-xs text-gray-300 mt-1">사진 없음</p>
+            </div>
+            <div className="flex-1 bg-gray-100 rounded-2xl p-4 text-center">
+              <p className="text-xs text-gray-400 mb-1">After</p>
+              <p className="text-2xl">📷</p>
+              <p className="text-xs text-gray-300 mt-1">사진 없음</p>
+            </div>
           </div>
         </div>
       </div>
@@ -2235,36 +2273,108 @@ function ReportHistoryScreen() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
-      <div className="flex items-center gap-3 px-5 pt-5 pb-3">
-        <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
-          <ChevronLeft size={24} className="text-gray-700"/>
-        </button>
-        <h2 className="text-xl font-bold text-gray-900 flex-1">완료 보고 내역</h2>
-        <span className="text-xs text-gray-400 font-medium">{sampleReports.length}건</span>
+    <div className="flex-1 flex flex-col bg-gray-50 min-h-screen">
+      {/* 헤더 */}
+      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-0">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+              <ChevronLeft size={24} className="text-gray-700"/>
+            </button>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">완료 보고 내역</h2>
+              <p className="text-xs text-gray-400 mt-0.5">총 {filtered.length}건</p>
+            </div>
+          </div>
+          {/* 검색 버튼 */}
+          <button onClick={()=>setShowSearch(p=>!p)}
+            className="w-9 h-9 rounded-xl flex items-center justify-center transition-all"
+            style={{background:showSearch?"#1a56db":"#f3f4f6", color:showSearch?"white":"#374151"}}>
+            <Search size={16}/>
+          </button>
+        </div>
+
+        {/* 검색창 */}
+        {showSearch && (
+          <div className="relative mb-3">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
+            <input placeholder="현장명, 메모 검색..." value={searchQuery}
+              onChange={e=>setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-2.5 rounded-xl text-sm outline-none bg-gray-50 border border-gray-200"
+              autoFocus/>
+            {searchQuery && (
+              <button onClick={()=>setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 border-none bg-transparent cursor-pointer text-base">✕</button>
+            )}
+          </div>
+        )}
+
+        {/* 날짜 필터 */}
+        <div className="flex gap-2 overflow-x-auto pb-3">
+          {DATE_FILTERS.map(f=>(
+            <button key={f.value} onClick={()=>setDateFilter(f.value)}
+              className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
+              style={{background:dateFilter===f.value?"#111827":"white",
+                color:dateFilter===f.value?"white":"#6b7280",
+                borderColor:dateFilter===f.value?"#111827":"#e5e7eb"}}>
+              {f.label}
+            </button>
+          ))}
+          <div className="w-px bg-gray-200 mx-1 self-stretch"/>
+          {/* 팀 필터 */}
+          <button onClick={()=>setTeamFilter("전체")}
+            className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
+            style={{background:teamFilter==="전체"?"#111827":"white",
+              color:teamFilter==="전체"?"white":"#6b7280",
+              borderColor:teamFilter==="전체"?"#111827":"#e5e7eb"}}>
+            전체팀
+          </button>
+          {[...new Set(sampleReports.map(r=>r.teamName))].map(t=>(
+            <button key={t} onClick={()=>setTeamFilter(teamFilter===t?"전체":t)}
+              className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
+              style={{background:teamFilter===t?"#374151":"white",
+                color:teamFilter===t?"white":"#6b7280",
+                borderColor:teamFilter===t?"#374151":"#e5e7eb"}}>
+              {t}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="px-5 pb-8 flex flex-col gap-3">
-        {sampleReports.map(r=>(
-          <button key={r.id} onClick={()=>setSelected(r)}
-            className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 text-left w-full flex items-center gap-3 hover:border-blue-200 transition-all">
-            {/* 팀 컬러 바 */}
-            <div className="w-1 self-stretch rounded-full shrink-0" style={{background:r.teamColor}}/>
-            {/* 사진 썸네일 자리 */}
-            <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-2xl shrink-0">🏠</div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-gray-900 truncate">{r.title}</p>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{background:r.teamColor+"22",color:r.teamColor}}>{r.teamName}</span>
-                <span className="text-xs text-gray-400">{r.date}</span>
-              </div>
-              <p className="text-xs text-green-600 font-bold mt-1">{r.price}원</p>
+      {/* 목록 */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-5">
+        {filtered.length === 0 ? (
+          <div className="text-center py-16 text-gray-400">
+            <div className="text-4xl mb-3">📭</div>
+            <p className="text-sm font-bold">해당 내역이 없습니다</p>
+            {searchQuery && <p className="text-xs mt-2">"{searchQuery}" 검색 결과 없음</p>}
+          </div>
+        ) : dates.map(date=>(
+          <div key={date}>
+            <div className="flex items-center gap-3 mb-2">
+              <span className="text-xs font-bold text-gray-700">{dateLabel(date)}</span>
+              <div className="flex-1 h-px bg-gray-200"/>
+              <span className="text-xs text-gray-400">{grouped[date].length}건</span>
             </div>
-            <div className="flex flex-col items-end gap-1 shrink-0">
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-50 text-green-600">✅ {r.status}</span>
-              <ChevronLeft size={14} className="text-gray-300 rotate-180"/>
+            <div className="flex flex-col gap-2">
+              {grouped[date].map(r=>(
+                <button key={r.id} onClick={()=>setSelected(r)}
+                  className="w-full text-left bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 shadow-sm">
+                  <div className="w-1 self-stretch rounded-full shrink-0" style={{background:r.teamColor}}/>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-900 truncate">{r.title}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                        style={{background:r.teamColor+"22", color:r.teamColor}}>{r.teamName}</span>
+                      <span className="text-xs text-gray-400">{r.startTime}</span>
+                      <span className="text-xs text-gray-400">· {r.price}원</span>
+                    </div>
+                  </div>
+                  <ChevronLeft size={14} className="text-gray-300 rotate-180 shrink-0"/>
+                </button>
+              ))}
             </div>
-          </button>
+          </div>
         ))}
       </div>
     </div>
@@ -2272,8 +2382,6 @@ function ReportHistoryScreen() {
 }
 
 
-
-// ── 중요 공지 팝업 ───────────────────────────────────────────────
 function NoticePopup() {
   const { noticePopup, closePopup, setCurrentScreen } = useC();
   if(!noticePopup) return null;
