@@ -1,27 +1,18 @@
-/**
- * Firebase 초기화 모듈
- */
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId:             import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey:            "AIzaSyAz-Gt2CC0_6n0MA2UhRZBsqbHKobVLDzc",
+  authDomain:        "clean-manager-60bc9.firebaseapp.com",
+  projectId:         "clean-manager-60bc9",
+  storageBucket:     "clean-manager-60bc9.firebasestorage.app",
+  messagingSenderId: "121841901396",
+  appId:             "1:121841901396:web:2280750c052b2fcac7b2c1",
 };
-
-console.log("Firebase Config in code:", firebaseConfig);
 
 const app = initializeApp(firebaseConfig);
 
 export const db       = getFirestore(app);
 export const auth     = getAuth(app);
 export const provider = new GoogleAuthProvider();
-
-// 직원 계정 생성용 Secondary App (관리자 세션 유지용)
-export const secondaryApp = initializeApp(firebaseConfig, "SecondaryApp");
-export const secondaryAuth = getAuth(secondaryApp);
