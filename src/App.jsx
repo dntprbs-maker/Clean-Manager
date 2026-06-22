@@ -3988,8 +3988,29 @@ function ExternalLinksScreen() {
   const dragFrom = useRef(null);
   const dragTo   = useRef(null);
 
-  const EMOJIS    = ["🔗","📍","📞","💰","🧹","📋","🏢","🚗","📦","🛠️","🌐","📱","💬","📧","🗺️","📸"];
-  const CATEGORIES = ["전체","업무","지도","연락처","기타"];
+  const EMOJIS = ["🔗","📍","📞","💰","🧹","📋","🏢","🚗","📦","🛠️","🌐","📱","💬","📧","🗺️","📸"];
+  const [customCats, setCustomCats] = useState(["업무","지도","연락처","기타"]);
+  const [catModal, setCatModal]     = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [editCatIdx, setEditCatIdx] = useState(null);
+  const CATEGORIES = ["전체", ...customCats];
+
+  const addCat = () => {
+    if(!newCatName.trim()) return;
+    if(editCatIdx !== null) {
+      setCustomCats(p=>p.map((c,i)=>i===editCatIdx?newCatName.trim():c));
+      setEditCatIdx(null);
+    } else {
+      setCustomCats(p=>[...p, newCatName.trim()]);
+    }
+    setNewCatName(""); setCatModal(false);
+  };
+
+  const deleteCat = (idx) => {
+    const name = customCats[idx];
+    setCustomCats(p=>p.filter((_,i)=>i!==idx));
+    setLinks(p=>p.map(l=>l.category===name?{...l,category:"기타"}:l));
+  };
 
   const filtered = category==="전체" ? links : links.filter(l=>l.category===category);
 
