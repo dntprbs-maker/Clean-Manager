@@ -3,7 +3,7 @@ import { getFirestore } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey:            "AIzaSyAz-Gt2CC0_6n0MA2UhRZBsqbHKobVLDzc",
+  apiKey:            "AIzaSyAz-Gt2CC0_6nOMA2UhR28sqbHKobVLDzc",
   authDomain:        "clean-manager-60bc9.firebaseapp.com",
   projectId:         "clean-manager-60bc9",
   storageBucket:     "clean-manager-60bc9.firebasestorage.app",
