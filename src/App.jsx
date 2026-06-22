@@ -2705,8 +2705,8 @@ function ImportCalendarScreen() {
 
 // ── 로그인 화면 ───────────────────────────────────────────────
 function LoginScreen({ onLogin }) {
-  const [mode, setMode]               = useState("login");   // login | register | setPw
-  const [id, setId]                   = useState("");         // 사장: 아이디, 직원: 전화번호
+  const [mode, setMode]               = useState("login");  // login | register | setPw
+  const [id, setId]                   = useState("");
   const [pw, setPw]                   = useState("");
   const [pw2, setPw2]                 = useState("");
   const [companyName, setCompanyName] = useState("");
@@ -2714,67 +2714,50 @@ function LoginScreen({ onLogin }) {
   const [showPw, setShowPw]           = useState(false);
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState("");
-  const [pendingUser, setPendingUser] = useState(null); // 비밀번호 미설정 직원
+  const [pendingUser, setPendingUser] = useState(null);
 
-  // 사장님 로그인
-  const handleAdminLogin = async () => {
-    if(!id.trim()||!pw.trim()){ setError("아이디와 비밀번호를 입력하세요."); return; }
+  // 로그인 - 아이디/전화번호 자동 구분
+  const handleLogin = async () => {
+    if(!id.trim()){ setError("아이디 또는 전화번호를 입력하세요."); return; }
     setLoading(true); setError("");
     try {
       const { collection, query, where, getDocs, getDoc, doc } = await import("firebase/firestore");
-      const adminQ = query(collection(db, "admins"), where("id","==",id.trim()));
-      const adminSnap = await getDocs(adminQ);
-      if(!adminSnap.empty) {
-        const adminData = adminSnap.docs[0].data();
-        if(adminData.pw !== pw) { setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
-        const compDoc = await getDoc(doc(db, "companies", adminData.companyId));
-        const companyName = compDoc.exists() ? compDoc.data().name : "크린드림";
-        const user = {...adminData, uid:adminSnap.docs[0].id, companyName, role:"최고관리자"};
+      const isPhone = /^0\d{9,10}$/.test(id.trim().replace(/-/g,""));
+
+      if(isPhone) {
+        // 직원 (전화번호로 조회)
+        const phone = id.trim().replace(/-/g,"");
+        const staffQ = query(collection(db,"staffs"), where("phone","==",phone));
+        const staffSnap = await getDocs(staffQ);
+        if(staffSnap.empty){ setError("등록되지 않은 전화번호입니다."); setLoading(false); return; }
+        const staffData = staffSnap.docs[0].data();
+        const staffId   = staffSnap.docs[0].id;
+        // 첫 로그인 (비밀번호 없음)
+        if(!staffData.pw) {
+          const compDoc = await getDoc(doc(db,"companies",staffData.companyId));
+          setPendingUser({...staffData, uid:staffId, companyName:compDoc.exists()?compDoc.data().name:"크린드림"});
+          setMode("setPw"); setLoading(false); return;
+        }
+        // 비밀번호 확인
+        if(!pw.trim()){ setError("비밀번호를 입력하세요."); setLoading(false); return; }
+        if(staffData.pw !== pw){ setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
+        const compDoc = await getDoc(doc(db,"companies",staffData.companyId));
+        const user = {...staffData, uid:staffId, companyName:compDoc.exists()?compDoc.data().name:"크린드림"};
         try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
-        onLogin(user);
-        return;
+        onLogin(user); return;
+      } else {
+        // 관리자 (아이디로 조회)
+        if(!pw.trim()){ setError("비밀번호를 입력하세요."); setLoading(false); return; }
+        const adminQ = query(collection(db,"admins"), where("id","==",id.trim()));
+        const adminSnap = await getDocs(adminQ);
+        if(adminSnap.empty){ setError("등록되지 않은 아이디입니다."); setLoading(false); return; }
+        const adminData = adminSnap.docs[0].data();
+        if(adminData.pw !== pw){ setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
+        const compDoc = await getDoc(doc(db,"companies",adminData.companyId));
+        const user = {...adminData, uid:adminSnap.docs[0].id, companyName:compDoc.exists()?compDoc.data().name:"크린드림", role:"최고관리자"};
+        try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
+        onLogin(user); return;
       }
-      setError("등록되지 않은 아이디입니다.");
-    } catch(e) {
-      console.error(e);
-      setError("로그인 중 오류가 발생했습니다.");
-    } finally { setLoading(false); }
-  };
-
-  // 직원 로그인 (전화번호)
-  const handleStaffLogin = async () => {
-    if(!id.trim()){ setError("전화번호를 입력하세요."); return; }
-    setLoading(true); setError("");
-    try {
-      const { collection, query, where, getDocs, getDoc, doc, updateDoc } = await import("firebase/firestore");
-      // 전화번호로 직원 조회
-      const phone = id.trim().replace(/-/g,"");
-      const staffQ = query(collection(db, "staffs"), where("phone","==",phone));
-      const staffSnap = await getDocs(staffQ);
-      if(staffSnap.empty) { setError("등록되지 않은 전화번호입니다."); setLoading(false); return; }
-
-      const staffData = staffSnap.docs[0].data();
-      const staffId   = staffSnap.docs[0].id;
-
-      // 비밀번호 미설정 → 첫 로그인
-      if(!staffData.pw) {
-        const compDoc = await getDoc(doc(db, "companies", staffData.companyId));
-        const companyName = compDoc.exists() ? compDoc.data().name : "크린드림";
-        setPendingUser({...staffData, uid:staffId, companyName});
-        setMode("setPw");
-        setLoading(false);
-        return;
-      }
-
-      // 비밀번호 있으면 확인
-      if(!pw.trim()){ setError("비밀번호를 입력하세요."); setLoading(false); return; }
-      if(staffData.pw !== pw) { setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
-
-      const compDoc = await getDoc(doc(db, "companies", staffData.companyId));
-      const companyName = compDoc.exists() ? compDoc.data().name : "크린드림";
-      const user = {...staffData, uid:staffId, companyName};
-      try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
-      onLogin(user);
     } catch(e) {
       console.error(e);
       setError("로그인 중 오류가 발생했습니다.");
@@ -2783,13 +2766,13 @@ function LoginScreen({ onLogin }) {
 
   // 첫 로그인 비밀번호 설정
   const handleSetPw = async () => {
-    if(!pw.trim()||!pw2.trim()){ setError("비밀번호를 입력하세요."); return; }
-    if(pw !== pw2){ setError("비밀번호가 일치하지 않습니다."); return; }
-    if(pw.length < 4){ setError("비밀번호는 4자 이상이어야 합니다."); return; }
+    if(!pw||!pw2){ setError("비밀번호를 입력하세요."); return; }
+    if(pw!==pw2){ setError("비밀번호가 일치하지 않습니다."); return; }
+    if(pw.length<4){ setError("비밀번호는 4자 이상이어야 합니다."); return; }
     setLoading(true); setError("");
     try {
       const { doc, updateDoc } = await import("firebase/firestore");
-      await updateDoc(doc(db, "staffs", pendingUser.uid), { pw });
+      await updateDoc(doc(db,"staffs",pendingUser.uid), { pw });
       const user = {...pendingUser, pw};
       try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
       onLogin(user);
@@ -2799,7 +2782,7 @@ function LoginScreen({ onLogin }) {
     } finally { setLoading(false); }
   };
 
-  // 사장님 회원가입
+  // 업체 가입
   const handleRegister = async () => {
     if(!companyName||!id||!pw||!pw2){ setError("모든 항목을 입력하세요."); return; }
     if(pw!==pw2){ setError("비밀번호가 일치하지 않습니다."); return; }
@@ -2807,23 +2790,14 @@ function LoginScreen({ onLogin }) {
     setLoading(true); setError("");
     try {
       const { collection, query, where, getDocs, doc, setDoc } = await import("firebase/firestore");
-      const adminQ = query(collection(db, "admins"), where("id","==",id.trim()));
+      const adminQ = query(collection(db,"admins"), where("id","==",id.trim()));
       const adminSnap = await getDocs(adminQ);
       if(!adminSnap.empty){ setError("이미 사용 중인 아이디입니다."); setLoading(false); return; }
       const companyId = "c_" + Math.random().toString(36).slice(2,9);
       const adminId   = "a_" + Math.random().toString(36).slice(2,9);
-      await setDoc(doc(db, "companies", companyId), {
-        name: companyName.trim(), companyId,
-        createdAt: new Date().toISOString(),
-      });
-      await setDoc(doc(db, "admins", adminId), {
-        id: id.trim(), pw,
-        name: id.trim(), companyId,
-        role: "최고관리자", team: "관리팀",
-        createdAt: new Date().toISOString(),
-      });
-      const user = {uid:adminId, id:id.trim(), name:id.trim(), companyId,
-        companyName:companyName.trim(), role:"최고관리자", team:"관리팀"};
+      await setDoc(doc(db,"companies",companyId), { name:companyName.trim(), companyId, createdAt:new Date().toISOString() });
+      await setDoc(doc(db,"admins",adminId), { id:id.trim(), pw, name:id.trim(), companyId, role:"최고관리자", team:"관리팀", createdAt:new Date().toISOString() });
+      const user = {uid:adminId, id:id.trim(), name:id.trim(), companyId, companyName:companyName.trim(), role:"최고관리자", team:"관리팀"};
       try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
       onLogin(user);
     } catch(e) {
@@ -2832,7 +2806,7 @@ function LoginScreen({ onLogin }) {
     } finally { setLoading(false); }
   };
 
-  // ── 첫 로그인 비밀번호 설정 화면 ──
+  // ── 비밀번호 설정 화면 (첫 로그인) ──
   if(mode==="setPw") {
     return (
       <div className="flex-1 flex flex-col bg-white min-h-screen">
@@ -2846,7 +2820,7 @@ function LoginScreen({ onLogin }) {
           </p>
         </div>
         <div className="px-6 pb-12 flex flex-col gap-3">
-          <div className="p-4 rounded-2xl bg-green-50 border border-green-100 mb-2">
+          <div className="p-4 rounded-2xl bg-green-50 border border-green-100 mb-1">
             <p className="text-sm font-bold text-green-600 mb-1">📱 로그인 정보</p>
             <p className="text-xs text-gray-500">전화번호: <span className="font-bold text-gray-800">{id}</span></p>
             <p className="text-xs text-gray-400 mt-1">다음부터 이 번호 + 비밀번호로 로그인해요.</p>
@@ -2855,26 +2829,20 @@ function LoginScreen({ onLogin }) {
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
             <input type={showPw?"text":"password"} placeholder="새 비밀번호 (4자 이상)" value={pw}
               onChange={e=>{setPw(e.target.value);setError("");}}
-              className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                (pw?"border-green-400":"border-gray-200")}/>
-            <button onClick={()=>setShowPw(p=>!p)}
-              className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">
-              {showPw?"🙈":"👁️"}
-            </button>
+              className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(pw?"border-green-400":"border-gray-200")}/>
+            <button onClick={()=>setShowPw(p=>!p)} className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">{showPw?"🙈":"👁️"}</button>
           </div>
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
             <input type={showPw?"text":"password"} placeholder="비밀번호 확인" value={pw2}
               onChange={e=>{setPw2(e.target.value);setError("");}}
-              className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                (pw2?(pw===pw2?"border-green-400":"border-red-400"):"border-gray-200")}/>
-            {pw2 && <span className="absolute right-4 top-1/2 -translate-y-1/2 text-base">{pw===pw2?"✅":"❌"}</span>}
+              className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(pw2?(pw===pw2?"border-green-400":"border-red-400"):"border-gray-200")}/>
+            {pw2&&<span className="absolute right-4 top-1/2 -translate-y-1/2 text-base">{pw===pw2?"✅":"❌"}</span>}
           </div>
-          {error && <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
+          {error&&<div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
           <button onClick={handleSetPw} disabled={loading}
             className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
-            style={{background:pw&&pw2?"linear-gradient(135deg,#16a34a,#15803d)":"#e5e7eb",
-              opacity:loading?0.7:1}}>
+            style={{background:pw&&pw2?"linear-gradient(135deg,#16a34a,#15803d)":"#e5e7eb",opacity:loading?0.7:1}}>
             {loading?"설정 중...":"비밀번호 설정하고 시작하기"}
           </button>
         </div>
@@ -2882,162 +2850,109 @@ function LoginScreen({ onLogin }) {
     );
   }
 
+  // ── 업체 가입 화면 ──
+  if(mode==="register") {
+    return (
+      <div className="flex-1 flex flex-col bg-white min-h-screen">
+        <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
+          <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
+            style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🧹</div>
+          <h1 className="text-3xl font-extrabold text-gray-900 mb-2">크린매니저</h1>
+          <p className="text-sm text-gray-400 font-medium">청소업체 관리 솔루션</p>
+        </div>
+        <div className="px-6 pb-12 flex flex-col gap-3">
+          <button onClick={()=>{setMode("login");setError("");}}
+            className="flex items-center gap-1 border-none bg-transparent cursor-pointer text-sm text-gray-500 font-semibold mb-1 p-0">
+            ‹ 로그인으로 돌아가기
+          </button>
+          <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 mb-1">
+            <p className="text-sm font-bold text-blue-600 mb-1">🏢 업체 대표 계정 만들기</p>
+            <p className="text-xs text-gray-500 leading-relaxed">직원 계정은 가입 후 직원 관리 메뉴에서 추가할 수 있어요.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="cursor-pointer shrink-0">
+              <div className="w-14 h-14 rounded-2xl overflow-hidden flex items-center justify-center"
+                style={{background:logoPreview?"transparent":"#f3f4f6",border:`2px dashed ${logoPreview?"#1a56db":"#d1d5db"}`}}>
+                {logoPreview
+                  ? <img src={logoPreview} className="w-full h-full object-cover"/>
+                  : <div className="text-center"><div className="text-xl">📷</div><div className="text-gray-400" style={{fontSize:9}}>로고</div></div>}
+              </div>
+              <input type="file" accept="image/*" onChange={e=>{const f=e.target.files[0];if(f)setLogoPreview(URL.createObjectURL(f));}} className="hidden"/>
+            </label>
+            <input placeholder="회사명" value={companyName} onChange={e=>{setCompanyName(e.target.value);setError("");}}
+              className={"flex-1 min-w-0 py-3.5 px-4 rounded-2xl text-sm outline-none bg-gray-50 border "+(companyName?"border-blue-400":"border-gray-200")}/>
+          </div>
+          <div className="h-px bg-gray-100"/>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
+            <input placeholder="아이디" value={id} onChange={e=>{setId(e.target.value);setError("");}}
+              className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(id?"border-blue-400":"border-gray-200")}/>
+          </div>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+            <input type={showPw?"text":"password"} placeholder="비밀번호 (4자 이상)" value={pw} onChange={e=>{setPw(e.target.value);setError("");}}
+              className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(pw?"border-blue-400":"border-gray-200")}/>
+            <button onClick={()=>setShowPw(p=>!p)} className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">{showPw?"🙈":"👁️"}</button>
+          </div>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+            <input type={showPw?"text":"password"} placeholder="비밀번호 확인" value={pw2} onChange={e=>{setPw2(e.target.value);setError("");}}
+              className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(pw2?(pw===pw2?"border-green-400":"border-red-400"):"border-gray-200")}/>
+            {pw2&&<span className="absolute right-4 top-1/2 -translate-y-1/2 text-base">{pw===pw2?"✅":"❌"}</span>}
+          </div>
+          {error&&<div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
+          <button onClick={handleRegister} disabled={loading}
+            className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
+            style={{background:id&&pw&&pw2&&companyName?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",opacity:loading?0.7:1}}>
+            {loading?"가입 중...":"가입하기"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── 로그인 화면 ──
   return (
     <div className="flex-1 flex flex-col bg-white min-h-screen">
-      {/* 브랜딩 */}
       <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
         <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
           style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🧹</div>
         <h1 className="text-3xl font-extrabold text-gray-900 mb-2">크린매니저</h1>
         <p className="text-sm text-gray-400 font-medium">청소업체 관리 솔루션</p>
       </div>
-
       <div className="px-6 pb-12 flex flex-col gap-3">
-        {/* 탭 */}
-        <div className="flex bg-gray-100 rounded-2xl p-1 gap-1 mb-1">
-          {[["login","🔐 관리자"],["staff","📱 직원"],["register","✏️ 업체 가입"]].map(([k,l])=>(
-            <button key={k} onClick={()=>{setMode(k);setError("");setId("");setPw("");}}
-              className={"flex-1 py-2 rounded-xl text-xs font-bold transition-all " +
-                (mode===k?"bg-white shadow text-gray-900":"text-gray-400")}>
-              {l}
-            </button>
-          ))}
+        {/* 아이디/전화번호 */}
+        <div className="relative">
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
+          <input placeholder="아이디 또는 전화번호" value={id}
+            onChange={e=>{setId(e.target.value);setError("");setPw("");}}
+            className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(id?"border-blue-400":"border-gray-200")}/>
         </div>
-
-        {/* 관리자 로그인 */}
-        {mode==="login" && (
-          <>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
-              <input placeholder="아이디" value={id}
-                onChange={e=>{setId(e.target.value);setError("");}}
-                className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (id?"border-blue-400":"border-gray-200")}/>
-            </div>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
-              <input type={showPw?"text":"password"} placeholder="비밀번호" value={pw}
-                onChange={e=>{setPw(e.target.value);setError("");}}
-                onKeyDown={e=>e.key==="Enter"&&handleAdminLogin()}
-                className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (pw?"border-blue-400":"border-gray-200")}/>
-              <button onClick={()=>setShowPw(p=>!p)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">
-                {showPw?"🙈":"👁️"}
-              </button>
-            </div>
-            {error && <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
-            <button onClick={handleAdminLogin} disabled={loading}
-              className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
-              style={{background:id&&pw?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",opacity:loading?0.7:1}}>
-              {loading?"로그인 중...":"로그인"}
-            </button>
-          </>
+        {/* 전화번호 아니면 비밀번호 바로 표시, 전화번호면 10자 이상 입력 후 표시 */}
+        {(id && (!/^0\d/.test(id) || id.replace(/-/g,"").length >= 10)) && (
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+            <input type={showPw?"text":"password"}
+              placeholder={/^0\d/.test(id)?"비밀번호 (처음이면 비워두세요)":"비밀번호"}
+              value={pw} onChange={e=>{setPw(e.target.value);setError("");}}
+              onKeyDown={e=>e.key==="Enter"&&handleLogin()}
+              className="w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border border-gray-200"/>
+            <button onClick={()=>setShowPw(p=>!p)} className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">{showPw?"🙈":"👁️"}</button>
+          </div>
         )}
-
-        {/* 직원 로그인 */}
-        {mode==="staff" && (
-          <>
-            <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100 mb-1">
-              <p className="text-sm font-bold text-gray-700 mb-1">📱 직원 로그인</p>
-              <p className="text-xs text-gray-400 leading-relaxed">
-                전화번호로 로그인하세요.<br/>
-                처음 로그인하면 비밀번호를 설정할 수 있어요.
-              </p>
-            </div>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">📱</span>
-              <input placeholder="전화번호 (예: 01012345678)" value={id}
-                onChange={e=>{setId(e.target.value);setError("");setPw("");}}
-                type="tel"
-                className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (id?"border-blue-400":"border-gray-200")}/>
-            </div>
-            {/* 전화번호 입력 후 비밀번호란 표시 */}
-            {id.replace(/-/g,"").length >= 10 && (
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
-                <input type={showPw?"text":"password"} placeholder="비밀번호 (처음이면 비워두세요)" value={pw}
-                  onChange={e=>{setPw(e.target.value);setError("");}}
-                  onKeyDown={e=>e.key==="Enter"&&handleStaffLogin()}
-                  className="w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border border-gray-200"/>
-                <button onClick={()=>setShowPw(p=>!p)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">
-                  {showPw?"🙈":"👁️"}
-                </button>
-              </div>
-            )}
-            {error && <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
-            <button onClick={handleStaffLogin} disabled={loading}
-              className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
-              style={{background:id?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",opacity:loading?0.7:1}}>
-              {loading?"확인 중...":"로그인"}
-            </button>
-          </>
-        )}
-
-        {/* 업체 가입 */}
-        {mode==="register" && (
-          <>
-            <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 mb-1">
-              <p className="text-sm font-bold text-blue-600 mb-1">🏢 업체 대표 계정 만들기</p>
-              <p className="text-xs text-gray-500 leading-relaxed">직원 계정은 가입 후 직원 관리 메뉴에서 추가할 수 있어요.</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <label className="cursor-pointer shrink-0">
-                <div className="w-14 h-14 rounded-2xl overflow-hidden flex items-center justify-center"
-                  style={{background:logoPreview?"transparent":"#f3f4f6",
-                    border:`2px dashed ${logoPreview?"#1a56db":"#d1d5db"}`}}>
-                  {logoPreview
-                    ? <img src={logoPreview} className="w-full h-full object-cover"/>
-                    : <div className="text-center"><div className="text-xl">📷</div><div className="text-gray-400" style={{fontSize:9}}>로고</div></div>
-                  }
-                </div>
-                <input type="file" accept="image/*"
-                  onChange={e=>{const f=e.target.files[0];if(f)setLogoPreview(URL.createObjectURL(f));}}
-                  className="hidden"/>
-              </label>
-              <input placeholder="회사명" value={companyName}
-                onChange={e=>{setCompanyName(e.target.value);setError("");}}
-                className={"flex-1 min-w-0 py-3.5 px-4 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (companyName?"border-blue-400":"border-gray-200")}/>
-            </div>
-            <div className="h-px bg-gray-100"/>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
-              <input placeholder="아이디" value={id}
-                onChange={e=>{setId(e.target.value);setError("");}}
-                className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (id?"border-blue-400":"border-gray-200")}/>
-            </div>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
-              <input type={showPw?"text":"password"} placeholder="비밀번호 (4자 이상)" value={pw}
-                onChange={e=>{setPw(e.target.value);setError("");}}
-                className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (pw?"border-blue-400":"border-gray-200")}/>
-              <button onClick={()=>setShowPw(p=>!p)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">
-                {showPw?"🙈":"👁️"}
-              </button>
-            </div>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
-              <input type={showPw?"text":"password"} placeholder="비밀번호 확인" value={pw2}
-                onChange={e=>{setPw2(e.target.value);setError("");}}
-                className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (pw2?(pw===pw2?"border-green-400":"border-red-400"):"border-gray-200")}/>
-              {pw2 && <span className="absolute right-4 top-1/2 -translate-y-1/2 text-base">{pw===pw2?"✅":"❌"}</span>}
-            </div>
-            {error && <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
-            <button onClick={handleRegister} disabled={loading}
-              className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
-              style={{background:id&&pw&&pw2&&companyName?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",
-                opacity:loading?0.7:1}}>
-              {loading?"가입 중...":"가입하기"}
-            </button>
-          </>
-        )}
+        {error&&<div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
+        <button onClick={handleLogin} disabled={loading}
+          className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
+          style={{background:id?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",opacity:loading?0.7:1}}>
+          {loading?"확인 중...":"로그인"}
+        </button>
+        <p className="text-sm text-gray-400 text-center mt-1">
+          처음 사용하시나요?{" "}
+          <button onClick={()=>{setMode("register");setError("");setId("");setPw("");}}
+            className="text-blue-500 font-bold border-none bg-transparent cursor-pointer text-sm">
+            회원가입
+          </button>
+        </p>
       </div>
     </div>
   );
