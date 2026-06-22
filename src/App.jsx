@@ -1411,6 +1411,13 @@ function SideDrawer() {
             className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
             <Bell size={20} className="text-orange-500" />
             <span className="text-sm font-medium text-gray-700 flex-1 text-left">팀 공지사항</span>
+            {(() => {
+              const readIds = JSON.parse(localStorage.getItem("readNotices")||"[]");
+              const unread = notices.filter(n=>!readIds.includes(n.id)).length;
+              return unread > 0
+                ? <span className="text-xs font-bold text-white bg-red-500 rounded-full w-5 h-5 flex items-center justify-center shrink-0">{unread}</span>
+                : null;
+            })()}
           </button>
 
           {/* 변경 로그 - 최고관리자, 관리팀장만 */}
@@ -1447,20 +1454,6 @@ function SideDrawer() {
               <span className="text-sm font-medium text-gray-700 flex-1 text-left">📥 캘린더 가져오기</span>
             </button>
           )}
-
-          {/* 로그아웃 버튼 */}
-          <div className="px-4 pt-2 pb-4 mt-2 border-t border-gray-100">
-            <button
-              onClick={() => {
-                localStorage.removeItem("loginUser");
-                onLogout();
-                setDrawer(false);
-              }}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-red-50 hover:bg-red-100 transition-colors">
-              <span className="text-red-500 text-lg">🚪</span>
-              <span className="text-sm font-bold text-red-500 flex-1 text-left">로그아웃</span>
-            </button>
-          </div>
         </div>
       </div>
     </>
@@ -1660,19 +1653,37 @@ function EventModal() {
       {/* ── 새 디자인 폼 (네이버 스타일) ───────────────────────── */}
       <div className="flex-1 overflow-y-auto bg-white">
 
-        {/* 캘린더(담당팀) 선택 — 맨 위 */}
-        <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-100 bg-gray-50/50">
-          <User size={18} className="text-gray-400 shrink-0"/>
-          <span className="text-sm font-semibold text-gray-700 shrink-0">담당팀</span>
-          <select
-            value={form.calId}
-            onChange={e=>set("calId",e.target.value)}
-            className="flex-1 text-sm font-bold outline-none bg-transparent text-right"
-            style={{color: cals.find(c=>c.id===form.calId)?.color || "#333"}}>
-            {cals.map(cal=>(
-              <option key={cal.id} value={cal.id}>{cal.label}</option>
-            ))}
-          </select>
+        {/* 캘린더(담당팀) 선택 — 버튼 방식 */}
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/50">
+          <div className="flex items-center gap-2 mb-2">
+            <User size={16} className="text-gray-400 shrink-0"/>
+            <span className="text-sm font-semibold text-gray-700">담당팀</span>
+            {form.calId && (
+              <span className="ml-auto text-xs font-bold px-2 py-0.5 rounded-full"
+                style={{background: (cals.find(c=>c.id===form.calId)?.color||"#1a56db")+"22",
+                  color: cals.find(c=>c.id===form.calId)?.color||"#1a56db"}}>
+                {cals.find(c=>c.id===form.calId)?.label}
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {cals.map(cal=>{
+              const selected = form.calId === cal.id;
+              return (
+                <button key={cal.id}
+                  onClick={()=>set("calId", cal.id)}
+                  className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
+                  style={{
+                    background: selected ? cal.color : "white",
+                    color: selected ? "white" : "#6b7280",
+                    borderColor: selected ? cal.color : "#e5e7eb",
+                    boxShadow: selected ? `0 2px 8px ${cal.color}44` : "none"
+                  }}>
+                  {cal.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* 제목 */}
@@ -2181,19 +2192,62 @@ function FieldReportScreen({ ev, onClose }) {
 
 // ── 완료 보고 히스토리 화면 ───────────────────────────────────────────────
 function ReportHistoryScreen() {
-  const { setCurrentScreen, events, cals, currentUser } = useC();
+  const { setCurrentScreen, cals } = useC();
 
-  // 샘플 보고 데이터 (Firebase 연동 전 목업)
   const sampleReports = [
-    {id:"r1", title:"강남구 OO동 입주청소 30평", date:"2026-06-20", startTime:"09:00", teamName:"청소 1팀", teamColor:"#1a56db", status:"완료", memo:"주방 기름때 심했으나 완료. 베란다 청소 추가 진행.", price:"400,000"},
-    {id:"r2", title:"마포구 아현동 이사청소 25평", date:"2026-06-19", startTime:"13:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음. 깔끔하게 완료.", price:"320,000"},
-    {id:"r3", title:"송파구 잠실 정기청소", date:"2026-06-18", startTime:"10:00", teamName:"청소 1팀", teamColor:"#1a56db", status:"완료", memo:"에어컨 필터 청소 추가 요청. 처리 완료.", price:"150,000"},
+    {id:"r1", title:"강남구 OO동 입주청소 30평",    date:"2026-06-20", startTime:"09:00", teamName:"청소 1팀", teamColor:"#1a56db", status:"완료", memo:"주방 기름때 심했으나 완료. 베란다 청소 추가 진행.", price:"400,000"},
+    {id:"r2", title:"마포구 아현동 이사청소 25평",   date:"2026-06-19", startTime:"13:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음. 깔끔하게 완료.", price:"320,000"},
+    {id:"r3", title:"송파구 잠실 정기청소",          date:"2026-06-18", startTime:"10:00", teamName:"청소 1팀", teamColor:"#1a56db", status:"완료", memo:"에어컨 필터 청소 추가 요청. 처리 완료.", price:"150,000"},
     {id:"r4", title:"동대문구 전농동 입주청소 33평", date:"2026-06-17", startTime:"09:30", teamName:"청소 3팀", teamColor:"#ea580c", status:"완료", memo:"인테리어 후 입주 청소. 실리콘 작업 흔적 제거 완료.", price:"450,000"},
-    {id:"r5", title:"서초구 방배동 이사청소 28평", date:"2026-06-16", startTime:"14:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음.", price:"350,000"},
+    {id:"r5", title:"서초구 방배동 이사청소 28평",   date:"2026-06-16", startTime:"14:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음.", price:"350,000"},
+    {id:"r6", title:"노원구 LH 입주청소 28평",       date:"2026-06-15", startTime:"11:00", teamName:"LH",      teamColor:"#7c3aed", status:"완료", memo:"LH 표준 청소 완료.", price:"280,000"},
+    {id:"r7", title:"마포구 공덕 정기청소",          date:"2026-06-14", startTime:"14:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음.", price:"150,000"},
   ];
 
   const [selected, setSelected] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dateFilter, setDateFilter]   = useState("전체");
+  const [teamFilter, setTeamFilter]   = useState("전체");
+  const [showSearch, setShowSearch]   = useState(false);
 
+  // 날짜 필터 옵션
+  const today = fmt(new Date());
+  const weekAgo = fmt(new Date(Date.now() - 86400000 * 7));
+  const monthAgo = fmt(new Date(Date.now() - 86400000 * 30));
+
+  const DATE_FILTERS = [
+    {label:"전체", value:"전체"},
+    {label:"오늘", value:"today"},
+    {label:"이번주", value:"week"},
+    {label:"이번달", value:"month"},
+  ];
+
+  // 필터 적용
+  const filtered = sampleReports.filter(r => {
+    const matchDate = dateFilter === "전체" ? true
+      : dateFilter === "today" ? r.date === today
+      : dateFilter === "week"  ? r.date >= weekAgo
+      : r.date >= monthAgo;
+    const matchTeam   = teamFilter === "전체" || r.teamName === teamFilter;
+    const matchSearch = !searchQuery || r.title.includes(searchQuery) || r.memo.includes(searchQuery);
+    return matchDate && matchTeam && matchSearch;
+  });
+
+  // 날짜별 그룹
+  const grouped = filtered.reduce((acc, r) => {
+    if(!acc[r.date]) acc[r.date] = [];
+    acc[r.date].push(r);
+    return acc;
+  }, {});
+  const dates = Object.keys(grouped).sort((a,b)=>b.localeCompare(a));
+
+  const dateLabel = (d) => {
+    if(d === today) return "오늘";
+    if(d === fmt(new Date(Date.now()-86400000))) return "어제";
+    return d.slice(5).replace("-",".");
+  };
+
+  // 상세 화면
   if(selected) {
     return (
       <div className="flex-1 overflow-y-auto bg-white flex flex-col">
@@ -2201,40 +2255,35 @@ function ReportHistoryScreen() {
           <button onClick={()=>setSelected(null)} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
             <ChevronLeft size={24} className="text-gray-700"/>
           </button>
-          <h2 className="text-base font-bold text-gray-900 flex-1 line-clamp-1">보고서 상세</h2>
-        </div>
-        {/* 히어로 */}
-        <div className="px-5 py-5" style={{background:`linear-gradient(135deg,${selected.teamColor},${selected.teamColor}cc)`}}>
-          <p className="text-xs font-bold text-white/70 mb-1">{selected.teamName}</p>
-          <p className="text-lg font-extrabold text-white leading-snug">{selected.title}</p>
-          <p className="text-xs text-white/80 mt-2">📅 {selected.date} · {selected.startTime.replace(":","시 ")}분 시작</p>
+          <h2 className="text-base font-bold text-gray-900 flex-1 line-clamp-1">{selected.title}</h2>
         </div>
         <div className="px-5 py-4 flex flex-col gap-4">
-          {/* Before/After 사진 영역 */}
+          <div className="flex items-center gap-3">
+            <div className="w-2 h-2 rounded-full" style={{background:selected.teamColor}}/>
+            <span className="text-sm font-bold" style={{color:selected.teamColor}}>{selected.teamName}</span>
+            <span className="text-sm text-gray-400">·</span>
+            <span className="text-sm text-gray-400">{selected.date} {selected.startTime}</span>
+          </div>
+          <div className="h-px bg-gray-100"/>
           <div>
-            <p className="text-xs font-bold text-gray-500 mb-2">📸 현장 사진</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="aspect-square rounded-2xl bg-gray-100 flex flex-col items-center justify-center border-2 border-dashed border-gray-200">
-                <span className="text-2xl mb-1">📷</span>
-                <p className="text-xs text-gray-400 font-medium">Before</p>
-                <p className="text-[10px] text-gray-300 mt-0.5">Firebase 연동 후</p>
-              </div>
-              <div className="aspect-square rounded-2xl bg-gray-100 flex flex-col items-center justify-center border-2 border-dashed border-gray-200">
-                <span className="text-2xl mb-1">📷</span>
-                <p className="text-xs text-gray-400 font-medium">After</p>
-                <p className="text-[10px] text-gray-300 mt-0.5">Firebase 연동 후</p>
-              </div>
-            </div>
-          </div>
-          {/* 금액 */}
-          <div className="bg-green-50 rounded-2xl p-4 flex items-center justify-between">
-            <span className="text-sm font-bold text-green-700">💰 확정 금액</span>
-            <span className="text-lg font-extrabold text-green-600">{selected.price}원</span>
-          </div>
-          {/* 메모 */}
-          <div className="bg-gray-50 rounded-2xl p-4">
-            <p className="text-xs font-bold text-gray-500 mb-2">📝 현장 메모</p>
+            <p className="text-xs font-bold text-gray-400 mb-2">완료 메모</p>
             <p className="text-sm text-gray-700 leading-relaxed">{selected.memo}</p>
+          </div>
+          <div className="bg-gray-50 rounded-2xl p-4 flex items-center justify-between">
+            <span className="text-sm font-bold text-gray-500">청소 금액</span>
+            <span className="text-base font-extrabold text-blue-600">{selected.price}원</span>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1 bg-gray-100 rounded-2xl p-4 text-center">
+              <p className="text-xs text-gray-400 mb-1">Before</p>
+              <p className="text-2xl">📷</p>
+              <p className="text-xs text-gray-300 mt-1">사진 없음</p>
+            </div>
+            <div className="flex-1 bg-gray-100 rounded-2xl p-4 text-center">
+              <p className="text-xs text-gray-400 mb-1">After</p>
+              <p className="text-2xl">📷</p>
+              <p className="text-xs text-gray-300 mt-1">사진 없음</p>
+            </div>
           </div>
         </div>
       </div>
@@ -2242,36 +2291,108 @@ function ReportHistoryScreen() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
-      <div className="flex items-center gap-3 px-5 pt-5 pb-3">
-        <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
-          <ChevronLeft size={24} className="text-gray-700"/>
-        </button>
-        <h2 className="text-xl font-bold text-gray-900 flex-1">완료 보고 내역</h2>
-        <span className="text-xs text-gray-400 font-medium">{sampleReports.length}건</span>
+    <div className="flex-1 flex flex-col bg-gray-50 min-h-screen">
+      {/* 헤더 */}
+      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-0">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+              <ChevronLeft size={24} className="text-gray-700"/>
+            </button>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">완료 보고 내역</h2>
+              <p className="text-xs text-gray-400 mt-0.5">총 {filtered.length}건</p>
+            </div>
+          </div>
+          {/* 검색 버튼 */}
+          <button onClick={()=>setShowSearch(p=>!p)}
+            className="w-9 h-9 rounded-xl flex items-center justify-center transition-all"
+            style={{background:showSearch?"#1a56db":"#f3f4f6", color:showSearch?"white":"#374151"}}>
+            <Search size={16}/>
+          </button>
+        </div>
+
+        {/* 검색창 */}
+        {showSearch && (
+          <div className="relative mb-3">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
+            <input placeholder="현장명, 메모 검색..." value={searchQuery}
+              onChange={e=>setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-2.5 rounded-xl text-sm outline-none bg-gray-50 border border-gray-200"
+              autoFocus/>
+            {searchQuery && (
+              <button onClick={()=>setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 border-none bg-transparent cursor-pointer text-base">✕</button>
+            )}
+          </div>
+        )}
+
+        {/* 날짜 필터 */}
+        <div className="flex gap-2 overflow-x-auto pb-3">
+          {DATE_FILTERS.map(f=>(
+            <button key={f.value} onClick={()=>setDateFilter(f.value)}
+              className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
+              style={{background:dateFilter===f.value?"#111827":"white",
+                color:dateFilter===f.value?"white":"#6b7280",
+                borderColor:dateFilter===f.value?"#111827":"#e5e7eb"}}>
+              {f.label}
+            </button>
+          ))}
+          <div className="w-px bg-gray-200 mx-1 self-stretch"/>
+          {/* 팀 필터 */}
+          <button onClick={()=>setTeamFilter("전체")}
+            className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
+            style={{background:teamFilter==="전체"?"#111827":"white",
+              color:teamFilter==="전체"?"white":"#6b7280",
+              borderColor:teamFilter==="전체"?"#111827":"#e5e7eb"}}>
+            전체팀
+          </button>
+          {[...new Set(sampleReports.map(r=>r.teamName))].map(t=>(
+            <button key={t} onClick={()=>setTeamFilter(teamFilter===t?"전체":t)}
+              className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
+              style={{background:teamFilter===t?"#374151":"white",
+                color:teamFilter===t?"white":"#6b7280",
+                borderColor:teamFilter===t?"#374151":"#e5e7eb"}}>
+              {t}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="px-5 pb-8 flex flex-col gap-3">
-        {sampleReports.map(r=>(
-          <button key={r.id} onClick={()=>setSelected(r)}
-            className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 text-left w-full flex items-center gap-3 hover:border-blue-200 transition-all">
-            {/* 팀 컬러 바 */}
-            <div className="w-1 self-stretch rounded-full shrink-0" style={{background:r.teamColor}}/>
-            {/* 사진 썸네일 자리 */}
-            <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-2xl shrink-0">🏠</div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-gray-900 truncate">{r.title}</p>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{background:r.teamColor+"22",color:r.teamColor}}>{r.teamName}</span>
-                <span className="text-xs text-gray-400">{r.date}</span>
-              </div>
-              <p className="text-xs text-green-600 font-bold mt-1">{r.price}원</p>
+      {/* 목록 */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-5">
+        {filtered.length === 0 ? (
+          <div className="text-center py-16 text-gray-400">
+            <div className="text-4xl mb-3">📭</div>
+            <p className="text-sm font-bold">해당 내역이 없습니다</p>
+            {searchQuery && <p className="text-xs mt-2">"{searchQuery}" 검색 결과 없음</p>}
+          </div>
+        ) : dates.map(date=>(
+          <div key={date}>
+            <div className="flex items-center gap-3 mb-2">
+              <span className="text-xs font-bold text-gray-700">{dateLabel(date)}</span>
+              <div className="flex-1 h-px bg-gray-200"/>
+              <span className="text-xs text-gray-400">{grouped[date].length}건</span>
             </div>
-            <div className="flex flex-col items-end gap-1 shrink-0">
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-50 text-green-600">✅ {r.status}</span>
-              <ChevronLeft size={14} className="text-gray-300 rotate-180"/>
+            <div className="flex flex-col gap-2">
+              {grouped[date].map(r=>(
+                <button key={r.id} onClick={()=>setSelected(r)}
+                  className="w-full text-left bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 shadow-sm">
+                  <div className="w-1 self-stretch rounded-full shrink-0" style={{background:r.teamColor}}/>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-900 truncate">{r.title}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                        style={{background:r.teamColor+"22", color:r.teamColor}}>{r.teamName}</span>
+                      <span className="text-xs text-gray-400">{r.startTime}</span>
+                      <span className="text-xs text-gray-400">· {r.price}원</span>
+                    </div>
+                  </div>
+                  <ChevronLeft size={14} className="text-gray-300 rotate-180 shrink-0"/>
+                </button>
+              ))}
             </div>
-          </button>
+          </div>
         ))}
       </div>
     </div>
@@ -2279,12 +2400,64 @@ function ReportHistoryScreen() {
 }
 
 
+function NoticePopup() {
+  const { noticePopup, closePopup, setCurrentScreen } = useC();
+  if(!noticePopup) return null;
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:"24px",
+      background:"rgba(0,0,0,.5)"}}>
+      <div style={{background:"white",borderRadius:24,width:"100%",maxWidth:360,
+        boxShadow:"0 20px 60px rgba(0,0,0,.3)",animation:"fadeIn .3s ease"}}>
+        {/* 헤더 */}
+        <div style={{padding:"20px 20px 0",display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:36,height:36,borderRadius:12,background:"#fef2f2",
+            display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>
+            📌
+          </div>
+          <div style={{flex:1}}>
+            <p style={{fontSize:11,fontWeight:700,color:"#ef4444",marginBottom:2}}>중요 공지사항</p>
+            <p style={{fontSize:15,fontWeight:800,color:"#111827",lineHeight:1.3}}>{noticePopup.title}</p>
+          </div>
+        </div>
+        {/* 내용 */}
+        <div style={{padding:"16px 20px",maxHeight:200,overflowY:"auto"}}>
+          <p style={{fontSize:13,color:"#6b7280",lineHeight:1.8,whiteSpace:"pre-wrap"}}>
+            {noticePopup.body || "내용이 없습니다."}
+          </p>
+        </div>
+        {/* 작성자/날짜 */}
+        <div style={{padding:"0 20px 16px",display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#9ca3af"}}>
+          <span style={{fontWeight:700,color:"#6b7280"}}>{noticePopup.author}</span>
+          <span>·</span>
+          <span>{noticePopup.date}</span>
+        </div>
+        {/* 버튼 */}
+        <div style={{padding:"0 16px 16px",display:"flex",gap:8}}>
+          <button onClick={()=>{ closePopup(); setCurrentScreen("notice"); }}
+            style={{flex:1,padding:"12px",borderRadius:14,border:"1.5px solid #f3f4f6",
+              background:"white",fontSize:13,fontWeight:700,color:"#6b7280",cursor:"pointer"}}>
+            공지 전체보기
+          </button>
+          <button onClick={closePopup}
+            style={{flex:1,padding:"12px",borderRadius:14,border:"none",
+              background:"linear-gradient(135deg,#1a56db,#2563eb)",
+              fontSize:13,fontWeight:700,color:"white",cursor:"pointer"}}>
+            확인
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── 캘린더 가져오기 화면 (.ics) ───────────────────────────────────────────────
 function ImportCalendarScreen() {
   const { setCurrentScreen, addEvent, cals } = useC();
   const [step, setStep]                 = useState("upload");
   const [parsedEvents, setParsedEvents] = useState([]);
   const [selectedIds, setSelectedIds]   = useState([]);
+  const [selectedCal, setSelectedCal]   = useState("unassigned"); // 팀 배정
   const [fileName, setFileName]         = useState("");
   const [error, setError]               = useState("");
   const [importing, setImporting]       = useState(false);
@@ -2368,7 +2541,7 @@ function ImportCalendarScreen() {
       addEvent({
         ...ev,
         id: uid(),
-        calId: cals[0]?.id || "clean1",
+        calId: selectedCal,
         end: ev.end || ev.start,
         startTime: ev.startTime || "09:00",
         endTime: ev.endTime || "10:00",
@@ -2414,6 +2587,29 @@ function ImportCalendarScreen() {
           </div>
           <p className="text-xs text-gray-400 ml-10">{fileName}</p>
         </div>
+        {/* 팀 배정 선택 */}
+        <div className="bg-white border-b border-gray-100 px-4 py-3">
+          <p className="text-xs font-bold text-gray-500 mb-2">📌 가져올 팀 선택 (일괄 배정)</p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            <button onClick={()=>setSelectedCal("unassigned")}
+              className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
+              style={{background:selectedCal==="unassigned"?"#111827":"white",
+                color:selectedCal==="unassigned"?"white":"#6b7280",
+                borderColor:selectedCal==="unassigned"?"#111827":"#e5e7eb"}}>
+              미정
+            </button>
+            {cals.map(cal=>(
+              <button key={cal.id} onClick={()=>setSelectedCal(cal.id)}
+                className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
+                style={{background:selectedCal===cal.id?cal.color:"white",
+                  color:selectedCal===cal.id?"white":"#6b7280",
+                  borderColor:selectedCal===cal.id?cal.color:"#e5e7eb"}}>
+                {cal.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="px-4 py-3 flex items-center gap-3 bg-white border-b border-gray-100">
           <button
             onClick={() => setSelectedIds(
@@ -2509,21 +2705,20 @@ function ImportCalendarScreen() {
 
 // ── 로그인 화면 ───────────────────────────────────────────────
 function LoginScreen({ onLogin }) {
-  const [mode, setMode]       = useState("login");  // login | register
-  const [id, setId]           = useState("");
-  const [pw, setPw]           = useState("");
-  const [pw2, setPw2]         = useState("");
+  const [mode, setMode]               = useState("login");
+  const [id, setId]                   = useState("");
+  const [pw, setPw]                   = useState("");
+  const [pw2, setPw2]                 = useState("");
   const [companyName, setCompanyName] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState("");
-  const [showPw, setShowPw]   = useState(false);
+  const [logoPreview, setLogoPreview] = useState(null);
+  const [showPw, setShowPw]           = useState(false);
+  const [loading, setLoading]         = useState(false);
+  const [error, setError]             = useState("");
 
-  // 로그인
   const handleLogin = async () => {
     if(!id.trim()||!pw.trim()){ setError("아이디와 비밀번호를 입력하세요."); return; }
     setLoading(true); setError("");
     try {
-      // admins 컬렉션에서 먼저 조회
       const { collection, query, where, getDocs, getDoc, doc } = await import("firebase/firestore");
       const adminQ = query(collection(db, "admins"), where("id","==",id.trim()));
       const adminSnap = await getDocs(adminQ);
@@ -2532,10 +2727,11 @@ function LoginScreen({ onLogin }) {
         if(adminData.pw !== pw) { setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
         const compDoc = await getDoc(doc(db, "companies", adminData.companyId));
         const companyName = compDoc.exists() ? compDoc.data().name : "크린드림";
-        onLogin({...adminData, uid: adminSnap.docs[0].id, companyName, role:"최고관리자"});
+        const user = {...adminData, uid:adminSnap.docs[0].id, companyName, role:"최고관리자"};
+        try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
+        onLogin(user);
         return;
       }
-      // staffs 컬렉션에서 조회
       const staffQ = query(collection(db, "staffs"), where("id","==",id.trim()));
       const staffSnap = await getDocs(staffQ);
       if(!staffSnap.empty) {
@@ -2543,7 +2739,9 @@ function LoginScreen({ onLogin }) {
         if(staffData.pw !== pw) { setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
         const compDoc = await getDoc(doc(db, "companies", staffData.companyId));
         const companyName = compDoc.exists() ? compDoc.data().name : "크린드림";
-        onLogin({...staffData, uid: staffSnap.docs[0].id, companyName});
+        const user = {...staffData, uid:staffSnap.docs[0].id, companyName};
+        try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
+        onLogin(user);
         return;
       }
       setError("등록되지 않은 아이디입니다.");
@@ -2555,38 +2753,32 @@ function LoginScreen({ onLogin }) {
     }
   };
 
-  // 사장님 회원가입
   const handleRegister = async () => {
-    if(!id.trim()||!pw.trim()||!companyName.trim()){ setError("모든 항목을 입력하세요."); return; }
-    if(pw !== pw2){ setError("비밀번호가 일치하지 않습니다."); return; }
-    if(pw.length < 4){ setError("비밀번호는 4자 이상이어야 합니다."); return; }
+    if(!companyName||!id||!pw||!pw2){ setError("모든 항목을 입력하세요."); return; }
+    if(pw!==pw2){ setError("비밀번호가 일치하지 않습니다."); return; }
+    if(pw.length<4){ setError("비밀번호는 4자 이상이어야 합니다."); return; }
     setLoading(true); setError("");
     try {
       const { collection, query, where, getDocs, doc, setDoc } = await import("firebase/firestore");
-      // 아이디 중복 확인
       const adminQ = query(collection(db, "admins"), where("id","==",id.trim()));
       const adminSnap = await getDocs(adminQ);
       if(!adminSnap.empty){ setError("이미 사용 중인 아이디입니다."); setLoading(false); return; }
-      // companyId 생성
       const companyId = "c_" + Math.random().toString(36).slice(2,9);
       const adminId   = "a_" + Math.random().toString(36).slice(2,9);
-      // companies 저장
       await setDoc(doc(db, "companies", companyId), {
-        name: companyName.trim(),
-        companyId,
+        name: companyName.trim(), companyId,
         createdAt: new Date().toISOString(),
       });
-      // admins 저장
       await setDoc(doc(db, "admins", adminId), {
-        id: id.trim(),
-        pw,
-        name: id.trim(),
-        companyId,
-        role: "최고관리자",
-        team: "관리팀",
+        id: id.trim(), pw,
+        name: id.trim(), companyId,
+        role: "최고관리자", team: "관리팀",
         createdAt: new Date().toISOString(),
       });
-      onLogin({uid:adminId, id:id.trim(), name:id.trim(), companyId, companyName:companyName.trim(), role:"최고관리자", team:"관리팀"});
+      const user = {uid:adminId, id:id.trim(), name:id.trim(), companyId,
+        companyName:companyName.trim(), role:"최고관리자", team:"관리팀"};
+      try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
+      onLogin(user);
     } catch(e) {
       console.error(e);
       setError("가입 중 오류가 발생했습니다.");
@@ -2601,87 +2793,125 @@ function LoginScreen({ onLogin }) {
       <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
         <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
           style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🧹</div>
-        <h1 className="text-3xl font-extrabold text-gray-900 mb-2">크린드림</h1>
-        <p className="text-sm text-gray-400">현장 관리 앱</p>
+        <h1 className="text-3xl font-extrabold text-gray-900 mb-2">크린매니저</h1>
+        <p className="text-sm text-gray-400 font-medium">청소업체 관리 솔루션</p>
       </div>
 
-      {/* 로그인/가입 영역 */}
       <div className="px-6 pb-12 flex flex-col gap-3">
-        {/* 탭 */}
-        <div className="flex bg-gray-100 rounded-2xl p-1 gap-1 mb-1">
-          {[["login","🔐 로그인"],["register","✏️ 업체 가입"]].map(([k,l])=>(
-            <button key={k} onClick={()=>{setMode(k);setError("");}}
-              className={"flex-1 py-2.5 rounded-xl text-sm font-bold transition-all " +
-                (mode===k?"bg-white shadow text-gray-900":"text-gray-400")}>
-              {l}
+
+        {/* 로그인 */}
+        {mode==="login" && (
+          <>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
+              <input placeholder="아이디" value={id}
+                onChange={e=>{setId(e.target.value);setError("");}}
+                className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
+                  (id?"border-blue-400":"border-gray-200")}/>
+            </div>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+              <input type={showPw?"text":"password"} placeholder="비밀번호" value={pw}
+                onChange={e=>{setPw(e.target.value);setError("");}}
+                onKeyDown={e=>e.key==="Enter"&&handleLogin()}
+                className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
+                  (pw?"border-blue-400":"border-gray-200")}/>
+              <button onClick={()=>setShowPw(p=>!p)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">
+                {showPw?"🙈":"👁️"}
+              </button>
+            </div>
+            {error && <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
+            <button onClick={handleLogin} disabled={loading}
+              className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
+              style={{background:id&&pw?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",opacity:loading?0.7:1}}>
+              {loading?"로그인 중...":"로그인"}
             </button>
-          ))}
-        </div>
+            <p className="text-sm text-gray-400 text-center mt-1">
+              처음 사용하시나요?{" "}
+              <button onClick={()=>{setMode("register");setError("");}}
+                className="text-blue-500 font-bold border-none bg-transparent cursor-pointer text-sm">
+                회원가입
+              </button>
+            </p>
+          </>
+        )}
 
-        {/* 아이디 */}
-        <div className="relative">
-          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
-          <input placeholder="아이디" value={id}
-            onChange={e=>{setId(e.target.value);setError("");}}
-            className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-              (error?"border-red-300":id?"border-blue-400":"border-gray-200")}/>
-        </div>
-
-        {/* 비밀번호 */}
-        <div className="relative">
-          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
-          <input type={showPw?"text":"password"} placeholder="비밀번호" value={pw}
-            onChange={e=>{setPw(e.target.value);setError("");}}
-            onKeyDown={e=>e.key==="Enter"&&(mode==="login"?handleLogin():null)}
-            className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-              (error?"border-red-300":pw?"border-blue-400":"border-gray-200")}/>
-          <button onClick={()=>setShowPw(p=>!p)}
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 border-none bg-transparent cursor-pointer text-base">
-            {showPw?"🙈":"👁️"}
-          </button>
-        </div>
-
-        {/* 가입 전용 필드 */}
+        {/* 회원가입 */}
         {mode==="register" && (
           <>
+            <button onClick={()=>{setMode("login");setError("");}}
+              className="flex items-center gap-1 border-none bg-transparent cursor-pointer text-sm text-gray-500 font-semibold mb-1 p-0">
+              ‹ 로그인으로 돌아가기
+            </button>
+            <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 mb-1">
+              <p className="text-sm font-bold text-blue-600 mb-1">🏢 업체 대표 계정 만들기</p>
+              <p className="text-xs text-gray-500 leading-relaxed">직원 계정은 가입 후 직원 관리 메뉴에서 추가할 수 있어요.</p>
+            </div>
+
+            {/* 로고 + 회사명 */}
+            <div className="flex items-center gap-3">
+              <label className="cursor-pointer shrink-0">
+                <div className="w-14 h-14 rounded-2xl overflow-hidden flex items-center justify-center"
+                  style={{background:logoPreview?"transparent":"#f3f4f6",
+                    border:`2px dashed ${logoPreview?"#1a56db":"#d1d5db"}`}}>
+                  {logoPreview
+                    ? <img src={logoPreview} className="w-full h-full object-cover"/>
+                    : <div className="text-center">
+                        <div className="text-xl">📷</div>
+                        <div className="text-gray-400" style={{fontSize:9}}>로고</div>
+                      </div>
+                  }
+                </div>
+                <input type="file" accept="image/*"
+                  onChange={e=>{const f=e.target.files[0];if(f)setLogoPreview(URL.createObjectURL(f));}}
+                  className="hidden"/>
+              </label>
+              <input placeholder="회사명" value={companyName}
+                onChange={e=>{setCompanyName(e.target.value);setError("");}}
+                className={"flex-1 min-w-0 py-3.5 px-4 rounded-2xl text-sm outline-none bg-gray-50 border " +
+                  (companyName?"border-blue-400":"border-gray-200")}/>
+            </div>
+
+            <div className="h-px bg-gray-100"/>
+
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
+              <input placeholder="아이디" value={id}
+                onChange={e=>{setId(e.target.value);setError("");}}
+                className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
+                  (id?"border-blue-400":"border-gray-200")}/>
+            </div>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+              <input type={showPw?"text":"password"} placeholder="비밀번호 (4자 이상)" value={pw}
+                onChange={e=>{setPw(e.target.value);setError("");}}
+                className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
+                  (pw?"border-blue-400":"border-gray-200")}/>
+              <button onClick={()=>setShowPw(p=>!p)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">
+                {showPw?"🙈":"👁️"}
+              </button>
+            </div>
             <div className="relative">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
               <input type={showPw?"text":"password"} placeholder="비밀번호 확인" value={pw2}
                 onChange={e=>{setPw2(e.target.value);setError("");}}
-                className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (error?"border-red-300":pw2?"border-blue-400":"border-gray-200")}/>
+                className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
+                  (pw2?(pw===pw2?"border-green-400":"border-red-400"):"border-gray-200")}/>
+              {pw2 && <span className="absolute right-4 top-1/2 -translate-y-1/2 text-base">{pw===pw2?"✅":"❌"}</span>}
             </div>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🏢</span>
-              <input placeholder="회사명 (예: 크린드림)" value={companyName}
-                onChange={e=>{setCompanyName(e.target.value);setError("");}}
-                className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border " +
-                  (error?"border-red-300":companyName?"border-blue-400":"border-gray-200")}/>
-            </div>
+            {error && <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
+            <button onClick={handleRegister} disabled={loading}
+              className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
+              style={{background:id&&pw&&pw2&&companyName?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",
+                opacity:loading?0.7:1}}>
+              {loading?"가입 중...":"가입하기"}
+            </button>
+            <p className="text-xs text-gray-300 text-center mt-1 leading-relaxed">
+              가입 후 직원 계정은 직원 관리 메뉴에서 추가할 수 있어요.
+            </p>
           </>
-        )}
-
-        {/* 에러 */}
-        {error && (
-          <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">
-            ⚠️ {error}
-          </div>
-        )}
-
-        {/* 버튼 */}
-        <button
-          onClick={mode==="login"?handleLogin:handleRegister}
-          disabled={loading}
-          className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
-          style={{background:"linear-gradient(135deg,#1a56db,#2563eb)",opacity:loading?0.7:1}}>
-          {loading?"처리 중...":(mode==="login"?"로그인":"업체 가입하기")}
-        </button>
-
-        {mode==="login" && (
-          <p className="text-xs text-gray-400 text-center mt-1">
-            처음 사용하시나요? <button onClick={()=>{setMode("register");setError("");}}
-              className="text-blue-500 font-bold border-none bg-transparent cursor-pointer">업체 가입</button>
-          </p>
         )}
       </div>
     </div>
@@ -3059,20 +3289,36 @@ function TeamScheduleScreen() {
 
 // ── 대시보드 화면 ───────────────────────────────────────────────
 // 카드 선택형 대시보드
+// 대시보드 카드 카테고리
+const DASH_CARD_GROUPS = [
+  { id:"schedule", label:"📅 일정 관련" },
+  { id:"sales",    label:"💰 영업 관련" },
+  { id:"ops",      label:"🚨 운영 관련" },
+];
+
 const ALL_DASH_CARDS = [
-  {id:"today_count",   label:"오늘 일정",      icon:"📅", color:"#1a56db", bg:"#eff6ff", roles:["최고관리자","관리팀장","현장팀장"],
+  // ── 일정 관련 ──
+  {id:"today_count",    group:"schedule", label:"오늘 일정",      icon:"📅", color:"#1a56db", bg:"#eff6ff", roles:["최고관리자","관리팀장","현장팀장"],
     getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const t=fmt(new Date());return{value:f.filter(e=>e.start<=t&&(!e.end||e.end>=t)).length,unit:"건"};}},
-  {id:"tomorrow_count",label:"내일 일정",      icon:"🗓️", color:"#7c3aed", bg:"#f5f3ff", roles:["최고관리자","관리팀장","현장팀장"],
+  {id:"tomorrow_count", group:"schedule", label:"내일 일정",      icon:"🗓️", color:"#7c3aed", bg:"#f5f3ff", roles:["최고관리자","관리팀장","현장팀장"],
     getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const t=fmt(new Date(Date.now()+86400000));return{value:f.filter(e=>e.start<=t&&(!e.end||e.end>=t)).length,unit:"건"};}},
-  {id:"month_count",   label:"이번달 총",      icon:"📈", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","관리팀장","영업팀장","현장팀장"],
+  {id:"month_count",    group:"schedule", label:"이번달 총",      icon:"📈", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","관리팀장","영업팀장","현장팀장"],
     getValue:(ev,user)=>{const f=user.calId?ev.filter(e=>e.calId===user.calId):ev;const m=fmt(new Date()).slice(0,7);return{value:f.filter(e=>e.start.startsWith(m)).length,unit:"건"};}},
-  {id:"complaint",     label:"미처리 컴플레인", icon:"🚨", color:"#ef4444", bg:"#fef2f2", roles:["최고관리자","관리팀장"],
-    getValue:()=>({value:0,unit:"건"})},
-  {id:"month_revenue", label:"이번달 매출",    icon:"💰", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","영업팀장"],
+  {id:"today_done",     group:"schedule", label:"오늘 완료 현장", icon:"✅", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","관리팀장","현장팀장"],
+    getValue:(_,__,___,reports)=>{const t=fmt(new Date());return{value:(reports||[]).filter(r=>r.date===t&&r.status==="완료").length,unit:"건"};}},
+  // ── 영업 관련 ──
+  {id:"month_revenue",  group:"sales",    label:"이번달 매출",    icon:"💰", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","영업팀장"],
     getValue:(ev)=>{const m=fmt(new Date()).slice(0,7);return{value:Math.round(ev.filter(e=>e.start.startsWith(m)).reduce((s,e)=>s+(e.price||0),0)/10000),unit:"만원"};}},
-  {id:"week_contract", label:"이번주 계약",    icon:"📋", color:"#7c3aed", bg:"#f5f3ff", roles:["최고관리자","영업팀장"],
+  {id:"week_contract",  group:"sales",    label:"이번주 계약",    icon:"📋", color:"#7c3aed", bg:"#f5f3ff", roles:["최고관리자","영업팀장"],
     getValue:(ev)=>{const d=new Date(),day=d.getDay(),ws=fmt(new Date(new Date().setDate(d.getDate()-day+(day===0?-6:1))));return{value:ev.filter(e=>e.start>=ws&&e.start<=fmt(new Date())).length,unit:"건"};}},
-  {id:"team_count",    label:"운영 팀 수",     icon:"🧹", color:"#ea580c", bg:"#fff7ed", roles:["최고관리자","관리팀장"],
+  {id:"today_revenue",  group:"sales",    label:"오늘 매출",      icon:"💵", color:"#16a34a", bg:"#f0fdf4", roles:["최고관리자","영업팀장"],
+    getValue:(ev)=>{const t=fmt(new Date());return{value:Math.round(ev.filter(e=>e.start===t).reduce((s,e)=>s+(e.price||0),0)/10000),unit:"만원"};}},
+  // ── 운영 관련 ──
+  {id:"complaint",      group:"ops",      label:"미처리 컴플레인",icon:"🚨", color:"#ef4444", bg:"#fef2f2", roles:["최고관리자","관리팀장"],
+    getValue:()=>({value:0,unit:"건"})},
+  {id:"special",        group:"ops",      label:"미확인 특이사항",icon:"⚠️", color:"#f59e0b", bg:"#fffbeb", roles:["최고관리자","관리팀장"],
+    getValue:()=>({value:0,unit:"건"})},
+  {id:"team_count",     group:"ops",      label:"운영 팀 수",     icon:"🧹", color:"#ea580c", bg:"#fff7ed", roles:["최고관리자","관리팀장"],
     getValue:(_,__,cals)=>({value:cals?.length||0,unit:"팀"})},
 ];
 
@@ -3122,26 +3368,37 @@ function DashboardScreen() {
         {/* 편집 모드 */}
         {editing ? (
           <>
-            <p className="text-sm text-gray-500 leading-relaxed">보여줄 카드를 선택하세요.</p>
-            {available.map(card=>{
-              const checked = selectedIds.includes(card.id);
-              const {value,unit} = card.getValue(visibleEvents, currentUser, cals);
+            <p className="text-sm text-gray-500 leading-relaxed mb-2">보여줄 카드를 선택하세요.</p>
+            {DASH_CARD_GROUPS.map(group=>{
+              const groupCards = available.filter(c=>c.group===group.id);
+              if(groupCards.length===0) return null;
               return (
-                <button key={card.id} onClick={()=>toggle(card.id)}
-                  className="flex items-center gap-4 p-4 rounded-2xl text-left transition-all"
-                  style={{background:"white", border:`2px solid ${checked?card.color:"#f3f4f6"}`,
-                    boxShadow:checked?`0 0 0 3px ${card.color}22`:"none"}}>
-                  <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center"
-                    style={{border:`2px solid ${checked?card.color:"#d1d5db"}`, background:checked?card.color:"white"}}>
-                    {checked && <span style={{color:"white",fontSize:12,fontWeight:800}}>✓</span>}
+                <div key={group.id} className="mb-4">
+                  <p className="text-xs font-bold text-gray-400 mb-2 px-1">{group.label}</p>
+                  <div className="flex flex-col gap-2">
+                    {groupCards.map(card=>{
+                      const checked = selectedIds.includes(card.id);
+                      const {value,unit} = card.getValue(visibleEvents, currentUser, cals, []);
+                      return (
+                        <button key={card.id} onClick={()=>toggle(card.id)}
+                          className="flex items-center gap-4 p-4 rounded-2xl text-left transition-all"
+                          style={{background:"white", border:`2px solid ${checked?card.color:"#f3f4f6"}`,
+                            boxShadow:checked?`0 0 0 3px ${card.color}22`:"none"}}>
+                          <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center"
+                            style={{border:`2px solid ${checked?card.color:"#d1d5db"}`, background:checked?card.color:"white"}}>
+                            {checked && <span style={{color:"white",fontSize:12,fontWeight:800}}>✓</span>}
+                          </div>
+                          <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-xl shrink-0"
+                            style={{background:card.bg}}>{card.icon}</div>
+                          <div className="flex-1">
+                            <p className="text-sm font-bold text-gray-900">{card.label}</p>
+                            <p className="text-xs text-gray-400 mt-0.5">현재 <span className="font-bold" style={{color:card.color}}>{value}{unit}</span></p>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
-                  <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-xl shrink-0"
-                    style={{background:card.bg}}>{card.icon}</div>
-                  <div className="flex-1">
-                    <p className="text-sm font-bold text-gray-900">{card.label}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">현재 <span className="font-bold" style={{color:card.color}}>{value}{unit}</span></p>
-                  </div>
-                </button>
+                </div>
               );
             })}
           </>
