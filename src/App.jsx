@@ -1653,19 +1653,37 @@ function EventModal() {
       {/* ── 새 디자인 폼 (네이버 스타일) ───────────────────────── */}
       <div className="flex-1 overflow-y-auto bg-white">
 
-        {/* 캘린더(담당팀) 선택 — 맨 위 */}
-        <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-100 bg-gray-50/50">
-          <User size={18} className="text-gray-400 shrink-0"/>
-          <span className="text-sm font-semibold text-gray-700 shrink-0">담당팀</span>
-          <select
-            value={form.calId}
-            onChange={e=>set("calId",e.target.value)}
-            className="flex-1 text-sm font-bold outline-none bg-transparent text-right"
-            style={{color: cals.find(c=>c.id===form.calId)?.color || "#333"}}>
-            {cals.map(cal=>(
-              <option key={cal.id} value={cal.id}>{cal.label}</option>
-            ))}
-          </select>
+        {/* 캘린더(담당팀) 선택 — 버튼 방식 */}
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/50">
+          <div className="flex items-center gap-2 mb-2">
+            <User size={16} className="text-gray-400 shrink-0"/>
+            <span className="text-sm font-semibold text-gray-700">담당팀</span>
+            {form.calId && (
+              <span className="ml-auto text-xs font-bold px-2 py-0.5 rounded-full"
+                style={{background: (cals.find(c=>c.id===form.calId)?.color||"#1a56db")+"22",
+                  color: cals.find(c=>c.id===form.calId)?.color||"#1a56db"}}>
+                {cals.find(c=>c.id===form.calId)?.label}
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {cals.map(cal=>{
+              const selected = form.calId === cal.id;
+              return (
+                <button key={cal.id}
+                  onClick={()=>set("calId", cal.id)}
+                  className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
+                  style={{
+                    background: selected ? cal.color : "white",
+                    color: selected ? "white" : "#6b7280",
+                    borderColor: selected ? cal.color : "#e5e7eb",
+                    boxShadow: selected ? `0 2px 8px ${cal.color}44` : "none"
+                  }}>
+                  {cal.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* 제목 */}
