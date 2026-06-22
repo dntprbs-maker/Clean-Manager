@@ -12,7 +12,10 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+// 직원 추가 시 메인 세션 유지를 위한 보조 앱 인스턴스
+const secondaryApp = initializeApp(firebaseConfig, "Secondary");
 
-export const db       = getFirestore(app);
-export const auth     = getAuth(app);
-export const provider = new GoogleAuthProvider();
+export const db            = getFirestore(app);
+export const auth          = getAuth(app);
+export const provider      = new GoogleAuthProvider();
+export const secondaryAuth = getAuth(secondaryApp);
