@@ -455,16 +455,15 @@ function Provider({ children, loginUser, onLogout }) {
     // calId가 없거나 "unassigned"인 미배정 일정도 항상 표시
     let evs = events.filter(e=>checkedIds.has(e.calId) || !e.calId || e.calId==="unassigned");
     if (!["관리팀", "영업팀"].includes(currentUser.team) && currentUser.role !== "최고관리자") {
-      // 팀명과 정확히 일치하는 cal 찾기
-      const myCal = CALS.find(c => c.label === currentUser.team);
+      // cals를 직접 사용해 정확히 매칭 (CALS 전역 배열 stale 문제 방지)
+      const myCal = cals.find(c => c.label === currentUser.team);
       if (myCal) {
-        // 매칭 cal이 있으면 해당 cal의 일정만 표시
         evs = evs.filter(e => e.calId === myCal.id);
       }
       // 매칭 cal이 없으면 전체 표시 (팀에 대응하는 캘린더가 없는 경우)
     }
-    return expandRecurring(evs); // 반복 일정을 개별 날짜로 펼침
-  }, [events, checkedIds, currentUser.team, currentUser.role]);
+    return expandRecurring(evs);
+  }, [events, checkedIds, cals, currentUser.team, currentUser.role]);
 
   return (
     <Ctx.Provider value={{
@@ -1224,10 +1223,12 @@ function DetailSheet() {
           </div>
           <span className="text-base font-bold text-gray-800">일정</span>
           <div className="flex gap-1">
-            <button onClick={()=>{close();setTimeout(()=>openModal(null,detEv.id),300);}}
-              className="p-2 rounded-full hover:bg-gray-100"><Edit3 size={19} className="text-gray-600"/></button>
-            <button onClick={()=>{deleteEvent(detEv.id);close();}}
-              className="p-2 rounded-full hover:bg-gray-100"><Trash2 size={19} className="text-gray-600"/></button>
+            {currentUser.role !== "팀원" && <>
+              <button onClick={()=>{close();setTimeout(()=>openModal(null,detEv.id),300);}}
+                className="p-2 rounded-full hover:bg-gray-100"><Edit3 size={19} className="text-gray-600"/></button>
+              <button onClick={()=>{deleteEvent(detEv.id);close();}}
+                className="p-2 rounded-full hover:bg-gray-100"><Trash2 size={19} className="text-gray-600"/></button>
+            </>}
           </div>
         </div>
 
@@ -3315,6 +3316,24 @@ function LoginScreen({ onLogin }) {
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState("");
   const [pendingUser, setPendingUser] = useState(null);
+  const [hasPw, setHasPw]             = useState(null); // null=미확인, true=비번있음, false=최초
+
+  const isPhone = id => id.replace(/-/g,"").startsWith("0");
+  const phoneComplete = id => isPhone(id) && id.replace(/-/g,"").length >= 10;
+
+  // 전화번호 완성 시 Firestore에서 비밀번호 여부 확인
+  useEffect(() => {
+    if (!phoneComplete(id)) { setHasPw(null); return; }
+    let cancelled = false;
+    getDocs(query(collection(db,"staffs"), where("phone","==",onlyDigits(id))))
+      .then(snap => {
+        if (cancelled) return;
+        if (snap.empty) { setHasPw(true); return; } // 없으면 관리자일 수 있으니 표시
+        setHasPw(!!snap.docs[0].data().pw);
+      })
+      .catch(() => setHasPw(true));
+    return () => { cancelled = true; };
+  }, [id]);
 
   // 로그인 - 아이디/전화번호 자동 구분
   const handleLogin = async () => {
@@ -3384,7 +3403,8 @@ function LoginScreen({ onLogin }) {
 
   // 업체 가입
   const handleRegister = async () => {
-    if(!companyName||!id||!pw||!pw2){ setError("모든 항목을 입력하세요."); return; }
+    if(!id||!pw||!pw2){ setError("모든 항목을 입력하세요."); return; }
+    if(id.trim().startsWith("0")){ setError("아이디는 0으로 시작할 수 없습니다."); return; }
     if(pw!==pw2){ setError("비밀번호가 일치하지 않습니다."); return; }
     if(pw.length<4){ setError("비밀번호는 4자 이상이어야 합니다."); return; }
     setLoading(true); setError("");
@@ -3394,7 +3414,8 @@ function LoginScreen({ onLogin }) {
       if(!adminSnap.empty){ setError("이미 사용 중인 아이디입니다."); setLoading(false); return; }
       const companyId = "c_" + Math.random().toString(36).slice(2,9);
       const adminId   = "a_" + Math.random().toString(36).slice(2,9);
-      await setDoc(doc(db,"companies",companyId), { name:companyName.trim(), companyId, createdAt:new Date().toISOString() });
+      // 회사명은 기본값으로 설정 (나중에 회사 설정에서 변경)
+      await setDoc(doc(db,"companies",companyId), { name:"내 회사", companyId, createdAt:new Date().toISOString() });
       await setDoc(doc(db,"admins",adminId), { id:id.trim(), pw, name:id.trim(), companyId, role:"최고관리자", team:"사장", createdAt:new Date().toISOString() });
       // 기본 캘린더(담당팀 색상) 시드 — 이게 없으면 일정이 달력에 안 보임
       await Promise.all(DEFAULT_CALS.map(c => setDoc(doc(db,"companies",companyId,"cals",c.id), c)));
@@ -3403,7 +3424,7 @@ function LoginScreen({ onLogin }) {
         teams: INIT_TEAMS,
         linkCategories: ["업무", "지도", "연락처", "기타"],
       });
-      const user = {uid:adminId, id:id.trim(), name:id.trim(), companyId, companyName:companyName.trim(), role:"최고관리자", team:"사장"};
+      const user = {uid:adminId, id:id.trim(), name:id.trim(), companyId, companyName:"내 회사", role:"최고관리자", team:"사장", needsSetup:true};
       try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
       onLogin(user);
     } catch(e) {
@@ -3468,49 +3489,51 @@ function LoginScreen({ onLogin }) {
           <p className="text-sm text-gray-400 font-medium">청소업체 관리 솔루션</p>
         </div>
         <div className="px-6 pb-12 flex flex-col gap-3">
-          <button onClick={()=>{setMode("login");setError("");}}
-            className="flex items-center gap-1 border-none bg-transparent cursor-pointer text-sm text-gray-500 font-semibold mb-1 p-0">
-            ‹ 로그인으로 돌아가기
-          </button>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-sm font-bold text-gray-700">회원가입</p>
+            <button onClick={()=>{setMode("login");setError("");}}
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 transition-colors">
+              <X size={18} className="text-gray-600"/>
+            </button>
+          </div>
           <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 mb-1">
             <p className="text-sm font-bold text-blue-600 mb-1">🏢 업체 대표 계정 만들기</p>
-            <p className="text-xs text-gray-500 leading-relaxed">직원 계정은 가입 후 직원 관리 메뉴에서 추가할 수 있어요.</p>
+            <p className="text-xs text-gray-500 leading-relaxed">회사명·로고는 가입 후 앱 설정에서 언제든 변경할 수 있어요.</p>
           </div>
-          <div className="flex items-center gap-3">
-            <label className="cursor-pointer shrink-0">
-              <div className="w-14 h-14 rounded-2xl overflow-hidden flex items-center justify-center"
-                style={{background:logoPreview?"transparent":"#f3f4f6",border:`2px dashed ${logoPreview?"#1a56db":"#d1d5db"}`}}>
-                {logoPreview
-                  ? <img src={logoPreview} className="w-full h-full object-cover"/>
-                  : <div className="text-center"><div className="text-xl">📷</div><div className="text-gray-400" style={{fontSize:9}}>로고</div></div>}
-              </div>
-              <input type="file" accept="image/*" onChange={e=>{const f=e.target.files[0];if(f)setLogoPreview(URL.createObjectURL(f));}} className="hidden"/>
-            </label>
-            <input placeholder="회사명" value={companyName} onChange={e=>{setCompanyName(e.target.value);setError("");}}
-              className={"flex-1 min-w-0 py-3.5 px-4 rounded-2xl text-sm outline-none bg-gray-50 border "+(companyName?"border-blue-400":"border-gray-200")}/>
-          </div>
-          <div className="h-px bg-gray-100"/>
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
-            <input placeholder="아이디" value={id} onChange={e=>{setId(e.target.value);setError("");}}
-              className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(id?"border-blue-400":"border-gray-200")}/>
+            <input placeholder="아이디 (숫자 0으로 시작하면 안됩니다.)" value={id}
+              onChange={e=>{
+                const v = e.target.value;
+                setId(v);
+                setError(v.startsWith("0") ? "⛔ 아이디는 숫자 0으로 시작할 수 없습니다!" : "");
+              }}
+              className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(id.startsWith("0")?"border-red-400":id?"border-blue-400":"border-gray-200")}/>
+            {id.startsWith("0") && (
+              <div className="absolute left-0 right-0 top-full mt-1 z-10 bg-red-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg">
+                ⛔ 0으로 시작하는 아이디는 사용할 수 없습니다
+                <div className="absolute -top-1.5 left-6 w-3 h-3 bg-red-500 rotate-45"/>
+              </div>
+            )}
           </div>
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
             <input type={showPw?"text":"password"} placeholder="비밀번호 (4자 이상)" value={pw} onChange={e=>{setPw(e.target.value);setError("");}}
+              autoComplete="new-password"
               className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(pw?"border-blue-400":"border-gray-200")}/>
             <button onClick={()=>setShowPw(p=>!p)} className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">{showPw?"🙈":"👁️"}</button>
           </div>
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
             <input type={showPw?"text":"password"} placeholder="비밀번호 확인" value={pw2} onChange={e=>{setPw2(e.target.value);setError("");}}
+              autoComplete="new-password"
               className={"w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(pw2?(pw===pw2?"border-green-400":"border-red-400"):"border-gray-200")}/>
             {pw2&&<span className="absolute right-4 top-1/2 -translate-y-1/2 text-base">{pw===pw2?"✅":"❌"}</span>}
           </div>
           {error&&<div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
           <button onClick={handleRegister} disabled={loading}
             className="w-full py-4 rounded-2xl text-white text-sm font-bold mt-1"
-            style={{background:id&&pw&&pw2&&companyName?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",opacity:loading?0.7:1}}>
+            style={{background:id&&pw&&pw2?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb",opacity:loading?0.7:1}}>
             {loading?"가입 중...":"가입하기"}
           </button>
         </div>
@@ -3529,23 +3552,53 @@ function LoginScreen({ onLogin }) {
         <p className="text-sm text-gray-400 font-medium">청소업체 관리 솔루션</p>
       </div>
       <div className="px-6 pb-12 flex flex-col gap-3">
-        {/* 아이디/전화번호 */}
+        {/* 아이디/전화번호 — 전화번호면 하이픈 자동 삽입 */}
         <div className="relative">
           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
           <input placeholder="아이디 또는 전화번호" value={id}
-            onChange={e=>{setId(e.target.value);setError("");setPw("");}}
+            onChange={e=>{
+              const raw = e.target.value;
+              if (/^0\d*[-\d]*$/.test(raw.replace(/-/g,"")) || raw === "") {
+                // 전화번호 패턴이면 하이픈 자동 삽입
+                const digits = raw.replace(/\D/g,"").slice(0,11);
+                const fmt = digits.length <= 3 ? digits
+                  : digits.length <= 7 ? `${digits.slice(0,3)}-${digits.slice(3)}`
+                  : `${digits.slice(0,3)}-${digits.slice(3,7)}-${digits.slice(7)}`;
+                setId(fmt);
+              } else {
+                setId(raw);
+              }
+              setError(""); setPw("");
+            }}
             className={"w-full pl-11 pr-4 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border "+(id?"border-blue-400":"border-gray-200")}/>
         </div>
-        {/* 전화번호 아니면 비밀번호 바로 표시, 전화번호면 10자 이상 입력 후 표시 */}
-        {(id && (!/^0\d/.test(id) || id.replace(/-/g,"").length >= 10)) && (
+        {/* 비밀번호 — 최초 로그인이면 숨김 */}
+        {(id && !isPhone(id)) && (
+          // 관리자 아이디 로그인
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
-            <input type={showPw?"text":"password"}
-              placeholder={/^0\d/.test(id)?"비밀번호 (처음이면 비워두세요)":"비밀번호"}
+            <input type={showPw?"text":"password"} placeholder="비밀번호"
               value={pw} onChange={e=>{setPw(e.target.value);setError("");}}
               onKeyDown={e=>e.key==="Enter"&&handleLogin()}
               className="w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border border-gray-200"/>
             <button onClick={()=>setShowPw(p=>!p)} className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">{showPw?"🙈":"👁️"}</button>
+          </div>
+        )}
+        {(phoneComplete(id) && hasPw === true) && (
+          // 전화번호 + 비밀번호 있는 직원
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">🔒</span>
+            <input type={showPw?"text":"password"} placeholder="비밀번호"
+              value={pw} onChange={e=>{setPw(e.target.value);setError("");}}
+              onKeyDown={e=>e.key==="Enter"&&handleLogin()}
+              className="w-full pl-11 pr-11 py-3.5 rounded-2xl text-sm outline-none bg-gray-50 border border-gray-200"/>
+            <button onClick={()=>setShowPw(p=>!p)} className="absolute right-4 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer text-base text-gray-400">{showPw?"🙈":"👁️"}</button>
+          </div>
+        )}
+        {(phoneComplete(id) && hasPw === false) && (
+          // 최초 로그인 — 비밀번호 필드 없이 안내 메시지
+          <div className="px-4 py-3 rounded-xl bg-blue-50 border border-blue-100 text-sm text-blue-600 font-semibold">
+            👋 처음 로그인하시는군요! 로그인 버튼을 누르면 비밀번호를 설정할 수 있습니다.
           </div>
         )}
         {error&&<div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-500 font-semibold">⚠️ {error}</div>}
@@ -3568,11 +3621,25 @@ function LoginScreen({ onLogin }) {
 
 // ── 앱 내부 뼈대 (로그인 후 메인 화면 라우팅) ───────────────────────────────────────────────
 function AppInner() {
-  const { currentScreen } = useC();
+  const { currentScreen, setCompanySettingsModal, currentUser } = useC();
+  const [setupBanner, setSetupBanner] = useState(!!currentUser?.needsSetup);
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none">
       <style>{ANIM_CSS}</style>
       <TopHeader/>
+      {/* 첫 가입 후 회사 설정 안내 배너 */}
+      {setupBanner && (
+        <div className="bg-blue-600 px-4 py-2.5 flex items-center gap-2 shrink-0">
+          <span className="text-sm text-white flex-1">🏢 회사명·로고를 설정해보세요!</span>
+          <button onClick={()=>{ setCompanySettingsModal(true); setSetupBanner(false); }}
+            className="text-xs font-bold text-blue-100 bg-white/20 px-3 py-1 rounded-full">
+            설정하기
+          </button>
+          <button onClick={()=>setSetupBanner(false)} className="text-white/70 hover:text-white ml-1">
+            <X size={16}/>
+          </button>
+        </div>
+      )}
       {currentScreen === "calendar" && (
         <>
           <CalendarView/>
@@ -3759,7 +3826,7 @@ function EmployeeFormModal() {
     if (empModal.open) {
       if (empModal.editId) {
         const u = users.find(x => x.id === empModal.editId);
-        if (u) setForm({ ...u, phone: fmtPhone(u.phone), password: "" });
+        if (u) setForm({ ...u, phone: fmtPhone(u.phone) });
       } else {
         setForm({ name: "", phone: "", team: "", role: "" });
       }
@@ -3777,9 +3844,9 @@ function EmployeeFormModal() {
     
     try {
       if (empModal.editId) {
-        // 기존 유저 수정
-        const { password, email, ...rest } = form;
-        const updateData = { ...rest, phone: onlyDigits(form.phone) }; // 전화번호는 숫자만 저장
+        // 기존 유저 수정 (pw 포함 저장)
+        const { email, ...rest } = form;
+        const updateData = { ...rest, phone: onlyDigits(form.phone) };
         await setDoc(doc(db, "companies", companyId, "users", empModal.editId), updateData, { merge: true });
         await setDoc(doc(db, "staffs", empModal.editId), { ...updateData, companyId }, { merge: true });
       } else {
@@ -3829,6 +3896,7 @@ function EmployeeFormModal() {
     try {
       await setDoc(doc(db, "companies", companyId, "users", empModal.editId), { pw: "" }, { merge: true });
       await setDoc(doc(db, "staffs", empModal.editId), { pw: "" }, { merge: true });
+      setForm(f => ({...f, pw: ""}));
       alert("비밀번호가 초기화됐습니다.\n직원이 다음 로그인 시 새 비밀번호를 설정합니다.");
     } catch(e) {
       alert("초기화 실패: " + e.message);
@@ -3880,13 +3948,24 @@ function EmployeeFormModal() {
             </select>
           </div>
         </div>
+        {empModal.editId && (
+          <div className="px-5 pb-1">
+            <label className="block text-xs font-semibold text-gray-500 mb-1">비밀번호</label>
+            <div className="flex gap-2 items-center">
+              <input
+                value={form.pw || ""}
+                onChange={e => setForm({...form, pw: e.target.value})}
+                placeholder="(미설정)"
+                className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800 font-mono"
+              />
+              <button onClick={resetPw} disabled={loading}
+                className="shrink-0 px-3 py-2 text-xs font-bold text-orange-500 bg-orange-50 rounded-lg hover:bg-orange-100 disabled:opacity-50 whitespace-nowrap">
+                초기화
+              </button>
+            </div>
+          </div>
+        )}
         <div className="px-5 py-4 border-t border-gray-50 bg-gray-50 flex flex-col gap-2">
-          {empModal.editId && (
-            <button onClick={resetPw} disabled={loading}
-              className="w-full py-2 text-sm font-bold text-orange-500 bg-orange-50 rounded-lg hover:bg-orange-100 disabled:opacity-50">
-              🔑 비밀번호 초기화
-            </button>
-          )}
           <div className="flex gap-2">
             {empModal.editId && (
               <button onClick={del} disabled={loading} className="px-4 py-2 text-sm font-bold text-red-500 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-50">삭제</button>
