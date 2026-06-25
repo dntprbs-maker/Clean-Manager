@@ -3794,13 +3794,26 @@ function EmployeeFormModal() {
       try {
         await deleteDoc(doc(db, "companies", companyId, "users", empModal.editId));
         await deleteDoc(doc(db, "staffs", empModal.editId));
-        // Auth에서의 실제 계정 삭제는 Admin SDK 등 서버사이드 처리가 필요하므로 DB만 제거
         close();
       } catch(e) {
         alert("삭제 실패");
       } finally {
         setLoading(false);
       }
+    }
+  };
+
+  const resetPw = async () => {
+    if (!confirm("비밀번호를 초기화하시겠습니까?\n직원이 다음 로그인 시 새 비밀번호를 설정하게 됩니다.")) return;
+    setLoading(true);
+    try {
+      await setDoc(doc(db, "companies", companyId, "users", empModal.editId), { pw: "" }, { merge: true });
+      await setDoc(doc(db, "staffs", empModal.editId), { pw: "" }, { merge: true });
+      alert("비밀번호가 초기화됐습니다.\n직원이 다음 로그인 시 새 비밀번호를 설정합니다.");
+    } catch(e) {
+      alert("초기화 실패: " + e.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -3847,15 +3860,23 @@ function EmployeeFormModal() {
             </select>
           </div>
         </div>
-        <div className="px-5 py-4 border-t border-gray-50 bg-gray-50 flex gap-2">
+        <div className="px-5 py-4 border-t border-gray-50 bg-gray-50 flex flex-col gap-2">
           {empModal.editId && (
-            <button onClick={del} disabled={loading} className="px-4 py-2 text-sm font-bold text-red-500 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-50">삭제</button>
+            <button onClick={resetPw} disabled={loading}
+              className="w-full py-2 text-sm font-bold text-orange-500 bg-orange-50 rounded-lg hover:bg-orange-100 disabled:opacity-50">
+              🔑 비밀번호 초기화
+            </button>
           )}
-          <div className="flex-1"></div>
-          <button onClick={close} disabled={loading} className="px-4 py-2 text-sm font-bold text-gray-500 hover:bg-gray-200 rounded-lg disabled:opacity-50">취소</button>
-          <button onClick={save} disabled={loading} className="px-5 py-2 text-sm font-bold text-white bg-gray-900 hover:bg-black rounded-lg flex items-center justify-center min-w-[80px]">
-            {loading ? <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin"/> : "저장"}
-          </button>
+          <div className="flex gap-2">
+            {empModal.editId && (
+              <button onClick={del} disabled={loading} className="px-4 py-2 text-sm font-bold text-red-500 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-50">삭제</button>
+            )}
+            <div className="flex-1"/>
+            <button onClick={close} disabled={loading} className="px-4 py-2 text-sm font-bold text-gray-500 hover:bg-gray-200 rounded-lg disabled:opacity-50">취소</button>
+            <button onClick={save} disabled={loading} className="px-5 py-2 text-sm font-bold text-white bg-gray-900 hover:bg-black rounded-lg flex items-center justify-center min-w-[80px]">
+              {loading ? <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin"/> : "저장"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
