@@ -18,12 +18,23 @@ import {
   CheckSquare, FileText, Camera, Download
 } from "lucide-react";
 
-import { auth, provider, db, secondaryAuth } from "./firebase";
-import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
+import { db, functions } from "./firebase";
 import { collection, doc, setDoc, getDoc, getDocs, updateDoc, onSnapshot, query, where, orderBy, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 
 // ── 캘린더 목록 ───────────────────────────────────────────────
-const CALS = [];
+// 신규 업체 가입 시 기본으로 깔리는 캘린더(=담당팀별 색상). 가입 시 Firestore에도 시드된다.
+const DEFAULT_CALS = [
+  { id: "clean0", label: "관리팀",      name: "관리팀",      color: "#1a56db", checked: true, isField: false },
+  { id: "clean1", label: "영업팀",      name: "영업팀",      color: "#16a34a", checked: true, isField: false },
+  { id: "clean2", label: "입주청소팀",  name: "입주청소팀",  color: "#ea580c", checked: true, isField: true  },
+  { id: "clean3", label: "정기청소팀",  name: "정기청소팀",  color: "#7c3aed", checked: true, isField: true  },
+  { id: "clean4", label: "에어컨청소팀", name: "에어컨청소팀", color: "#0891b2", checked: true, isField: true  },
+];
+// 모듈 전역에서 calById/색상 조회에 쓰는 "현재 캘린더" 미러.
+// Provider가 Firestore cals 스냅샷을 받을 때마다 내용물을 교체(splice)해서 항상 최신값을 유지한다.
+// (const 참조는 그대로 두고 배열 내용만 갈아끼워야 기존 calById/CALS.find 호출부가 전부 동작함)
+const CALS = [...DEFAULT_CALS];
 
 // ── 직원 관리 ───────────────────────────────────────────────
 const INIT_TEAMS = ["사장", "관리팀", "영업팀", "입주청소팀", "정기청소팀", "에어컨청소팀"];
@@ -36,6 +47,18 @@ const INIT_USERS = [
   { id: "u5", name: "정팀원", phone: "010-4444-4444", team: "입주청소팀", role: "팀원" },
   { id: "u6", name: "강정기", phone: "010-5555-5555", team: "정기청소팀", role: "팀장" },
 ];
+
+// ── 제목 규칙 기본값 ──────────────────────────────────────────────
+const DEFAULT_TITLE_RULE = ["time", "district", "area"];
+const DEFAULT_TYPE_KEYWORDS = ["입주청소", "정기청소", "에어컨청소", "특수청소", "줄눈청소"];
+const TITLE_TOKEN_LABELS = {
+  time:         { label:"시간대",    desc:"오전/오후/종일" },
+  district:     { label:"지역",      desc:"구·동·로·길" },
+  area:         { label:"평수/방",   desc:"15평, 원룸 등" },
+  type:         { label:"청소종류",  desc:"입주청소 등 키워드" },
+  contact_name: { label:"담당자명",  desc:"고객 이름" },
+  phone_last4:  { label:"번호4자리", desc:"전화번호 끝 4자리" },
+};
 
 const HOLIDAYS = {
   "2026-01-01":"신정","2026-02-18":"설날","2026-03-01":"삼일절",
@@ -53,7 +76,43 @@ const fmt  = d=>{ if(!d)return""; const dt=typeof d==="string"?new Date(d+"T00:0
 const pd   = s=>{ if(!s)return null; const[y,m,d]=s.split("-").map(Number); return new Date(y,m-1,d); };
 const diff = (s,e)=>!s||!e?0:Math.round((pd(e)-pd(s))/864e5);
 const add  = (s,n)=>{ const d=pd(s); d.setDate(d.getDate()+n); return fmt(d); };
+const addMonths = (s,n)=>{ const d=pd(s); d.setMonth(d.getMonth()+n); return fmt(d); };
 const calById = id => CALS.find(c=>c.id===id)||CALS[0];
+
+// ── 전화번호 정규화/표시 ───────────────────────────────────────────
+// 저장은 숫자만(canonical), 화면 표시는 하이픈 포맷으로.
+const onlyDigits = s => (s || "").replace(/\D/g, "");
+const fmtPhone = s => {
+  const d = onlyDigits(s);
+  if (d.length === 11) return `${d.slice(0,3)}-${d.slice(3,7)}-${d.slice(7)}`;
+  if (d.length === 10) return `${d.slice(0,3)}-${d.slice(3,6)}-${d.slice(6)}`;
+  return s || "";
+};
+
+// ── 반복 일정 전개 ────────────────────────────────────────────────
+// repeat(daily/weekly/monthly) 일정을 repeatUntil(없으면 6개월) 까지 개별 일정으로 펼친다.
+// 각 인스턴스는 원본 id 를 그대로 유지(상세/수정/삭제는 시리즈 단위로 동작).
+function expandRecurring(events) {
+  const HARD_CAP = 400; // 안전장치 (무한 루프 방지)
+  const now = new Date();
+  const defaultUntil = fmt(new Date(now.getFullYear(), now.getMonth() + 6, now.getDate()));
+  const out = [];
+  for (const ev of events) {
+    if (!ev.repeat || ev.repeat === "none") { out.push(ev); continue; }
+    const dur   = diff(ev.start, ev.end || ev.start); // 일정 길이(일)
+    const until = ev.repeatUntil || defaultUntil;
+    let cur = ev.start, count = 0;
+    while (cur <= until && count < HARD_CAP) {
+      out.push({ ...ev, start: cur, end: add(cur, dur), _recurring: true });
+      count++;
+      if      (ev.repeat === "daily")   cur = add(cur, 1);
+      else if (ev.repeat === "weekly")  cur = add(cur, 7);
+      else if (ev.repeat === "monthly") cur = addMonths(cur, 1);
+      else break;
+    }
+  }
+  return out;
+}
 
 // 시간 포맷: "09:00" → "오전 9:00"
 const fmtTime = t => {
@@ -66,11 +125,11 @@ const fmtTime = t => {
 };
 
 // ── 텍스트 자동 파싱 엔진 (정규식 기반) ─────────────────────────
-function parseEventText(text) {
+function parseEventText(text, titleRule = DEFAULT_TITLE_RULE, typeKeywords = DEFAULT_TYPE_KEYWORDS) {
   const result = {
     title:"", start:"", end:"", allDay:false,
     startTime:"09:00", endTime:"10:00",
-    place:"", description:text.trim(), url:"", calId:"clean0", repeat:"none",
+    place:"", description:text.trim(), url:"", calId:"", repeat:"none",
   };
   const yr = new Date().getFullYear();
 
@@ -158,24 +217,24 @@ function parseEventText(text) {
   const pw = text.match(/(비밀번호|비번)\s*[:：]?\s*([0-9*#!@]+)/);
   const password = pw ? pw[2] : "";
 
-  // 제목 자동 생성 (시간 -> 지역 -> 면적/방개수)
-  const tp = [];
-  if (hasAllDay) tp.push("종일");
-  else if (hasAM) tp.push("오전");
-  else if (hasPM) tp.push("오후");
-
-  if (result.place) {
-    const dg = result.place.match(/([가-힣]+(구|동|로|길))/);
-    if (dg) tp.push(dg[1]);
-  }
-
+  // 제목 자동 생성 — titleRule 토큰 순서대로 조합
   const roomMatch = text.match(/([가-힣]*방\s*\d+개|원룸|투룸|쓰리룸|포룸|\d+평)/);
-  if (roomMatch) {
-    tp.push(roomMatch[1]);
-  } else if (phones.length>0 && phones[0].name) {
-    tp.push(phones[0].name); // 방 정보가 없으면 담당자 이름으로 대체
-  }
-  result.title = tp.join(" ");
+  const districtMatch = result.place ? result.place.match(/([가-힣]+(구|동|로|길))/) : null;
+  const typeMatch = typeKeywords.map(k => text.includes(k) ? k : null).find(Boolean);
+
+  const tokenValues = {
+    time:         hasAllDay ? "종일" : hasAM ? "오전" : hasPM ? "오후" : "",
+    district:     districtMatch ? districtMatch[1] : "",
+    area:         roomMatch ? roomMatch[1] : "",
+    type:         typeMatch || "",
+    contact_name: phones.length > 0 && phones[0].name ? phones[0].name : "",
+    phone_last4:  phones.length > 0 ? phones[0].phone.replace(/[^0-9]/g,"").slice(-4) : "",
+  };
+
+  result.title = (titleRule || DEFAULT_TITLE_RULE)
+    .map(token => tokenValues[token] || "")
+    .filter(Boolean)
+    .join(" ");
 
   // 연락처 필드 별도 저장
   result.contact = phones.map(function(p){ return (p.name?p.name+" ":"")+p.phone; }).join(", ");
@@ -222,12 +281,19 @@ function Provider({ children, loginUser, onLogout }) {
 
   // Firestore 데이터
   const [events, setEvents] = useState([]);
-  const [cals, setCals] = useState(CALS); // 기본 캘린더 목록
+  const [cals, setCals] = useState(DEFAULT_CALS); // 기본 캘린더 목록 (Firestore 로드 전 fallback)
   const [teams, setTeams] = useState(INIT_TEAMS);
   const [users, setUsers] = useState(INIT_USERS);
   const [activityLogs, setActivityLogs] = useState([]);
   const [notices, setNotices] = useState([]);
   const [links, setLinks] = useState([]);
+  const [linkCategories, setLinkCategories] = useState(["업무", "지도", "연락처", "기타"]);
+  const [titleRule, setTitleRule]       = useState(DEFAULT_TITLE_RULE);
+  const [typeKeywords, setTypeKeywords] = useState(DEFAULT_TYPE_KEYWORDS);
+  const [reports, setReports] = useState([]);
+
+  // 모듈 전역 CALS 미러를 항상 최신 cals로 유지 (calById/CALS.find 호출부가 전부 이걸 본다)
+  useEffect(() => { CALS.splice(0, CALS.length, ...cals); }, [cals]);
 
   useEffect(() => {
     const unsubEvents = onSnapshot(collection(companyRef, "events"), snap => {
@@ -236,26 +302,87 @@ function Provider({ children, loginUser, onLogout }) {
     const unsubUsers = onSnapshot(collection(companyRef, "users"), snap => {
       if(!snap.empty) setUsers(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     });
-    const unsubTeams = onSnapshot(collection(companyRef, "teams"), snap => {
-      if(!snap.empty) setTeams(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    // 팀 목록 + 링크 카테고리는 단일 설정 문서(meta/config)에 배열로 저장 (순서 보존)
+    const unsubConfig = onSnapshot(doc(companyRef, "meta", "config"), snap => {
+      const data = snap.data();
+      if (data?.teams)          setTeams(data.teams);
+      if (data?.linkCategories) setLinkCategories(data.linkCategories);
+      if (data?.titleRule)      setTitleRule(data.titleRule);
+      if (data?.typeKeywords)   setTypeKeywords(data.typeKeywords);
     });
     const unsubLogs = onSnapshot(query(collection(companyRef, "activityLogs"), orderBy("time", "desc")), snap => {
       setActivityLogs(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     });
     const unsubNotices = onSnapshot(collection(companyRef, "notices"), snap => {
-      setNotices(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      // 최신순 정렬 (date 내림차순)
+      setNotices(snap.docs.map(d => ({ ...d.data(), id: d.id }))
+        .sort((a,b) => (b.date||"").localeCompare(a.date||"")));
     });
     const unsubLinks = onSnapshot(collection(companyRef, "links"), snap => {
-      setLinks(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      setLinks(snap.docs.map(d => ({ ...d.data(), id: d.id }))
+        .sort((a,b) => (a.order ?? 0) - (b.order ?? 0)));
     });
     const unsubCals = onSnapshot(collection(companyRef, "cals"), snap => {
       if (!snap.empty) setCals(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     });
+    const unsubReports = onSnapshot(collection(companyRef, "reports"), snap => {
+      setReports(snap.docs.map(d => ({ ...d.data(), id: d.id }))
+        .sort((a,b) => (b.date||"").localeCompare(a.date||"")));
+    });
 
     return () => {
-      unsubEvents(); unsubUsers(); unsubTeams(); unsubLogs(); unsubNotices(); unsubLinks(); unsubCals();
+      unsubEvents(); unsubUsers(); unsubConfig(); unsubLogs(); unsubNotices(); unsubLinks(); unsubCals(); unsubReports();
     };
   }, [loginUser.companyId]);
+
+  // ── 공지 CRUD (Firestore 영속) ──
+  const addNotice = useCallback(n => {
+    const ref = doc(collection(companyRef, "notices"));
+    setDoc(ref, { ...n, id: ref.id });
+  }, [companyRef]);
+  const deleteNotice = useCallback(id => {
+    deleteDoc(doc(companyRef, "notices", id));
+  }, [companyRef]);
+
+  // ── 링크 CRUD (Firestore 영속, order 필드로 순서 유지) ──
+  const addLink = useCallback(l => {
+    const ref = doc(collection(companyRef, "links"));
+    setDoc(ref, { ...l, id: ref.id, order: links.length });
+  }, [companyRef, links.length]);
+  const deleteLink = useCallback(id => {
+    deleteDoc(doc(companyRef, "links", id));
+  }, [companyRef]);
+  // 순서 변경: 새 배열을 받아 order를 다시 매겨 전부 저장
+  const persistLinkOrder = useCallback(arr => {
+    arr.forEach((l, i) => setDoc(doc(companyRef, "links", l.id), { ...l, order: i }, { merge: true }));
+  }, [companyRef]);
+  const updateLink = useCallback(l => {
+    setDoc(doc(companyRef, "links", l.id), l, { merge: true });
+  }, [companyRef]);
+
+  // ── 팀 목록 / 링크 카테고리 (meta/config 단일 문서) ──
+  const saveTeams = useCallback(arr => {
+    setTeams(arr); // 즉시 반영 (스냅샷이 확정)
+    setDoc(doc(companyRef, "meta", "config"), { teams: arr }, { merge: true });
+  }, [companyRef]);
+  const saveLinkCategories = useCallback(arr => {
+    setLinkCategories(arr);
+    setDoc(doc(companyRef, "meta", "config"), { linkCategories: arr }, { merge: true });
+  }, [companyRef]);
+  const saveTitleRule = useCallback((rule, keywords) => {
+    setTitleRule(rule);
+    if (keywords !== undefined) setTypeKeywords(keywords);
+    setDoc(doc(companyRef, "meta", "config"), {
+      titleRule: rule,
+      ...(keywords !== undefined ? { typeKeywords: keywords } : {}),
+    }, { merge: true });
+  }, [companyRef]);
+
+  // ── 완료 보고 저장 (Firestore) ──
+  const addReport = useCallback(r => {
+    const ref = doc(collection(companyRef, "reports"));
+    setDoc(ref, { ...r, id: ref.id });
+  }, [companyRef]);
 
   const addLog = useCallback((action, detail) => {
     const newLogRef = doc(collection(companyRef, "activityLogs"));
@@ -288,6 +415,12 @@ function Provider({ children, loginUser, onLogout }) {
     }
   }, [cals, companyRef]);
 
+  const updateCal = useCallback(updated => {
+    const nextCals = cals.map(c => c.id === updated.id ? {...c, ...updated} : c);
+    setCals(nextCals);
+    setDoc(doc(companyRef, "cals", updated.id), updated);
+  }, [cals, companyRef]);
+
   // UI 상태
   const [modal,setModal]       = useState({open:false,date:null,editId:null});
   const [current,setCurrent]   = useState(() => {
@@ -316,20 +449,20 @@ function Provider({ children, loginUser, onLogout }) {
   const visibleEvents  = useMemo(()=>{
     let evs = events.filter(e=>checkedIds.has(e.calId));
     if (!["관리팀", "영업팀"].includes(currentUser.team) && currentUser.role !== "최고관리자") {
-      const myTeamKeyword = currentUser.team.replace("팀", ""); 
+      const myTeamKeyword = currentUser.team.replace("팀", "");
       evs = evs.filter(e => {
         const cal = CALS.find(c=>c.id===e.calId);
         return cal && cal.label.includes(myTeamKeyword);
       });
     }
-    return evs;
+    return expandRecurring(evs); // 반복 일정을 개별 날짜로 펼침
   }, [events, checkedIds, currentUser.team, currentUser.role]);
 
   return (
     <Ctx.Provider value={{
       events,visibleEvents,addEvent,updateEvent,deleteEvent,
       fieldReportEv,setFieldReportEv,
-      cals,toggleCal,
+      cals,toggleCal,updateCal,
       modal,openModal,closeModal,
       current,setCurrent,
       selDate,setSelDate,
@@ -338,15 +471,18 @@ function Provider({ children, loginUser, onLogout }) {
       searchOpen,setSearchOpen,
       searchQuery,setSearchQuery,
       sheetMode,setSheetMode,
-      teams,setTeams,teamModal,setTeamModal,
+      teams,setTeams,saveTeams,teamModal,setTeamModal,
       users,setUsers,
       currentUser,setCurrentUser,loginUser,onLogout,
       currentScreen,setCurrentScreen,
       empModal,setEmpModal,
       companySettingsModal,setCompanySettingsModal,
       activityLogs,setActivityLogs,
-      notices,setNotices,
-      links,setLinks,
+      notices,setNotices,addNotice,deleteNotice,
+      links,setLinks,addLink,deleteLink,updateLink,persistLinkOrder,
+      linkCategories,saveLinkCategories,
+      titleRule,typeKeywords,saveTitleRule,
+      reports,addReport,
       companyId: loginUser.companyId
     }}>
       {children}
@@ -568,7 +704,7 @@ function ScheduleList({ selDate, compact=false }) {
             <ChevronRight size={15}/>
           </button>
         </div>
-        <button onClick={()=>openModal(selDate)} className="text-blue-500 text-sm font-semibold">+ 추가</button>
+        <div className="w-10"/>
       </div>
 
       {/* 이벤트 목록 */}
@@ -580,13 +716,6 @@ function ScheduleList({ selDate, compact=false }) {
           return(
             <div key={ev.id}
               onClick={()=>setDetEv(ev)}
-              onContextMenu={e=>{e.preventDefault();setLongPressEv(ev);}}
-              onTouchStart={e=>{
-                const t=setTimeout(()=>setLongPressEv(ev),500);
-                e.currentTarget._lpt=t;
-              }}
-              onTouchEnd={e=>clearTimeout(e.currentTarget._lpt)}
-              onTouchMove={e=>clearTimeout(e.currentTarget._lpt)}
               className="flex items-center px-4 py-1.5 border-b border-gray-50 cursor-pointer">
               {isMulti
                 ? <span className="text-sm px-2 py-0.5 rounded text-white font-medium mr-2 truncate max-w-[80%]"
@@ -1120,6 +1249,17 @@ function DetailSheet() {
             </div>
           </div>
 
+          {/* 반복 */}
+          {detEv.repeat && detEv.repeat !== "none" && (
+            <div className="flex items-center px-5 py-4 border-b border-gray-100 gap-4">
+              <RotateCcw size={20} className="text-gray-400 shrink-0"/>
+              <span className="text-[15px] text-gray-800">
+                {(REPEAT_OPTS.find(o=>o.value===detEv.repeat)||{}).label || "반복"}
+                {detEv.repeatUntil ? ` · ${detEv.repeatUntil}까지` : ""}
+              </span>
+            </div>
+          )}
+
           {/* 장소 */}
           {detEv.place && (
             <div className="flex items-start px-5 py-5 border-b border-gray-100 gap-4">
@@ -1297,7 +1437,7 @@ function BottomTabBar() {
 
 // ── 사이드 드로어 (스와이프 열기/닫기 지원) ───────────────────────
 function SideDrawer() {
-  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices } = useC();
+  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, onLogout } = useC();
 
   // 드래그 상태
   const startX   = useRef(null);
@@ -1506,6 +1646,24 @@ function SideDrawer() {
               <span className="text-sm font-medium text-gray-700 flex-1 text-left">📥 캘린더 가져오기</span>
             </button>
           )}
+
+          {/* 설정 가이드 / FAQ */}
+          <button
+            onClick={() => { setCurrentScreen("faq"); setDrawer(false); }}
+            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+            <span className="text-lg">❓</span>
+            <span className="text-sm font-medium text-gray-700 flex-1 text-left">설정 가이드 · FAQ</span>
+          </button>
+
+          {/* 로그아웃 */}
+          <div className="mt-2 pt-2 border-t border-gray-100">
+            <button
+              onClick={() => { if(window.confirm("로그아웃 하시겠습니까?")) onLogout?.(); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <span className="text-red-500 text-lg">⎋</span>
+              <span className="text-sm font-medium text-red-500 flex-1 text-left">로그아웃</span>
+            </button>
+          </div>
         </div>
       </div>
     </>
@@ -1513,19 +1671,303 @@ function SideDrawer() {
 }
 
 // ── 일정 추가 모달 ────────────────────────────────────────────────
-const blank=date=>({title:"",description:"",contact:"",team:"",start:date||fmt(new Date()),end:date||fmt(new Date()),allDay:false,startTime:"09:00",endTime:"10:00",place:"",url:"",calId:"clean0",repeat:"none"});
+const blank=date=>({title:"",description:"",contact:"",team:"",start:date||fmt(new Date()),end:date||fmt(new Date()),allDay:false,startTime:"09:00",endTime:"10:00",place:"",url:"",calId:"",repeat:"none",repeatUntil:""});
+
+// ── 드럼롤 휠 피커 ────────────────────────────────────────────────
+function WheelPicker({ items, value, onChange, renderItem }) {
+  const ITEM_H = 44;
+  const ref = useRef(null);
+  const timer = useRef(null);
+  const scrolling = useRef(false);
+  const display = renderItem || (v => String(v));
+
+  // items/value 변경 시 스크롤 위치 초기화
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const idx = items.indexOf(value);
+    if (idx >= 0) el.scrollTop = idx * ITEM_H;
+  }, [items]);
+
+  // 외부 value 변경 시 부드럽게 이동
+  useEffect(() => {
+    if (scrolling.current) return;
+    const el = ref.current;
+    if (!el) return;
+    const idx = items.indexOf(value);
+    if (idx >= 0) el.scrollTo({ top: idx * ITEM_H, behavior: "smooth" });
+  }, [value]);
+
+  const handleScroll = () => {
+    scrolling.current = true;
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      scrolling.current = false;
+      const el = ref.current;
+      if (!el) return;
+      const idx = Math.max(0, Math.min(items.length - 1, Math.round(el.scrollTop / ITEM_H)));
+      el.scrollTo({ top: idx * ITEM_H, behavior: "smooth" });
+      if (items[idx] !== value) onChange(items[idx]);
+    }, 120);
+  };
+
+  return (
+    <div className="relative flex-1 overflow-hidden select-none" style={{ height: ITEM_H * 5 }}>
+      {/* 선택 영역 하이라이트 */}
+      <div className="absolute left-1 right-1 rounded-xl bg-gray-100 pointer-events-none z-10"
+        style={{ top: ITEM_H * 2, height: ITEM_H }} />
+      {/* 상하 페이드 */}
+      <div className="absolute inset-0 pointer-events-none z-20"
+        style={{ background: "linear-gradient(to bottom,white 0%,transparent 30%,transparent 70%,white 100%)" }} />
+      <div ref={ref} onScroll={handleScroll}
+        className="h-full overflow-y-scroll"
+        style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none" }}>
+        <div style={{ height: ITEM_H * 2 }} />
+        {items.map((item, i) => {
+          const sel = item === value;
+          return (
+            <div key={i} style={{ height: ITEM_H, scrollSnapAlign: "center",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: sel ? 17 : 15, fontWeight: sel ? 700 : 400,
+              color: sel ? "#111827" : "#9ca3af" }}>
+              {display(item)}
+            </div>
+          );
+        })}
+        <div style={{ height: ITEM_H * 2 }} />
+      </div>
+    </div>
+  );
+}
+
+// ── 날짜/시간 피커 (네이버 앱 스타일 — 인라인 드럼롤) ──────────────
+function DateTimePicker({ form, set, errs }) {
+  const [activePicker, setActivePicker] = useState(null); // null | "start" | "end"
+
+  // 피커 내부 상태 (ref로 항상 최신값 유지)
+  const ps = useRef({ year:2026, month:6, day:1, ampm:"오전", hour:9, min:0 });
+  const [pYear,  setPYear]  = useState(2026);
+  const [pMonth, setPMonth] = useState(6);
+  const [pDay,   setPDay]   = useState(1);
+  const [pAmpm,  setPAmpm]  = useState("오전");
+  const [pHour,  setPHour]  = useState(9);
+  const [pMin,   setPMin]   = useState(0);
+
+  const parseTime = t => {
+    if (!t) return { ampm:"오전", h:9, m:0 };
+    const [hh, mm] = t.split(":").map(Number);
+    const ampm = hh < 12 ? "오전" : "오후";
+    const h12  = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
+    return { ampm, h: h12, m: Math.round(mm / 5) * 5 % 60 };
+  };
+  const toTime24 = (ampm, h, m) => {
+    let h24 = h;
+    if (ampm === "오전" && h === 12) h24 = 0;
+    if (ampm === "오후" && h !== 12) h24 = h + 12;
+    return `${String(h24).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+  };
+
+  const applyToForm = (y, mo, d, ampm, h, m) => {
+    if (!activePicker) return;
+    const safeDay = Math.min(d, new Date(y, mo, 0).getDate());
+    const dateStr = `${y}-${String(mo).padStart(2,"0")}-${String(safeDay).padStart(2,"0")}`;
+    if (activePicker === "start") {
+      set("start", dateStr);
+      if (dateStr > form.end) set("end", dateStr);
+      if (!form.allDay) set("startTime", toTime24(ampm, h, m));
+    } else {
+      set("end", dateStr);
+      if (!form.allDay) set("endTime", toTime24(ampm, h, m));
+    }
+  };
+
+  const openPicker = field => {
+    if (activePicker === field) { setActivePicker(null); return; }
+    const dateStr = field === "start" ? form.start : form.end;
+    const timeStr = field === "start" ? form.startTime : form.endTime;
+    const d = pd(dateStr) || new Date();
+    const t = parseTime(timeStr);
+    const state = { year: d.getFullYear(), month: d.getMonth()+1, day: d.getDate(), ampm: t.ampm, hour: t.h, min: t.m };
+    ps.current = state;
+    setPYear(state.year); setPMonth(state.month); setPDay(state.day);
+    setPAmpm(state.ampm); setPHour(state.hour);   setPMin(state.min);
+    setActivePicker(field);
+  };
+
+  // 각 휠 변경 핸들러
+  const chYear  = v => { ps.current.year  = v; setPYear(v);  applyToForm(v, ps.current.month, ps.current.day, ps.current.ampm, ps.current.hour, ps.current.min); };
+  const chMonth = v => { ps.current.month = v; setPMonth(v); applyToForm(ps.current.year, v, ps.current.day, ps.current.ampm, ps.current.hour, ps.current.min); };
+  const chDay   = v => { ps.current.day   = v; setPDay(v);   applyToForm(ps.current.year, ps.current.month, v, ps.current.ampm, ps.current.hour, ps.current.min); };
+  const chAmpm  = v => { ps.current.ampm  = v; setPAmpm(v);  applyToForm(ps.current.year, ps.current.month, ps.current.day, v, ps.current.hour, ps.current.min); };
+  const chHour  = v => { ps.current.hour  = v; setPHour(v);  applyToForm(ps.current.year, ps.current.month, ps.current.day, ps.current.ampm, v, ps.current.min); };
+  const chMin   = v => { ps.current.min   = v; setPMin(v);   applyToForm(ps.current.year, ps.current.month, ps.current.day, ps.current.ampm, ps.current.hour, v); };
+
+  const daysInMonth = new Date(pYear, pMonth, 0).getDate();
+  const years  = Array.from({length:8}, (_,i) => 2023+i);
+  const months = Array.from({length:12},(_,i) => i+1);
+  const days   = Array.from({length:daysInMonth},(_,i) => i+1);
+  const hours  = Array.from({length:12},(_,i) => i+1);
+  const mins   = Array.from({length:12},(_,i) => i*5);
+  const WD     = ["일","월","화","수","목","금","토"];
+
+  const dispDate = s => {
+    if (!s) return "--";
+    const d = pd(s); if (!d) return "--";
+    const yy = String(d.getFullYear()).slice(2);
+    return `${yy}. ${d.getMonth()+1}. ${d.getDate()}.(${WD[d.getDay()]})`;
+  };
+  const dispTime = t => {
+    if (!t) return "--:--";
+    const p = parseTime(t);
+    return `${p.ampm} ${p.h}:${String(p.m).padStart(2,"0")}`;
+  };
+
+  return (
+    <div className="border-b border-gray-100">
+      {/* 종일 토글 */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+        <div className="flex items-center gap-3">
+          <Clock size={18} className="text-gray-400"/>
+          <span className="text-sm text-gray-700">종일</span>
+        </div>
+        <button onClick={()=>set("allDay",!form.allDay)}
+          className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${form.allDay?"bg-blue-600":"bg-gray-200"}`}>
+          <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.allDay?"translate-x-6":"translate-x-0"}`}/>
+        </button>
+      </div>
+
+      {/* 시작/종료 날짜시간 버튼 */}
+      <div className="flex items-center px-4 py-3 gap-2">
+        <button onClick={()=>openPicker("start")} className="flex-1 text-left">
+          <div className={`text-sm font-medium ${activePicker==="start"?"text-yellow-500":"text-gray-600"}`}>
+            {dispDate(form.start)}
+          </div>
+          {!form.allDay && (
+            <div className={`text-2xl font-bold mt-0.5 ${activePicker==="start"?"text-yellow-500":"text-gray-900"}`}>
+              {dispTime(form.startTime)}
+            </div>
+          )}
+        </button>
+        <ChevronRight size={16} className="text-gray-300 shrink-0"/>
+        <button onClick={()=>openPicker("end")} className="flex-1 text-right">
+          <div className={`text-sm font-medium ${activePicker==="end"?"text-yellow-500":"text-gray-600"}`}>
+            {dispDate(form.end)}
+          </div>
+          {!form.allDay && (
+            <div className={`text-2xl font-bold mt-0.5 ${activePicker==="end"?"text-yellow-500":"text-gray-900"}`}>
+              {dispTime(form.endTime)}
+            </div>
+          )}
+        </button>
+      </div>
+
+      {/* 인라인 드럼롤 */}
+      {activePicker && (
+        <div className="border-t border-gray-100">
+          <div className="flex px-1" style={{height:220}}>
+            <WheelPicker key={`y`}  items={years}  value={pYear}  onChange={chYear}  renderItem={v=>String(v)}/>
+            <WheelPicker key={`mo`} items={months} value={pMonth} onChange={chMonth} renderItem={v=>`${v}월`}/>
+            <WheelPicker key={`${pYear}-${pMonth}-d`} items={days} value={pDay} onChange={chDay}
+              renderItem={v=>`${v}일 ${WD[new Date(pYear,pMonth-1,v).getDay()]}`}/>
+            {!form.allDay && <>
+              <WheelPicker key={`ap`} items={["오전","오후"]} value={pAmpm} onChange={chAmpm}/>
+              <WheelPicker key={`h`}  items={hours} value={pHour} onChange={chHour} renderItem={v=>String(v)}/>
+              <WheelPicker key={`m`}  items={mins}  value={pMin}  onChange={chMin}  renderItem={v=>String(v).padStart(2,"0")}/>
+            </>}
+          </div>
+          {/* 오늘 버튼 */}
+          <div className="flex items-center justify-end px-4 py-2 gap-3 border-t border-gray-50">
+            <label className="flex items-center gap-1.5 text-sm text-gray-400 cursor-pointer">
+              <input type="checkbox" className="w-3.5 h-3.5"/> 음력
+            </label>
+            <button onClick={()=>{
+              const t = new Date();
+              const y=t.getFullYear(), mo=t.getMonth()+1, d=t.getDate();
+              ps.current = {...ps.current, year:y, month:mo, day:d};
+              setPYear(y); setPMonth(mo); setPDay(d);
+              applyToForm(y, mo, d, ps.current.ampm, ps.current.hour, ps.current.min);
+            }} className={`px-5 py-1.5 rounded-full text-sm font-bold ${activePicker==="start"?"bg-yellow-400 text-white":"bg-gray-100 text-gray-600"}`}>
+              오늘
+            </button>
+          </div>
+        </div>
+      )}
+
+      {errs.end  && <p className="text-red-500 text-xs px-4 pb-2">{errs.end}</p>}
+      {errs.time && <p className="text-red-500 text-xs px-4 pb-2">{errs.time}</p>}
+    </div>
+  );
+}
+
+// ── 반복 종료일 피커 (드럼롤) ──────────────────────────────────────
+function RepeatUntilPicker({ form, set }) {
+  const [open, setOpen] = useState(false);
+  const WD = ["일","월","화","수","목","금","토"];
+
+  const parseRepeat = () => {
+    const d = form.repeatUntil ? pd(form.repeatUntil) : new Date();
+    return { year: d.getFullYear(), month: d.getMonth()+1, day: d.getDate() };
+  };
+  const init = parseRepeat();
+  const [pYear, setPYear]   = useState(init.year);
+  const [pMonth, setPMonth] = useState(init.month);
+  const [pDay, setPDay]     = useState(init.day);
+  const ps = useRef(init);
+
+  const applyDate = (y, mo, d) => {
+    const safeDay = Math.min(d, new Date(y, mo, 0).getDate());
+    set("repeatUntil", `${y}-${String(mo).padStart(2,"0")}-${String(safeDay).padStart(2,"0")}`);
+  };
+  const chYear  = v => { ps.current.year=v;  setPYear(v);  applyDate(v, ps.current.month, ps.current.day); };
+  const chMonth = v => { ps.current.month=v; setPMonth(v); applyDate(ps.current.year, v, ps.current.day); };
+  const chDay   = v => { ps.current.day=v;   setPDay(v);   applyDate(ps.current.year, ps.current.month, v); };
+
+  const daysInMonth = new Date(pYear, pMonth, 0).getDate();
+  const years  = Array.from({length:8},(_,i)=>2023+i);
+  const months = Array.from({length:12},(_,i)=>i+1);
+  const days   = Array.from({length:daysInMonth},(_,i)=>i+1);
+
+  const dispDate = s => {
+    if (!s) return <span className="text-gray-400 font-normal">날짜 선택 (비우면 6개월)</span>;
+    const d = pd(s); if (!d) return "--";
+    return `${String(d.getFullYear()).slice(2)}. ${d.getMonth()+1}. ${d.getDate()}.(${WD[d.getDay()]})`;
+  };
+
+  return (
+    <>
+      <button onClick={()=>setOpen(o=>!o)} className="text-sm text-blue-600 font-semibold py-1">
+        {dispDate(form.repeatUntil)}
+      </button>
+      {open && (
+        <div className="border-t border-gray-100 mt-1">
+          <div className="flex px-1" style={{height:220}}>
+            <WheelPicker key="ry" items={years}  value={pYear}  onChange={chYear}  renderItem={v=>String(v)}/>
+            <WheelPicker key="rm" items={months} value={pMonth} onChange={chMonth} renderItem={v=>`${v}월`}/>
+            <WheelPicker key={`${pYear}-${pMonth}-rd`} items={days} value={pDay} onChange={chDay}
+              renderItem={v=>`${v}일 ${WD[new Date(pYear,pMonth-1,v).getDay()]}`}/>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 function EventModal() {
-  const { modal, closeModal, addEvent, updateEvent, deleteEvent, events, cals } = useC();
+  const { modal, closeModal, addEvent, updateEvent, deleteEvent, events, cals, titleRule, typeKeywords } = useC();
   const { open, date, editId } = modal;
   const editEv=editId?events.find(e=>e.id===editId):null;
   const [form,setForm]=useState(blank(date));
   const [errs,setErrs]=useState({});
   const [anim,setAnim]=useState(false);
   const [pasteText,setPasteText]=useState("");
-  const [aiMode,setAiMode]=useState(false);   // true=AI 상담대화 모드
+  // inputMode: "memo" | "chat" | "image" | "direct"
+  const [inputMode,setInputMode]=useState("memo");
   const [aiLoading,setAiLoading]=useState(false);
-  // step: "paste"=텍스트입력단계, "form"=일정폼단계
+  const [imgFile,setImgFile]=useState(null);
+  const [imgPreview,setImgPreview]=useState(null);
+  const [calDropOpen,setCalDropOpen]=useState(false);
+  const imgInputRef=useRef(null);
+  // step: "paste"=입력단계, "form"=일정폼단계
   const [step,setStep]=useState("paste");
   const tRef=useRef(null);
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
@@ -1535,9 +1977,11 @@ function EventModal() {
       setForm(editEv?{...editEv}:blank(date));
       setErrs({});
       setPasteText("");
-      setAiMode(false);
+      setInputMode("memo");
       setAiLoading(false);
-      // 수정모드 또는 날짜 직접 추가는 바로 폼, 새 일정은 텍스트 입력부터
+      setImgFile(null);
+      setImgPreview(null);
+      setCalDropOpen(false);
       setStep(editEv ? "form" : "paste");
       setTimeout(()=>setAnim(true),10);
       setTimeout(()=>tRef.current?.focus(),150);
@@ -1545,11 +1989,6 @@ function EventModal() {
     else setAnim(false);
   },[open,editId]);
 
-  const guard=useMemo(()=>{const d=diff(form.start,form.end);return{d,show:d>=14,monthly:d>=30};},[form.start,form.end]);
-  useEffect(()=>{
-    if(!guard.show&&form.repeat!=="none") set("repeat","none");
-    if(!guard.monthly&&form.repeat==="monthly") set("repeat","none");
-  },[guard.show,guard.monthly]);
 
   const validate=()=>{
     const e={};
@@ -1569,241 +2008,228 @@ function EventModal() {
         transition: "transform 0.35s cubic-bezier(0.32,0.72,0,1), opacity 0.35s ease",
       }}
       className="absolute inset-0 z-50 bg-white flex flex-col">
-      {/* ═══ STEP 1: 텍스트 입력 단계 ═══ */}
+      {/* ═══ STEP 1: 입력 방법 선택 단계 ═══ */}
       {step === "paste" ? (
         <>
+          {/* 헤더 */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <button onClick={closeModal}><X size={22} className="text-gray-600"/></button>
-            <h2 className="font-bold text-base">내용 입력</h2>
-            <button
-              onClick={()=>{
-                // 빈 칸이면 그냥 빈 폼으로, 내용 있으면 파싱
-                if(pasteText.trim()){
-                  const parsed = parseEventText(pasteText);
-                  setForm(p=>({...p, ...parsed}));
-                }
-                setStep("form");
-              }}
-              className="text-blue-500 font-bold text-base">확인</button>
+            <h2 className="font-bold text-base">일정 추가</h2>
+            <div className="w-6"/>
           </div>
-          <div className="flex-1 overflow-y-auto p-4">
-            {/* 탭 전환 */}
-            <div className="flex gap-2 mb-4">
-              <button
-                onClick={()=>setAiMode(false)}
-                className={"flex-1 py-2 rounded-xl text-sm font-bold transition-all " + (!aiMode ? "bg-blue-500 text-white" : "bg-gray-100 text-gray-500")}>
-                📋 메모·문자 입력
-              </button>
-              <button
-                onClick={()=>setAiMode(true)}
-                className={"flex-1 py-2 rounded-xl text-sm font-bold transition-all " + (aiMode ? "bg-blue-500 text-white" : "bg-gray-100 text-gray-500")}>
-                💬 상담 대화 AI 분석
-              </button>
-            </div>
 
-            {!aiMode ? (
+          {/* 4탭 */}
+          <div className="flex border-b border-gray-100">
+            {[
+              { key:"memo",  icon:"📋", label:"메모"  },
+              { key:"chat",  icon:"💬", label:"대화"  },
+              { key:"image", icon:"📷", label:"사진"  },
+              { key:"direct",icon:"✏️", label:"직접"  },
+            ].map(tab=>{
+              const active = inputMode === tab.key;
+              return (
+                <button key={tab.key}
+                  onClick={()=>{
+                    setInputMode(tab.key);
+                    if(tab.key==="direct"){ setStep("form"); }
+                  }}
+                  className="flex-1 flex flex-col items-center py-2.5 gap-0.5 relative transition-colors"
+                  style={{color: active ? "#1a56db" : "#9ca3af"}}>
+                  <span className="text-lg leading-none">{tab.icon}</span>
+                  <span className="text-[11px] font-semibold">{tab.label}</span>
+                  {active && (
+                    <span className="absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-blue-600"/>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 입력 영역 */}
+          <div className="flex-1 overflow-y-auto px-4 pt-4 pb-2">
+            {inputMode === "memo" && (
               <>
-                <p className="text-sm text-gray-500 mb-3">
-                  📋 카카오톡 문자나 메모를 붙여넣으면 날짜·장소·연락처·비밀번호를 자동으로 정리해드려요.
-                </p>
+                <p className="text-xs text-gray-400 mb-3">카카오톡 문자나 메모를 붙여넣으면 날짜·장소·연락처를 자동으로 정리해드려요.</p>
+                <textarea
+                  ref={tRef}
+                  autoFocus
+                  value={pasteText}
+                  onChange={e=>setPasteText(e.target.value)}
+                  placeholder={"여기에 내용을 붙여넣으세요...\n\n예)\n6월 15일 오전\n서울시 동대문구 망우로1길27\n이효림 010-2192-9533\n비밀번호 1469*"}
+                  className="w-full h-64 text-sm outline-none resize-none text-gray-800 placeholder-gray-300 leading-relaxed"
+                />
+              </>
+            )}
+            {inputMode === "chat" && (
+              <>
+                <p className="text-xs text-gray-400 mb-3">고객과 나눈 카카오톡 상담 대화를 통째로 붙여넣으면 AI가 예약 정보를 뽑아드려요.</p>
                 <textarea
                   autoFocus
                   value={pasteText}
                   onChange={e=>setPasteText(e.target.value)}
-                  placeholder={"여기에 내용을 입력하거나 붙여넣으세요...\n\n예)\n6월 15일 오전\n서울시 동대문구 망우로1길27\n이효림 010-2192-9533\n비밀번호 1469*"}
-                  rows={12}
-                  className="w-full text-sm outline-none resize-none text-gray-800 placeholder-gray-300 leading-relaxed"
-                />
-              </>
-            ) : (
-              <>
-                <p className="text-sm text-gray-500 mb-3">
-                  💬 고객과 나눈 카카오톡 상담 대화를 통째로 붙여넣으면 AI가 예약 정보를 뽑아드려요.
-                </p>
-                <textarea
-                  value={pasteText}
-                  onChange={e=>setPasteText(e.target.value)}
-                  placeholder={"[고객]\n안녕하세요! 청소 견적 문의드려요...\n\n[사장님]\n안녕하세요! 연락 주셔서 감사합니다..."}
-                  rows={12}
-                  className="w-full text-sm outline-none resize-none text-gray-800 placeholder-gray-300 leading-relaxed"
+                  placeholder={"[고객]\n안녕하세요! 청소 견적 문의드려요.\n\n[사장님]\n안녕하세요! 언제 원하세요?"}
+                  className="w-full h-64 text-sm outline-none resize-none text-gray-800 placeholder-gray-300 leading-relaxed"
                 />
               </>
             )}
+            {inputMode === "image" && (
+              <>
+                <p className="text-xs text-gray-400 mb-3">사진을 올리면 텍스트를 추출해서 일정을 자동으로 채워드려요.</p>
+                <input ref={imgInputRef} type="file" accept="image/*" className="hidden"
+                  onChange={e=>{
+                    const file = e.target.files?.[0];
+                    if(!file) return;
+                    setImgFile(file);
+                    const reader = new FileReader();
+                    reader.onload = ev => setImgPreview(ev.target.result);
+                    reader.readAsDataURL(file);
+                  }}/>
+                {imgPreview ? (
+                  <div className="relative">
+                    <img src={imgPreview} alt="선택된 이미지" className="w-full rounded-xl object-contain max-h-64 bg-gray-50"/>
+                    <button
+                      onClick={()=>{ setImgFile(null); setImgPreview(null); imgInputRef.current.value=""; }}
+                      className="absolute top-2 right-2 w-7 h-7 bg-black/50 rounded-full flex items-center justify-center">
+                      <X size={14} className="text-white"/>
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={()=>imgInputRef.current?.click()}
+                    className="w-full h-48 rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 text-gray-400 active:bg-gray-50">
+                    <span className="text-4xl">📷</span>
+                    <span className="text-sm font-medium">사진 선택</span>
+                    <span className="text-xs">카메라 촬영 또는 갤러리에서 선택</span>
+                  </button>
+                )}
+              </>
+            )}
           </div>
+
+          {/* 하단 버튼 */}
           <div className="px-4 py-3 border-t border-gray-100">
             <button
               disabled={aiLoading}
               onClick={async ()=>{
-                if(!pasteText.trim()){ setStep("form"); return; }
-                if(!aiMode){
-                  // 기존 정규식 파싱
-                  const parsed = parseEventText(pasteText);
-                  setForm(p=>({...p, ...parsed}));
+                if(inputMode === "memo"){
+                  if(pasteText.trim()){
+                    const parsed = parseEventText(pasteText, titleRule, typeKeywords);
+                    setForm(p=>({...p, ...parsed}));
+                  }
                   setStep("form");
-                } else {
-                  // AI 분석
+                } else if(inputMode === "chat"){
+                  if(!pasteText.trim()){ setStep("form"); return; }
                   setAiLoading(true);
                   try {
-                    const res = await fetch("https://api.anthropic.com/v1/messages", {
-                      method: "POST",
-                      headers: {"Content-Type":"application/json"},
-                      body: JSON.stringify({
-                        model: "claude-sonnet-4-6",
-                        max_tokens: 1000,
-                        system: `청소업체 상담 대화를 분석해서 예약 정보를 JSON으로만 반환하세요. 마크다운 없이 순수 JSON만.
-{
-  "title": "일정 제목 (예: 강남구 OO동 입주청소 30평)",
-  "start": "YYYY-MM-DD 형식 또는 null",
-  "end": "YYYY-MM-DD 형식 또는 null",
-  "startTime": "HH:MM 24시간 또는 null",
-  "endTime": "HH:MM 24시간 또는 null",
-  "place": "주소",
-  "contact": "연락처 또는 null",
-  "description": "금액·예약금·인원·포함항목·특이사항 등 메모"
-}`,
-                        messages:[{role:"user",content:`다음 상담 대화에서 예약 정보를 추출해주세요:\n\n${pasteText}`}]
-                      })
-                    });
-                    const data = await res.json();
-                    const text = data.content[0].text.trim().replace(/\`\`\`json|\`\`\`/g,"").trim();
-                    const parsed = JSON.parse(text);
+                    const analyze = httpsCallable(functions, "analyzeConsultation");
+                    const result = await analyze({ text: pasteText });
+                    const parsed = result.data || {};
                     setForm(p=>({
                       ...p,
-                      title: parsed.title || p.title,
-                      start: parsed.start || p.start,
-                      end: parsed.end || parsed.start || p.end,
+                      title:     parsed.title     || p.title,
+                      start:     parsed.start     || p.start,
+                      end:       parsed.end || parsed.start || p.end,
                       startTime: parsed.startTime || p.startTime,
-                      endTime: parsed.endTime || p.endTime,
-                      place: parsed.place || p.place,
-                      contact: parsed.contact || p.contact,
+                      endTime:   parsed.endTime   || p.endTime,
+                      place:     parsed.place     || p.place,
+                      contact:   parsed.contact   || p.contact,
                       description: parsed.description || p.description,
                     }));
                     setStep("form");
-                  } catch(e) {
-                    alert("AI 분석 중 오류가 발생했어요. 다시 시도해주세요.");
-                    console.error(e);
-                  } finally {
-                    setAiLoading(false);
-                  }
+                  } catch(e){
+                    alert("AI 분석 중 오류가 발생했어요.\n" + (e?.message||""));
+                  } finally { setAiLoading(false); }
+                } else if(inputMode === "image"){
+                  if(!imgFile){ alert("사진을 먼저 선택해주세요."); return; }
+                  setAiLoading(true);
+                  try {
+                    const toBase64 = f => new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(f); });
+                    const base64 = await toBase64(imgFile);
+                    const extract = httpsCallable(functions, "extractFromImage");
+                    const result = await extract({ image: base64 });
+                    const parsed = result.data || {};
+                    setForm(p=>({
+                      ...p,
+                      title:     parsed.title     || p.title,
+                      start:     parsed.start     || p.start,
+                      end:       parsed.end || parsed.start || p.end,
+                      startTime: parsed.startTime || p.startTime,
+                      endTime:   parsed.endTime   || p.endTime,
+                      place:     parsed.place     || p.place,
+                      contact:   parsed.contact   || p.contact,
+                      description: parsed.description || p.description,
+                    }));
+                    setStep("form");
+                  } catch(e){
+                    alert("이미지 분석 중 오류가 발생했어요.\n" + (e?.message||""));
+                  } finally { setAiLoading(false); }
                 }
               }}
-              className={"w-full py-3 text-white text-sm font-bold rounded-2xl transition-all " + (aiLoading ? "bg-gray-300" : "bg-blue-500")}>
-              {aiLoading ? "⏳ AI 분석 중..." : aiMode ? "✨ AI로 자동 분석" : (pasteText.trim() ? "✨ 자동 분석하고 계속" : "직접 입력하기")}
+              className={"w-full py-3 text-white text-sm font-bold rounded-2xl transition-all " + (aiLoading ? "bg-gray-300" : "bg-blue-600")}>
+              {aiLoading ? "⏳ 분석 중..." :
+               inputMode === "memo"  ? (pasteText.trim() ? "✨ 자동 분석하고 계속" : "직접 입력하기") :
+               inputMode === "chat"  ? "✨ AI로 분석하기" :
+               inputMode === "image" ? "📷 이미지 분석하기" : "계속"}
             </button>
           </div>
         </>
       ) : (
       /* ═══ STEP 2: 일정 폼 단계 ═══ */
       <>
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <button onClick={()=>editId ? closeModal() : setStep("paste")}>
-          {editId ? <X size={22} className="text-gray-600"/> : <ChevronLeft size={22} className="text-gray-600"/>}
-        </button>
-        <h2 className="font-bold text-base">{editId?"일정 수정":"일정 추가"}</h2>
-        <button onClick={submit} className="text-blue-500 font-bold text-base">완료</button>
+      {/* 헤더 + 담당팀 드롭다운 */}
+      <div className="flex flex-col px-4 pt-3 pb-0 border-b border-gray-100">
+        <div className="flex items-center justify-between mb-1">
+          <button onClick={()=>editId ? closeModal() : setStep("paste")}>
+            {editId ? <X size={22} className="text-gray-600"/> : <ChevronLeft size={22} className="text-gray-600"/>}
+          </button>
+          <h2 className="font-bold text-base">{editId?"일정 수정":"일정 추가"}</h2>
+          <button onClick={submit} className="text-blue-500 font-bold text-base">완료</button>
+        </div>
+        {/* 담당팀 드롭다운 트리거 */}
+        <div className="relative pb-2">
+          <button onClick={()=>setCalDropOpen(o=>!o)}
+            className="flex items-center gap-1.5 text-xs font-semibold py-1 px-2 rounded-lg hover:bg-gray-50"
+            style={{color: cals.find(c=>c.id===form.calId)?.color || "#9ca3af"}}>
+            <span className="w-2.5 h-2.5 rounded-full shrink-0"
+              style={{background: cals.find(c=>c.id===form.calId)?.color || "#d1d5db"}}/>
+            <span>{cals.find(c=>c.id===form.calId)?.label || "팀배정"}</span>
+            <User size={12} className="opacity-60"/>
+            <ChevronDown size={12} className={`opacity-60 transition-transform ${calDropOpen?"rotate-180":""}`}/>
+          </button>
+          {calDropOpen && (
+            <div className="absolute left-0 top-full mt-1 bg-white rounded-xl shadow-xl border border-gray-100 z-[100] min-w-[140px] py-1 overflow-hidden">
+              {cals.filter(c => c.isField !== false).map(cal=>{
+                const selected = form.calId === cal.id;
+                return (
+                  <button key={cal.id}
+                    onClick={()=>{ set("calId",cal.id); setCalDropOpen(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-left hover:bg-gray-50 transition-colors"
+                    style={{fontWeight: selected?700:400, color: selected?cal.color:"#374151"}}>
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{background:cal.color}}/>
+                    {cal.label}
+                    {selected && <span className="ml-auto text-blue-500">✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
-      {/* ── 새 디자인 폼 (네이버 스타일) ───────────────────────── */}
+      {/* 폼 본문 */}
       <div className="flex-1 overflow-y-auto bg-white">
 
-        {/* 캘린더(담당팀) 선택 — 버튼 방식 */}
-        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/50">
-          <div className="flex items-center gap-2 mb-2">
-            <User size={16} className="text-gray-400 shrink-0"/>
-            <span className="text-sm font-semibold text-gray-700">담당팀</span>
-            {form.calId && (
-              <span className="ml-auto text-xs font-bold px-2 py-0.5 rounded-full"
-                style={{background: (cals.find(c=>c.id===form.calId)?.color||"#1a56db")+"22",
-                  color: cals.find(c=>c.id===form.calId)?.color||"#1a56db"}}>
-                {cals.find(c=>c.id===form.calId)?.label}
-              </span>
-            )}
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {cals.map(cal=>{
-              const selected = form.calId === cal.id;
-              return (
-                <button key={cal.id}
-                  onClick={()=>set("calId", cal.id)}
-                  className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
-                  style={{
-                    background: selected ? cal.color : "white",
-                    color: selected ? "white" : "#6b7280",
-                    borderColor: selected ? cal.color : "#e5e7eb",
-                    boxShadow: selected ? `0 2px 8px ${cal.color}44` : "none"
-                  }}>
-                  {cal.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
         {/* 제목 */}
-        <div className="flex items-center px-4 py-4 border-b border-gray-100 gap-3">
+        <div className="flex items-center px-4 py-3 border-b border-gray-100 gap-3">
           <span className="w-3 h-3 rounded-full shrink-0"
-            style={{background: cals.find(c=>c.id===form.calId)?.color||"#999"}}/>
-          <input
-            ref={tRef}
-            value={form.title}
-            onChange={e=>set("title",e.target.value)}
+            style={{background:cals.find(c=>c.id===form.calId)?.color||"#d1d5db"}}/>
+          <input ref={tRef} value={form.title} onChange={e=>set("title",e.target.value)}
             placeholder="일정을 입력하세요."
-            className={`flex-1 text-base font-medium outline-none text-gray-800 placeholder-gray-300
-              ${errs.title?"border-b border-red-400":""}`}
-          />
-          {errs.title&&<p className="text-red-500 text-xs mt-1">{errs.title}</p>}
+            className={`flex-1 text-base font-medium outline-none text-gray-800 placeholder-gray-300 ${errs.title?"border-b border-red-400":""}`}/>
+          {errs.title&&<p className="text-red-500 text-xs">{errs.title}</p>}
         </div>
 
-        {/* 날짜 & 시간 — 네이버 스타일 */}
-        <div className="px-4 py-4 border-b border-gray-100 space-y-3">
-          {/* 종일 토글 */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <button onClick={() => { setDrawer(false); setCompanySettingsModal(true); }} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-800 rounded-full hover:bg-gray-100 transition-colors">
-                <Settings size={20} />
-              </button>
-              <Clock size={18} className="text-gray-400"/>
-              <span className="text-sm text-gray-700">종일</span>
-            </div>
-            <button onClick={()=>set("allDay",!form.allDay)}
-              className={`relative w-12 h-6 rounded-full transition-colors duration-200
-                ${form.allDay?"bg-blue-600":"bg-gray-200"}`}>
-              <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform
-                ${form.allDay?"translate-x-6":"translate-x-0"}`}/>
-            </button>
-          </div>
-
-          {/* 날짜/시간 행 — 네이버처럼 시작 → 종료 */}
-          <div className="flex items-center gap-2 pl-9">
-            {/* 시작 */}
-            <div className="flex-1">
-              <input type="date" value={form.start}
-                onChange={e=>{set("start",e.target.value);if(e.target.value>form.end)set("end",e.target.value);}}
-                className="text-sm text-gray-600 outline-none bg-transparent w-full"/>
-              {!form.allDay&&(
-                <input type="time" value={form.startTime}
-                  onChange={e=>set("startTime",e.target.value)}
-                  className="text-[22px] font-bold text-gray-900 outline-none bg-transparent mt-1 w-full"/>
-              )}
-            </div>
-            {/* 화살표 */}
-            <ChevronRight size={18} className="text-gray-400 shrink-0"/>
-            {/* 종료 */}
-            <div className="flex-1 text-right">
-              <input type="date" value={form.end} min={form.start}
-                onChange={e=>set("end",e.target.value)}
-                className="text-sm text-gray-600 outline-none bg-transparent w-full text-right"/>
-              {!form.allDay&&(
-                <input type="time" value={form.endTime}
-                  onChange={e=>set("endTime",e.target.value)}
-                  className="text-[22px] font-bold text-gray-900 outline-none bg-transparent mt-1 w-full text-right"/>
-              )}
-            </div>
-          </div>
-          {errs.end&&<p className="text-red-500 text-xs pl-9">{errs.end}</p>}
-          {errs.time&&<p className="text-red-500 text-xs pl-9">{errs.time}</p>}
-        </div>
-
-
+        {/* 날짜 & 시간 — 네이버 앱 스타일 */}
+        <DateTimePicker form={form} set={set} errs={errs}/>
 
         {/* 주소 */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-100">
@@ -1854,31 +2280,33 @@ function EventModal() {
           />
         </div>
 
-        {/* 반복 (밸리데이션 가드) */}
-        {guard.show&&(
-          <div className="px-4 py-4 border-b border-gray-100">
-            <div className="flex items-center gap-3 mb-3">
-              <RotateCcw size={18} className="text-gray-400 shrink-0"/>
-              <span className="text-sm text-gray-700">반복</span>
-            </div>
-            <div className="flex flex-wrap gap-2 pl-9">
-              {REPEAT_OPTS.map(opt=>{
-                const locked=opt.value==="monthly"&&!guard.monthly;
-                const sel=form.repeat===opt.value;
-                return(
-                  <button key={opt.value} disabled={locked}
-                    onClick={()=>!locked&&set("repeat",opt.value)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition
-                      ${locked?"opacity-30 border-gray-200 text-gray-400"
-                        :sel?"bg-blue-500 border-blue-400 text-white"
-                            :"border-gray-200 text-gray-600"}`}>
-                    {locked?"🔒 "+opt.label:opt.label}
-                  </button>
-                );
-              })}
-            </div>
+        {/* 반복 — 정기청소 등 반복 일정용 (항상 표시) */}
+        <div className="px-4 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-3 mb-3">
+            <RotateCcw size={18} className="text-gray-400 shrink-0"/>
+            <span className="text-sm text-gray-700">반복</span>
           </div>
-        )}
+          <div className="flex flex-wrap gap-2 pl-9">
+            {REPEAT_OPTS.map(opt=>{
+              const sel=form.repeat===opt.value;
+              return(
+                <button key={opt.value}
+                  onClick={()=>set("repeat",opt.value)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition
+                    ${sel?"bg-blue-500 border-blue-400 text-white":"border-gray-200 text-gray-600"}`}>
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+          {/* 반복 종료일 — 반복일 때만 */}
+          {form.repeat!=="none" && (
+            <div className="flex items-center gap-2 pl-9 mt-3">
+              <span className="text-xs text-gray-500 shrink-0">종료일</span>
+              <RepeatUntilPicker form={form} set={set}/>
+            </div>
+          )}
+        </div>
 
         {/* 삭제 버튼 */}
         {editId&&(
@@ -1896,6 +2324,7 @@ function EventModal() {
     </div>
   );
 }
+
 
 // ── 상단 헤더 ─────────────────────────────────────────────────────
 function TopHeader() {
@@ -2048,7 +2477,7 @@ function SearchModal() {
 
 // ── 현장 완료 보고 화면 (2단계: 시작 → 완료) ─────────────────────
 function FieldReportScreen({ ev, onClose }) {
-  const { currentUser } = useC();
+  const { currentUser, addReport } = useC();
   const [step, setStep] = useState("start");
   const [startMemo, setStartMemo] = useState("");
   const [endMemo, setEndMemo] = useState("");
@@ -2080,6 +2509,27 @@ function FieldReportScreen({ ev, onClose }) {
   ];
 
   const handleComplete = () => {
+    // 완료 보고를 Firestore(reports)에 저장 → 완료 보고 내역 화면에 실제 반영됨
+    const now = new Date();
+    const endTimeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+    addReport({
+      eventId:   ev?.id || null,
+      title:     ev?.title || "",
+      date:      ev?.start || fmt(new Date()),
+      startTime: ev?.startTime || "",
+      calId:     ev?.calId || "",
+      teamName:  cal?.label || cal?.name || "",
+      teamColor: cal?.color || "#1a56db",
+      reporter:  currentUser?.name || "",
+      startMemo,
+      memo:      endMemo,        // 완료 메모 (내역 화면에서 memo 로 표시)
+      place:     ev?.place || "",
+      workStart: startTime,
+      workEnd:   endTimeStr,
+      status:    "완료",
+      createdAt: now.toISOString(),
+    });
+
     setShowLog(true);
     setLogs([]);
     setLogDone(false);
@@ -2243,18 +2693,145 @@ function FieldReportScreen({ ev, onClose }) {
 }
 
 // ── 완료 보고 히스토리 화면 ───────────────────────────────────────────────
-function ReportHistoryScreen() {
-  const { setCurrentScreen, cals } = useC();
+// ── 설정 가이드 · FAQ ────────────────────────────────────────────
+const FAQ_DATA = [
+  {
+    category: "🚀 처음 시작할 때",
+    items: [
+      { q: "회사를 처음 등록했어요. 뭘 먼저 해야 하나요?",
+        a: "① 사이드 메뉴 → 팀 관리에서 우리 회사 팀을 만들고\n② 각 팀의 '현장팀' 여부를 설정하세요 (현장팀만 일정 담당팀으로 표시됩니다)\n③ 팀원들에게 회사 ID와 가입 링크를 공유하세요.",
+        img: "/faq/faq-calendar.png" },
+      { q: "팀원은 어떻게 앱에 가입하나요?",
+        a: "앱 첫 화면에서 '회원가입'을 눌러 이름·전화번호를 입력하면 사장님 기기에 가입 요청이 옵니다. 사장님이 팀 배정 후 승인하면 됩니다." },
+    ]
+  },
+  {
+    category: "🏷️ 제목 규칙 설정",
+    items: [
+      { q: "일정 제목이 자동으로 이상하게 만들어져요.",
+        a: "사이드 메뉴 → 회사 설정 → '제목 규칙' 탭에서 제목에 포함할 항목과 순서를 직접 설정할 수 있습니다.\n예) [지역 → 평수 → 청소종류] 순서로 설정하면 '역촌동 15평 입주청소' 형태로 만들어집니다." },
+      { q: "'청소종류'가 제목에 안 나와요.",
+        a: "회사 설정 → 제목 규칙 → 청소 종류 키워드 목록에 우리 회사에서 쓰는 단어를 추가해주세요.\n예: 입주청소, 정기청소, 에어컨청소, 줄눈청소 등" },
+      { q: "텍스트 붙여넣기로 일정을 만들 때 어떤 정보를 인식하나요?",
+        a: "자동으로 인식되는 항목:\n• 날짜: '6월 15일', '6/15'\n• 시간: '오전 10시', '오후 2시30분'\n• 주소: 서울/경기 등 지명 + 구/동/로/길 패턴\n• 전화번호: 010-XXXX-XXXX\n• 평수/방: 15평, 원룸, 방2개\n• 비밀번호: '비밀번호: 1234' 패턴",
+        img: "/faq/faq-tabs.png" },
+    ]
+  },
+  {
+    category: "👥 팀 & 직원 관리",
+    items: [
+      { q: "현장팀과 업무팀의 차이가 뭔가요?",
+        a: "현장팀: 실제 청소 현장에 출동하는 팀 (입주청소팀, 정기청소팀 등)\n→ 일정 추가 시 '담당팀' 선택 목록에 표시됩니다.\n\n업무팀: 사무/관리 업무 팀 (관리팀, 영업팀 등)\n→ 담당팀 목록에 표시되지 않습니다.\n\n팀 관리 화면에서 각 팀의 현장팀/업무팀 버튼을 눌러 변경할 수 있습니다.",
+        img: "/faq/faq-team-manage.png" },
+      { q: "팀원이 볼 수 있는 일정이 제한되나요?",
+        a: "네. 권한에 따라 다릅니다.\n• 최고관리자·관리팀·영업팀: 모든 팀 일정 조회 가능\n• 팀장·팀원: 자기 팀 일정만 조회 가능\n\n예) 입주청소팀 팀원은 입주청소팀 일정만 볼 수 있습니다." },
+    ]
+  },
+  {
+    category: "📅 일정 관리",
+    items: [
+      { q: "일정을 추가하는 방법이 여러 개인데 어떤 걸 써야 하나요?",
+        a: "• 📋 메모: 카카오톡 문자나 예약 내용을 그대로 붙여넣으면 자동 분석 (가장 빠름)\n• 💬 대화: 고객과 나눈 상담 대화 전체를 붙여넣으면 AI가 예약 정보 추출\n• 📷 사진: 메모지나 캡처 이미지에서 텍스트 추출 (준비 중)\n• ✏️ 직접: 날짜·시간·장소를 직접 입력",
+        img: "/faq/faq-tabs.png" },
+      { q: "날짜와 시간은 어떻게 선택하나요?",
+        a: "일정 추가 → ✏️ 직접 탭에서 날짜(예: 26. 6. 24.(수)) 또는 시간(예: 오전 9:00)을 탭하면 바로 아래 스크롤 휠이 펼쳐집니다.\n\n• 날짜 휠: 연도 / 월 / 일+요일을 위아래 스크롤해서 선택\n• 시간 휠: 오전·오후 / 시 / 분을 스크롤해서 선택\n• '오늘' 버튼을 누르면 오늘 날짜로 이동\n• 같은 날짜를 다시 탭하면 휠이 닫힙니다",
+        img: "/faq/faq-date-picker.png" },
+      { q: "일정에 담당팀을 지정하는 방법은?",
+        a: "일정 추가 폼 상단 헤더 아래 '팀배정' 버튼을 탭하면 드롭다운이 열립니다.\n현장팀으로 설정된 팀 목록만 표시되며, 선택하면 팀 색상이 일정에 반영됩니다.\n\n담당팀을 지정하지 않아도 일정 저장은 가능합니다 (팀배정 상태로 저장).",
+        img: "/faq/faq-team-dropdown.png" },
+      { q: "반복 일정은 어떻게 설정하나요?",
+        a: "일정 추가 폼 하단 '반복' 항목에서 매일/매주/매월 중 선택하고, 종료일을 지정하면 됩니다.\n종료일을 비워두면 6개월 뒤까지 자동 생성됩니다.",
+        img: "/faq/faq-direct-form.png" },
+      { q: "현장 완료 보고는 뭔가요?",
+        a: "팀장 이상 권한을 가진 직원이 일정 상세에서 '현장 완료 보고' 버튼을 눌러 현장 사진·메모를 남길 수 있습니다.\n사이드 메뉴 → 완료 보고 내역에서 전체 기록을 조회할 수 있습니다." },
+    ]
+  },
+  {
+    category: "👥 팀 생성 · 설정 규칙",
+    items: [
+      { q: "팀을 새로 만들 때 '현장팀' 토글은 뭔가요?",
+        a: "팀 관리 화면에서 새 팀을 추가할 때 '현장팀' 토글이 있습니다.\n\n• 현장팀 ON: 일정 추가 시 담당팀 목록에 이 팀이 표시됩니다\n• 현장팀 OFF: 담당팀 목록에 표시되지 않습니다 (업무·관리 팀용)\n\n예) 입주청소팀·정기청소팀 → 현장팀 ON\n    관리팀·영업팀 → 현장팀 OFF",
+        img: "/faq/faq-team-manage.png" },
+      { q: "이미 만든 팀의 현장팀 여부를 바꾸고 싶어요.",
+        a: "팀 관리 화면의 팀 목록에서 각 팀 행 오른쪽에 '현장팀' 또는 '업무팀' 버튼이 있습니다.\n버튼을 탭하면 즉시 전환되며 Firestore에 자동 저장됩니다." },
+      { q: "팀 순서를 바꾸고 싶어요.",
+        a: "팀 관리 화면에서 각 팀 행 왼쪽의 ▲▼ 버튼으로 순서를 조정하거나, 핸들(≡)을 길게 눌러 드래그하면 됩니다.\n순서는 팀원 목록과 캘린더 색상 선택 순서에 반영됩니다." },
+      { q: "팀을 삭제하면 소속 직원은 어떻게 되나요?",
+        a: "해당 팀에 소속된 직원의 팀이 '미정'으로 변경됩니다.\n직원 목록에서 팀을 다시 배정해주세요." },
+    ]
+  },
+  {
+    category: "🔧 기타",
+    items: [
+      { q: "설정 가이드 화면은 어디서 볼 수 있나요?",
+        a: "사이드 메뉴(☰) → 설정 가이드 · FAQ 를 탭하면 이 화면이 열립니다.",
+        img: "/faq/faq-faq-screen.png" },
+      { q: "캘린더 색상을 바꾸고 싶어요.",
+        a: "현재는 기본 색상으로 고정되어 있습니다. 팀 색상 커스터마이징 기능은 추후 업데이트 예정입니다." },
+      { q: "앱을 다른 기기에서 사용하려면?",
+        a: "같은 아이디(전화번호)와 비밀번호로 로그인하면 됩니다. 모든 데이터는 클라우드에 저장되어 기기를 바꿔도 그대로 유지됩니다." },
+    ]
+  },
+];
 
-  const sampleReports = [
-    {id:"r1", title:"강남구 OO동 입주청소 30평",    date:"2026-06-20", startTime:"09:00", teamName:"청소 1팀", teamColor:"#1a56db", status:"완료", memo:"주방 기름때 심했으나 완료. 베란다 청소 추가 진행.", price:"400,000"},
-    {id:"r2", title:"마포구 아현동 이사청소 25평",   date:"2026-06-19", startTime:"13:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음. 깔끔하게 완료.", price:"320,000"},
-    {id:"r3", title:"송파구 잠실 정기청소",          date:"2026-06-18", startTime:"10:00", teamName:"청소 1팀", teamColor:"#1a56db", status:"완료", memo:"에어컨 필터 청소 추가 요청. 처리 완료.", price:"150,000"},
-    {id:"r4", title:"동대문구 전농동 입주청소 33평", date:"2026-06-17", startTime:"09:30", teamName:"청소 3팀", teamColor:"#ea580c", status:"완료", memo:"인테리어 후 입주 청소. 실리콘 작업 흔적 제거 완료.", price:"450,000"},
-    {id:"r5", title:"서초구 방배동 이사청소 28평",   date:"2026-06-16", startTime:"14:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음.", price:"350,000"},
-    {id:"r6", title:"노원구 LH 입주청소 28평",       date:"2026-06-15", startTime:"11:00", teamName:"LH",      teamColor:"#7c3aed", status:"완료", memo:"LH 표준 청소 완료.", price:"280,000"},
-    {id:"r7", title:"마포구 공덕 정기청소",          date:"2026-06-14", startTime:"14:00", teamName:"청소 2팀", teamColor:"#16a34a", status:"완료", memo:"특이사항 없음.", price:"150,000"},
-  ];
+function FaqScreen() {
+  const { setCurrentScreen } = useC();
+  const [openIdx, setOpenIdx] = useState(null); // "카테고리index-itemIndex"
+
+  return (
+    <div className="flex flex-col flex-1 overflow-hidden bg-gray-50">
+      {/* 헤더 */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-100">
+        <button onClick={()=>setCurrentScreen("calendar")} className="p-1 -ml-1">
+          <ChevronLeft size={22} className="text-gray-700"/>
+        </button>
+        <h2 className="font-bold text-base flex-1">설정 가이드 · FAQ</h2>
+      </div>
+
+      <div className="flex-1 overflow-y-auto pb-8">
+        {FAQ_DATA.map((cat, ci) => (
+          <div key={ci} className="mb-2">
+            <div className="px-4 py-3 bg-gray-50">
+              <p className="text-xs font-bold text-gray-500">{cat.category}</p>
+            </div>
+            {cat.items.map((item, ii) => {
+              const key = `${ci}-${ii}`;
+              const isOpen = openIdx === key;
+              return (
+                <div key={ii} className="bg-white border-b border-gray-100">
+                  <button
+                    onClick={()=>setOpenIdx(isOpen ? null : key)}
+                    className="w-full flex items-center justify-between px-4 py-4 text-left">
+                    <span className="text-sm font-semibold text-gray-800 flex-1 pr-3 leading-snug">{item.q}</span>
+                    <ChevronDown size={16} className={`text-gray-400 shrink-0 transition-transform ${isOpen?"rotate-180":""}`}/>
+                  </button>
+                  {isOpen && (
+                    <div className="px-4 pb-4 flex flex-col gap-2">
+                      <div className="bg-blue-50 rounded-xl p-3">
+                        <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{item.a}</p>
+                      </div>
+                      {item.img && (
+                        <img src={item.img} alt="화면 예시"
+                          className="w-full rounded-xl border border-gray-100 shadow-sm"
+                          style={{maxHeight: 320, objectFit:"cover", objectPosition:"top"}}/>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ReportHistoryScreen() {
+  const { setCurrentScreen, reports } = useC();
+
+  // 현장 완료 보고에서 저장된 실제 데이터 (Firestore reports)
+  const sampleReports = reports;
 
   const [selected, setSelected] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -2321,10 +2898,12 @@ function ReportHistoryScreen() {
             <p className="text-xs font-bold text-gray-400 mb-2">완료 메모</p>
             <p className="text-sm text-gray-700 leading-relaxed">{selected.memo}</p>
           </div>
-          <div className="bg-gray-50 rounded-2xl p-4 flex items-center justify-between">
-            <span className="text-sm font-bold text-gray-500">청소 금액</span>
-            <span className="text-base font-extrabold text-blue-600">{selected.price}원</span>
-          </div>
+          {selected.price && (
+            <div className="bg-gray-50 rounded-2xl p-4 flex items-center justify-between">
+              <span className="text-sm font-bold text-gray-500">청소 금액</span>
+              <span className="text-base font-extrabold text-blue-600">{selected.price}원</span>
+            </div>
+          )}
           <div className="flex gap-3">
             <div className="flex-1 bg-gray-100 rounded-2xl p-4 text-center">
               <p className="text-xs text-gray-400 mb-1">Before</p>
@@ -2436,8 +3015,8 @@ function ReportHistoryScreen() {
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-xs font-bold px-2 py-0.5 rounded-full"
                         style={{background:r.teamColor+"22", color:r.teamColor}}>{r.teamName}</span>
-                      <span className="text-xs text-gray-400">{r.startTime}</span>
-                      <span className="text-xs text-gray-400">· {r.price}원</span>
+                      {r.startTime && <span className="text-xs text-gray-400">{r.startTime}</span>}
+                      {r.price && <span className="text-xs text-gray-400">· {r.price}원</span>}
                     </div>
                   </div>
                   <ChevronLeft size={14} className="text-gray-300 rotate-180 shrink-0"/>
@@ -2451,57 +3030,6 @@ function ReportHistoryScreen() {
   );
 }
 
-
-function NoticePopup() {
-  const { noticePopup, closePopup, setCurrentScreen } = useC();
-  if(!noticePopup) return null;
-
-  return (
-    <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:"24px",
-      background:"rgba(0,0,0,.5)"}}>
-      <div style={{background:"white",borderRadius:24,width:"100%",maxWidth:360,
-        boxShadow:"0 20px 60px rgba(0,0,0,.3)",animation:"fadeIn .3s ease"}}>
-        {/* 헤더 */}
-        <div style={{padding:"20px 20px 0",display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:36,height:36,borderRadius:12,background:"#fef2f2",
-            display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>
-            📌
-          </div>
-          <div style={{flex:1}}>
-            <p style={{fontSize:11,fontWeight:700,color:"#ef4444",marginBottom:2}}>중요 공지사항</p>
-            <p style={{fontSize:15,fontWeight:800,color:"#111827",lineHeight:1.3}}>{noticePopup.title}</p>
-          </div>
-        </div>
-        {/* 내용 */}
-        <div style={{padding:"16px 20px",maxHeight:200,overflowY:"auto"}}>
-          <p style={{fontSize:13,color:"#6b7280",lineHeight:1.8,whiteSpace:"pre-wrap"}}>
-            {noticePopup.body || "내용이 없습니다."}
-          </p>
-        </div>
-        {/* 작성자/날짜 */}
-        <div style={{padding:"0 20px 16px",display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#9ca3af"}}>
-          <span style={{fontWeight:700,color:"#6b7280"}}>{noticePopup.author}</span>
-          <span>·</span>
-          <span>{noticePopup.date}</span>
-        </div>
-        {/* 버튼 */}
-        <div style={{padding:"0 16px 16px",display:"flex",gap:8}}>
-          <button onClick={()=>{ closePopup(); setCurrentScreen("notice"); }}
-            style={{flex:1,padding:"12px",borderRadius:14,border:"1.5px solid #f3f4f6",
-              background:"white",fontSize:13,fontWeight:700,color:"#6b7280",cursor:"pointer"}}>
-            공지 전체보기
-          </button>
-          <button onClick={closePopup}
-            style={{flex:1,padding:"12px",borderRadius:14,border:"none",
-              background:"linear-gradient(135deg,#1a56db,#2563eb)",
-              fontSize:13,fontWeight:700,color:"white",cursor:"pointer"}}>
-            확인
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── 캘린더 가져오기 화면 (.ics) ───────────────────────────────────────────────
 function ImportCalendarScreen() {
@@ -2776,10 +3304,12 @@ function LoginScreen({ onLogin }) {
       const isPhone = /^0\d{9,10}$/.test(id.trim().replace(/-/g,""));
 
       if(isPhone) {
-        // 직원 (전화번호로 조회)
-        const phone = id.trim().replace(/-/g,"");
-        const staffQ = query(collection(db,"staffs"), where("phone","==",phone));
-        const staffSnap = await getDocs(staffQ);
+        // 직원 (전화번호로 조회) — 숫자만으로 우선 조회, 못 찾으면 하이픈 포맷으로도 조회(구버전 데이터 호환)
+        const phone = onlyDigits(id);
+        let staffSnap = await getDocs(query(collection(db,"staffs"), where("phone","==",phone)));
+        if(staffSnap.empty){
+          staffSnap = await getDocs(query(collection(db,"staffs"), where("phone","==",fmtPhone(phone))));
+        }
         if(staffSnap.empty){ setError("등록되지 않은 전화번호입니다."); setLoading(false); return; }
         const staffData = staffSnap.docs[0].data();
         const staffId   = staffSnap.docs[0].id;
@@ -2846,6 +3376,13 @@ function LoginScreen({ onLogin }) {
       const adminId   = "a_" + Math.random().toString(36).slice(2,9);
       await setDoc(doc(db,"companies",companyId), { name:companyName.trim(), companyId, createdAt:new Date().toISOString() });
       await setDoc(doc(db,"admins",adminId), { id:id.trim(), pw, name:id.trim(), companyId, role:"최고관리자", team:"사장", createdAt:new Date().toISOString() });
+      // 기본 캘린더(담당팀 색상) 시드 — 이게 없으면 일정이 달력에 안 보임
+      await Promise.all(DEFAULT_CALS.map(c => setDoc(doc(db,"companies",companyId,"cals",c.id), c)));
+      // 기본 팀 목록 + 링크 카테고리 시드 (사장 팀 포함, 목록에서는 숨겨짐)
+      await setDoc(doc(db,"companies",companyId,"meta","config"), {
+        teams: INIT_TEAMS,
+        linkCategories: ["업무", "지도", "연락처", "기타"],
+      });
       const user = {uid:adminId, id:id.trim(), name:id.trim(), companyId, companyName:companyName.trim(), role:"최고관리자", team:"사장"};
       try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
       onLogin(user);
@@ -3029,95 +3566,70 @@ function AppInner() {
       {currentScreen === "activity_log"  && <ActivityLogScreen/>}
       {currentScreen === "links"         && <ExternalLinksScreen/>}
       {currentScreen === "report_history"&& <ReportHistoryScreen/>}
+      {currentScreen === "faq"            && <FaqScreen/>}
+      {currentScreen === "import_calendar"&& <ImportCalendarScreen/>}
       <SideDrawer/>
       <DetailSheet/>
       <EventModal/>
       <SearchModal/>
       <EmployeeFormModal/>
       <TeamManagementModal/>
+      <CompanySettingsModal/>
+      <FieldReportGate/>
     </div>
   );
 }
 
+// 현장 완료 보고 화면을 컨텍스트 상태(fieldReportEv)와 연결하는 게이트
+function FieldReportGate() {
+  const { fieldReportEv, setFieldReportEv } = useC();
+  if (!fieldReportEv) return null;
+  return <FieldReportScreen ev={fieldReportEv} onClose={() => setFieldReportEv(null)} />;
+}
+
 export default function App() {
-  const [authState, setAuthState] = useState("loading"); // "loading" | "login" | "register" | "app"
+  const [authState, setAuthState] = useState("loading"); // "loading" | "login" | "app"
   const [loginUser, setLoginUser] = useState(null);
 
+  // 로그인은 전화번호/아이디 + 비밀번호 기반(Firestore 직접 조회)이며,
+  // 로그인 시 localStorage 에 사용자 정보를 저장한다. 새로고침 시 세션 복원.
   useEffect(() => {
-    // 리다이렉트 결과(에러 등) 확인
-    getRedirectResult(auth).then((result) => {
-      if (result) {
-        console.log("Redirect login success:", result);
-      }
-    }).catch((error) => {
-      console.error("Redirect login error:", error);
-      alert("로그인 에러: " + (error.message || "원인을 알 수 없는 오류"));
-    });
-
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        try {
-          // 1. 최고관리자 확인
-          const adminDoc = await getDoc(doc(db, "admins", user.uid));
-          if (adminDoc.exists()) {
-            const data = adminDoc.data();
-            const compDoc = await getDoc(doc(db, "companies", data.companyId));
-            const companyName = compDoc.exists() ? compDoc.data().name : "클린메니져";
-            const companyLogoUrl = compDoc.exists() ? compDoc.data().logoUrl : null;
-            
-            setLoginUser({ uid: user.uid, email: user.email, name: data.name || user.displayName, companyId: data.companyId, companyName, companyLogoUrl, role: data.role || "최고관리자", team: data.team || "관리팀" });
-            setAuthState("app");
-            return;
-          }
-          
-          // 2. 일반 직원 확인
-          const staffDoc = await getDoc(doc(db, "staffs", user.uid));
-          if (staffDoc.exists()) {
-            const data = staffDoc.data();
-            const compDoc = await getDoc(doc(db, "companies", data.companyId));
-            const companyName = compDoc.exists() ? compDoc.data().name : "클린메니져";
-            const companyLogoUrl = compDoc.exists() ? compDoc.data().logoUrl : null;
-            
-            setLoginUser({ uid: user.uid, email: user.email, name: data.name, companyId: data.companyId, companyName, companyLogoUrl, role: data.role, team: data.team });
-            setAuthState("app");
-            return;
-          }
-
-          // 3. 둘 다 없으면 신규 가입
+    try {
+      const saved = localStorage.getItem("loginUser");
+      if (saved) {
+        const user = JSON.parse(saved);
+        if (user && user.companyId) {
           setLoginUser(user);
-          setAuthState("register");
-          
-        } catch(e) {
-          console.error(e);
-          setAuthState("login");
+          setAuthState("app");
+          return;
         }
-      } else {
-        setLoginUser(null);
-        setAuthState("login");
       }
-    });
-    return () => unsub();
+    } catch (e) { /* 파싱 실패 시 로그인 화면 */ }
+    setAuthState("login");
   }, []);
 
+  const handleLogout = () => {
+    try { localStorage.removeItem("loginUser"); } catch (e) { /* ignore */ }
+    setLoginUser(null);
+    setAuthState("login");
+  };
+
   if (authState === "loading") {
-    return <div className="flex-1 flex min-h-screen items-center justify-center bg-gray-50">로딩 중...</div>;
+    return <div className="h-screen max-w-sm mx-auto flex items-center justify-center bg-gray-50">로딩 중...</div>;
   }
   if (authState === "login") {
-    return <LoginScreen onLogin={(user) => {
-      setLoginUser(user);
-      if (user.role) setAuthState("app");
-      else setAuthState("register");
-    }} />;
-  }
-  if (authState === "register") {
-    return <RegisterScreen user={loginUser} onComplete={(user) => {
-      setLoginUser(user);
-      setAuthState("app");
-    }} />;
+    return (
+      <div className="h-screen max-w-sm mx-auto relative overflow-hidden bg-white flex flex-col">
+        <LoginScreen onLogin={(user) => {
+          setLoginUser(user);
+          setAuthState("app");
+        }} />
+      </div>
+    );
   }
 
   return (
-    <Provider loginUser={loginUser} onLogout={() => signOut(auth)}>
+    <Provider loginUser={loginUser} onLogout={handleLogout}>
       <AppInner/>
     </Provider>
   );
@@ -3195,7 +3707,7 @@ function EmployeeListScreen() {
                           <span className="font-bold text-gray-900 text-sm">{u.name}</span>
                           <span className="text-[11px] px-2 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">{u.role}</span>
                         </div>
-                        <div className="text-xs text-gray-400">📞 {u.phone}</div>
+                        <div className="text-xs text-gray-400">📞 {fmtPhone(u.phone)}</div>
                       </div>
                       <button onClick={() => setEmpModal({open:true, editId:u.id})} className="p-2 text-gray-400 hover:text-gray-800 hover:bg-gray-100 rounded-full">
                         <Edit3 size={16}/>
@@ -3227,7 +3739,7 @@ function EmployeeFormModal() {
     if (empModal.open) {
       if (empModal.editId) {
         const u = users.find(x => x.id === empModal.editId);
-        if (u) setForm({ ...u, password: "" });
+        if (u) setForm({ ...u, phone: fmtPhone(u.phone), password: "" });
       } else {
         setForm({ name: "", phone: "", team: "", role: "" });
       }
@@ -3246,7 +3758,8 @@ function EmployeeFormModal() {
     try {
       if (empModal.editId) {
         // 기존 유저 수정
-        const { password, email, ...updateData } = form;
+        const { password, email, ...rest } = form;
+        const updateData = { ...rest, phone: onlyDigits(form.phone) }; // 전화번호는 숫자만 저장
         await setDoc(doc(db, "companies", companyId, "users", empModal.editId), updateData, { merge: true });
         await setDoc(doc(db, "staffs", empModal.editId), { ...updateData, companyId }, { merge: true });
       } else {
@@ -3256,7 +3769,7 @@ function EmployeeFormModal() {
         
         const userData = {
           name: form.name,
-          phone: form.phone,
+          phone: onlyDigits(form.phone),
           team: form.team,
           role: form.role,
           pw: "", // 로그인 시 본인이 직접 설정하도록 비워둠
@@ -3351,10 +3864,19 @@ function EmployeeFormModal() {
 
 // ── 팀 관리 모달 ───────────────────────────────────────────────
 function TeamManagementModal() {
-  const { teamModal, setTeamModal, teams, setTeams, users, setUsers } = useC();
-  const [newTeam, setNewTeam]   = useState("");
-  const [editIdx, setEditIdx]   = useState(null);
-  const [editName, setEditName] = useState("");
+  const { teamModal, setTeamModal, teams, saveTeams, users, companyId, cals, updateCal } = useC();
+
+  // 팀 삭제/이름변경 시 소속 직원의 team 을 Firestore 에 반영
+  const reassignTeam = (fromTeam, toTeam) => {
+    users.filter(u => u.team === fromTeam).forEach(u => {
+      setDoc(doc(db, "companies", companyId, "users", u.id), { team: toTeam }, { merge: true });
+      setDoc(doc(db, "staffs", u.id), { team: toTeam }, { merge: true });
+    });
+  };
+  const [newTeam, setNewTeam]       = useState("");
+  const [newTeamIsField, setNewTeamIsField] = useState(true);
+  const [editIdx, setEditIdx]       = useState(null);
+  const [editName, setEditName]     = useState("");
   const [dragIdx, setDragIdx]   = useState(null);
   const [overIdx, setOverIdx]   = useState(null);
   // 모든 useRef는 early return 전에 선언해야 함 (React 훅 규칙)
@@ -3373,14 +3895,27 @@ function TeamManagementModal() {
     const name = newTeam.trim();
     if (!name) return;
     if (teams.includes(name)) { alert("이미 존재하는 팀입니다."); return; }
-    setTeams([...teams, name]);
+    saveTeams([...teams, name]);
+    // 현장팀이면 캘린더(담당팀)도 생성
+    if (newTeamIsField) {
+      const COLORS = ["#f59e0b","#ec4899","#06b6d4","#84cc16","#8b5cf6","#f97316"];
+      const newCal = {
+        id: `cal_${Date.now()}`,
+        label: name, name,
+        color: COLORS[cals.length % COLORS.length],
+        checked: true,
+        isField: true,
+      };
+      updateCal(newCal);
+    }
     setNewTeam("");
+    setNewTeamIsField(true);
   };
 
   const handleDelete = (targetTeam) => {
     if (window.confirm("삭제하는 팀의 팀장,팀원은 소속이 미정으로 변경됩니다.")) {
-      setUsers(users.map(u => u.team === targetTeam ? { ...u, team: "미정" } : u));
-      setTeams(teams.filter(t => t !== targetTeam));
+      reassignTeam(targetTeam, "미정");
+      saveTeams(teams.filter(t => t !== targetTeam));
     }
   };
 
@@ -3388,8 +3923,8 @@ function TeamManagementModal() {
     const name = editName.trim();
     if (!name || name === oldName) { setEditIdx(null); return; }
     if (teams.includes(name)) { alert("이미 존재하는 팀입니다."); return; }
-    setTeams(teams.map(t => t === oldName ? name : t));
-    setUsers(users.map(u => u.team === oldName ? { ...u, team: name } : u));
+    saveTeams(teams.map(t => t === oldName ? name : t));
+    reassignTeam(oldName, name);
     setEditIdx(null);
   };
 
@@ -3397,14 +3932,14 @@ function TeamManagementModal() {
     const vIdx = visibleTeams.indexOf(team);
     const targetVIdx = vIdx + dir;
     if (targetVIdx < 0 || targetVIdx >= visibleTeams.length) return;
-    
+
     const targetTeam = visibleTeams[targetVIdx];
     const idx = teams.indexOf(team);
     const targetIdx = teams.indexOf(targetTeam);
-    
+
     const newTeams = [...teams];
     [newTeams[idx], newTeams[targetIdx]] = [newTeams[targetIdx], newTeams[idx]];
-    setTeams(newTeams);
+    saveTeams(newTeams);
   };
 
   // ── 드래그앤드롭 (HTML5) ──
@@ -3427,7 +3962,7 @@ function TeamManagementModal() {
     const newTeams = [...teams];
     newTeams.splice(fromIdx, 1);
     newTeams.splice(toIdx, 0, fromTeam);
-    setTeams(newTeams);
+    saveTeams(newTeams);
     setDragIdx(null); setOverIdx(null);
   };
   const onDragEnd = () => { setDragIdx(null); setOverIdx(null); };
@@ -3464,7 +3999,7 @@ function TeamManagementModal() {
       const newTeams = [...teams];
       newTeams.splice(fromIdx, 1);
       newTeams.splice(toIdx, 0, fromTeam);
-      setTeams(newTeams);
+      saveTeams(newTeams);
     }
     touchDragIdx.current = null;
     setDragIdx(null); setOverIdx(null);
@@ -3482,18 +4017,27 @@ function TeamManagementModal() {
         </div>
 
         {/* 새 팀 추가 */}
-        <div className="p-5 flex gap-2 border-b border-gray-50">
-          <input
-            type="text"
-            placeholder="새 팀 이름 (예: 특수청소팀)"
-            value={newTeam}
-            onChange={e => setNewTeam(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handleAdd()}
-            className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-sm outline-none focus:border-blue-500 transition-colors"
-          />
-          <button onClick={handleAdd} className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors">
-            추가
-          </button>
+        <div className="p-5 flex flex-col gap-2 border-b border-gray-50">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="새 팀 이름 (예: 특수청소팀)"
+              value={newTeam}
+              onChange={e => setNewTeam(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleAdd()}
+              className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-sm outline-none focus:border-blue-500 transition-colors"
+            />
+            <button onClick={handleAdd} className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors">
+              추가
+            </button>
+          </div>
+          <label className="flex items-center gap-2 px-1 cursor-pointer select-none">
+            <button onClick={()=>setNewTeamIsField(v=>!v)}
+              className={`relative w-9 h-5 rounded-full transition-colors ${newTeamIsField?"bg-blue-500":"bg-gray-200"}`}>
+              <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${newTeamIsField?"translate-x-4":"translate-x-0"}`}/>
+            </button>
+            <span className="text-xs text-gray-500">현장팀 <span className="text-gray-400">(일정 추가 담당팀에 표시)</span></span>
+          </label>
         </div>
 
         {/* 팀 목록 */}
@@ -3549,6 +4093,22 @@ function TeamManagementModal() {
                 <span className="flex-1 font-bold text-gray-800 text-sm">{t}</span>
               )}
 
+              {/* 현장팀 토글 */}
+              {(()=>{
+                const cal = cals.find(c => c.label === t);
+                if (!cal) return null;
+                const isField = cal.isField !== false;
+                return (
+                  <button onClick={()=>updateCal({...cal, isField: !isField})}
+                    title={isField?"현장팀 (일정에 표시)":"업무팀 (일정에 미표시)"}
+                    className={`text-[10px] font-bold px-2 py-1 rounded-full border transition-all ${
+                      isField ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-gray-50 text-gray-400 border-gray-200"
+                    }`}>
+                    {isField ? "현장팀" : "업무팀"}
+                  </button>
+                );
+              })()}
+
               {/* 수정 / 저장 */}
               {editIdx === i ? (
                 <button onClick={() => handleRename(t)} className="text-xs text-blue-600 font-bold px-2 py-1 hover:bg-blue-50 rounded-lg">저장</button>
@@ -3584,7 +4144,7 @@ function TeamScheduleScreen() {
   const getDate = (offset) => {
     const d = new Date();
     d.setDate(d.getDate() + offset);
-    return d.toISOString().slice(0,10);
+    return fmt(d); // 로컬 기준 날짜 (UTC 변환으로 하루 밀리는 문제 방지)
   };
 
   const formatDate = (offset) => {
@@ -3728,6 +4288,51 @@ function TeamScheduleScreen() {
 }
 
 
+// ── 대시보드 카드 정의 ───────────────────────────────────────────
+const DASH_CARD_GROUPS = [
+  { id: "count", label: "일정 현황" },
+  { id: "team",  label: "팀별" },
+  { id: "ops",   label: "운영" },
+];
+
+// 기간 겹침 판정 (start~end 가 from~to 와 겹치는가)
+const _ovl = (ev, from, to) => ev.start <= to && (ev.end || ev.start) >= from;
+
+const ALL_DASH_CARDS = [
+  { id:"today_count", label:"오늘 일정", icon:"📅", color:"#1a56db", bg:"#eff6ff", group:"count",
+    roles:["최고관리자","팀장","팀원"],
+    getValue:(evs)=>{ const t=fmt(new Date()); return { value:evs.filter(e=>_ovl(e,t,t)).length, unit:"건" }; } },
+  { id:"week_count", label:"이번주 일정", icon:"🗓️", color:"#0891b2", bg:"#ecfeff", group:"count",
+    roles:["최고관리자","팀장"],
+    getValue:(evs)=>{ const n=new Date(); const mon=new Date(n); mon.setDate(n.getDate()-((n.getDay()+6)%7));
+      const sun=new Date(mon); sun.setDate(mon.getDate()+6);
+      return { value:evs.filter(e=>_ovl(e,fmt(mon),fmt(sun))).length, unit:"건" }; } },
+  { id:"month_count", label:"이번달 일정", icon:"📆", color:"#7c3aed", bg:"#f5f3ff", group:"count",
+    roles:["최고관리자","팀장"],
+    getValue:(evs)=>{ const n=new Date();
+      const f=fmt(new Date(n.getFullYear(),n.getMonth(),1)), t=fmt(new Date(n.getFullYear(),n.getMonth()+1,0));
+      return { value:evs.filter(e=>_ovl(e,f,t)).length, unit:"건" }; } },
+  { id:"total_count", label:"전체 일정", icon:"📊", color:"#111827", bg:"#f3f4f6", group:"count",
+    roles:["최고관리자"],
+    getValue:(evs)=>({ value:evs.length, unit:"건" }) },
+  { id:"upcoming", label:"다가오는 일정", icon:"⏭️", color:"#16a34a", bg:"#f0fdf4", group:"ops",
+    roles:["최고관리자","팀장","팀원"],
+    getValue:(evs)=>{ const t=fmt(new Date()); return { value:evs.filter(e=>e.start>=t).length, unit:"건" }; } },
+  { id:"team_breakdown", label:"오늘 가장 바쁜 팀", icon:"🔥", color:"#ea580c", bg:"#fff7ed", group:"team",
+    roles:["최고관리자"],
+    getValue:(evs,user,cals)=>{ const t=fmt(new Date()); const cnt={};
+      evs.filter(e=>_ovl(e,t,t)).forEach(e=>{ cnt[e.calId]=(cnt[e.calId]||0)+1; });
+      let best=null,max=0; Object.entries(cnt).forEach(([id,c])=>{ if(c>max){max=c;best=id;} });
+      const cal=(cals||[]).find(c=>c.id===best);
+      return { value: best ? (cal?.label||cal?.name||"-") : "-", unit: best ? ` ${max}건` : "" }; } },
+];
+
+const DEFAULT_DASH_CARDS = {
+  "최고관리자": ["today_count","week_count","month_count","total_count","upcoming","team_breakdown"],
+  "팀장":       ["today_count","week_count","upcoming"],
+  "팀원":       ["today_count","upcoming"],
+};
+
 function DashboardScreen() {
   const { visibleEvents, setCurrentScreen, cals, currentUser } = useC();
   const [editing, setEditing]   = useState(false);
@@ -3842,7 +4447,7 @@ function DashboardScreen() {
 
 // ── 공지사항 화면 ───────────────────────────────────────────────
 function NoticeScreen() {
-  const { notices, setNotices, currentUser, setCurrentScreen } = useC();
+  const { notices, currentUser, setCurrentScreen, addNotice, deleteNotice: removeNoticeDoc } = useC();
   const [selected, setSelected]   = useState(null);
   const [writing, setWriting]     = useState(false);
   const [newTitle, setNewTitle]   = useState("");
@@ -3861,12 +4466,12 @@ function NoticeScreen() {
 
   const submitNotice = () => {
     if(!newTitle.trim()) return;
-    const n = {id:uid(), title:newTitle, body:newBody, author:currentUser.name, date:fmt(new Date()), important};
-    setNotices(p=>[n,...p]);
+    // id 는 Firestore 가 발급. 실시간 스냅샷으로 목록에 자동 반영됨.
+    addNotice({ title:newTitle, body:newBody, author:currentUser.name, date:fmt(new Date()), important });
     setNewTitle(""); setNewBody(""); setImportant(false); setWriting(false);
   };
 
-  const deleteNotice = (id) => { setNotices(p=>p.filter(n=>n.id!==id)); setSelected(null); };
+  const deleteNotice = (id) => { removeNoticeDoc(id); setSelected(null); };
 
   // 상세 보기
   if(selected) {
@@ -4123,7 +4728,7 @@ function ActivityLogScreen() {
 
 // ── 외부 링크 화면 ───────────────────────────────────────────────
 function ExternalLinksScreen() {
-  const { links, setLinks, setCurrentScreen } = useC();
+  const { links, setCurrentScreen, addLink, deleteLink, updateLink, persistLinkOrder, linkCategories, saveLinkCategories } = useC();
   const [adding, setAdding]     = useState(false);
   const [sorting, setSorting]   = useState(false);
   const [category, setCategory] = useState("전체");
@@ -4137,7 +4742,7 @@ function ExternalLinksScreen() {
   const dragTo   = useRef(null);
 
   const EMOJIS = ["🔗","📍","📞","💰","🧹","📋","🏢","🚗","📦","🛠️","🌐","📱","💬","📧","🗺️","📸"];
-  const [customCats, setCustomCats] = useState(["업무","지도","연락처","기타"]);
+  const customCats = linkCategories;   // Firestore(meta/config)에 영속되는 카테고리 목록
   const [catModal, setCatModal]     = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [editCatIdx, setEditCatIdx] = useState(null);
@@ -4146,18 +4751,19 @@ function ExternalLinksScreen() {
   const addCat = () => {
     if(!newCatName.trim()) return;
     if(editCatIdx !== null) {
-      setCustomCats(p=>p.map((c,i)=>i===editCatIdx?newCatName.trim():c));
+      saveLinkCategories(customCats.map((c,i)=>i===editCatIdx?newCatName.trim():c));
       setEditCatIdx(null);
     } else {
-      setCustomCats(p=>[...p, newCatName.trim()]);
+      saveLinkCategories([...customCats, newCatName.trim()]);
     }
     setNewCatName(""); setCatModal(false);
   };
 
   const deleteCat = (idx) => {
     const name = customCats[idx];
-    setCustomCats(p=>p.filter((_,i)=>i!==idx));
-    setLinks(p=>p.map(l=>l.category===name?{...l,category:"기타"}:l));
+    saveLinkCategories(customCats.filter((_,i)=>i!==idx));
+    // 해당 카테고리 링크들은 "기타"로 이동 (Firestore 반영)
+    links.filter(l=>l.category===name).forEach(l=>updateLink({...l, category:"기타"}));
   };
 
   const filtered = category==="전체" ? links : links.filter(l=>l.category===category);
@@ -4165,21 +4771,21 @@ function ExternalLinksScreen() {
   const handleAdd = () => {
     if(!newTitle.trim()||!newUrl.trim()) return;
     const url = newUrl.startsWith("http")?newUrl:`https://${newUrl}`;
-    setLinks(p=>[...p,{id:uid(),title:newTitle,url,emoji:newEmoji,category:newCat}]);
+    addLink({title:newTitle,url,emoji:newEmoji,category:newCat});
     setNewTitle(""); setNewUrl(""); setNewEmoji("🔗"); setNewCat("업무"); setAdding(false);
   };
 
-  const moveUp   = (id) => setLinks(p=>{const a=[...p],i=a.findIndex(l=>l.id===id);if(i<=0)return p;[a[i-1],a[i]]=[a[i],a[i-1]];return a;});
-  const moveDown = (id) => setLinks(p=>{const a=[...p],i=a.findIndex(l=>l.id===id);if(i>=a.length-1)return p;[a[i],a[i+1]]=[a[i+1],a[i]];return a;});
+  // 순서 변경: 배열을 재정렬해 order를 다시 매겨 Firestore에 저장
+  const moveUp   = (id) => { const a=[...links],i=a.findIndex(l=>l.id===id); if(i<=0)return; [a[i-1],a[i]]=[a[i],a[i-1]]; persistLinkOrder(a); };
+  const moveDown = (id) => { const a=[...links],i=a.findIndex(l=>l.id===id); if(i<0||i>=a.length-1)return; [a[i],a[i+1]]=[a[i+1],a[i]]; persistLinkOrder(a); };
 
   const reorder = (fromId,toId) => {
     if(!fromId||!toId||fromId===toId) return;
-    setLinks(prev=>{
-      const arr=[...prev];
-      const fi=arr.findIndex(l=>l.id===fromId), ti=arr.findIndex(l=>l.id===toId);
-      if(fi<0||ti<0) return prev;
-      const [item]=arr.splice(fi,1); arr.splice(ti,0,item); return arr;
-    });
+    const arr=[...links];
+    const fi=arr.findIndex(l=>l.id===fromId), ti=arr.findIndex(l=>l.id===toId);
+    if(fi<0||ti<0) return;
+    const [item]=arr.splice(fi,1); arr.splice(ti,0,item);
+    persistLinkOrder(arr);
   };
 
   const onDragStart=(id)=>{dragFrom.current=id;setDraggingId(id);};
@@ -4189,11 +4795,10 @@ function ExternalLinksScreen() {
   // 카테고리 관리 화면
   if(catModal) {
     const moveCat = (idx, dir) => {
-      setCustomCats(p => {
-        const a = [...p], ni = idx + dir;
-        if(ni < 0 || ni >= a.length) return p;
-        [a[idx], a[ni]] = [a[ni], a[idx]]; return a;
-      });
+      const a = [...customCats], ni = idx + dir;
+      if(ni < 0 || ni >= a.length) return;
+      [a[idx], a[ni]] = [a[ni], a[idx]];
+      saveLinkCategories(a);
     };
     return (
       <div className="flex-1 flex flex-col bg-white min-h-screen">
@@ -4400,7 +5005,7 @@ function ExternalLinksScreen() {
             )}
             {/* 일반: 삭제 버튼 */}
             {!sorting && (
-              <button onClick={()=>setLinks(p=>p.filter(x=>x.id!==l.id))}
+              <button onClick={()=>deleteLink(l.id)}
                 className="w-11 self-stretch border-l border-gray-100 bg-gray-50 flex items-center justify-center text-gray-300 hover:text-red-400 shrink-0 text-lg">
                 ✕
               </button>
@@ -4416,78 +5021,182 @@ function ExternalLinksScreen() {
 
 // ── 회사 정보 설정 모달 ───────────────────────────────────────────────
 function CompanySettingsModal() {
-  const { companySettingsModal, setCompanySettingsModal, currentUser } = useC();
+  const { companySettingsModal, setCompanySettingsModal, currentUser,
+          titleRule, typeKeywords, saveTitleRule } = useC();
+  const [tab, setTab]             = useState("info");
   const [companyName, setCompanyName] = useState("");
-  const [logoUrl, setLogoUrl] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [logoUrl, setLogoUrl]     = useState("");
+  const [loading, setLoading]     = useState(false);
+  const [localRule, setLocalRule] = useState(DEFAULT_TITLE_RULE);
+  const [localKw, setLocalKw]     = useState(DEFAULT_TYPE_KEYWORDS);
+  const [newKw, setNewKw]         = useState("");
+
+  const ALL_TOKENS = Object.keys(TITLE_TOKEN_LABELS);
 
   useEffect(() => {
     if (companySettingsModal) {
       setCompanyName(currentUser?.companyName || "");
       setLogoUrl(currentUser?.companyLogoUrl || "");
+      setTab("info");
+      setLocalRule(titleRule || DEFAULT_TITLE_RULE);
+      setLocalKw(typeKeywords || DEFAULT_TYPE_KEYWORDS);
     }
-  }, [companySettingsModal, currentUser]);
+  }, [companySettingsModal]);
 
   if (!companySettingsModal) return null;
+  const close = () => setCompanySettingsModal(false);
 
   const handleLogoUpload = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setLogoUrl(reader.result);
-      reader.readAsDataURL(file);
-    }
+    if (file) { const r = new FileReader(); r.onloadend = () => setLogoUrl(r.result); r.readAsDataURL(file); }
   };
 
-  const handleSave = async () => {
+  const handleSaveInfo = async () => {
     if (!companyName.trim()) return alert("회사명을 입력해주세요.");
     setLoading(true);
     try {
-      await window.alert("저장되었습니다. 새로고침 시 적용됩니다!");
-      // Firestore 문서 업데이트 로직은 실제 DB 연동 필요하므로 여기서는 시뮬레이션
-      // (기존 currentUser가 최상단 App 컴포넌트에서 관리되므로, 여기서는 새로고침 권장)
-      await updateDoc(doc(db, "companies", currentUser.companyId), {
-        name: companyName,
-        logoUrl: logoUrl
-      });
-      window.location.reload();
-    } catch (e) {
-      console.error(e);
-      alert("오류가 발생했습니다.");
-    } finally {
-      setLoading(false);
-    }
+      await updateDoc(doc(db, "companies", currentUser.companyId), { name: companyName, logoUrl });
+      alert("저장됐습니다. 새로고침 시 적용됩니다."); window.location.reload();
+    } catch(e) { alert("오류: " + e.message); } finally { setLoading(false); }
   };
 
+  const toggleToken = (token) => {
+    setLocalRule(r => r.includes(token) ? r.filter(t => t !== token) : [...r, token]);
+  };
+  const moveToken = (token, dir) => {
+    setLocalRule(r => {
+      const i = r.indexOf(token);
+      if (i < 0) return r;
+      const next = [...r];
+      const to = i + dir;
+      if (to < 0 || to >= next.length) return r;
+      [next[i], next[to]] = [next[to], next[i]];
+      return next;
+    });
+  };
+
+  // 제목 미리보기
+  const previewText = "6월 25일 오전 10시에 은평구 역촌동 15평 입주청소 일정이 있어\n방2화1 이효림 010-1234-5678";
+  const previewTitle = parseEventText(previewText, localRule, localKw).title || "(제목 없음)";
+
   return (
-    <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden flex flex-col shadow-2xl">
-        <div className="px-5 py-4 flex items-center justify-between border-b border-gray-100">
-          <h2 className="text-lg font-bold text-gray-900">회사 정보 설정</h2>
-          <button onClick={() => setCompanySettingsModal(false)} className="p-1 rounded-full hover:bg-gray-100">
-            <X size={20} className="text-gray-500" />
+    <div className="absolute inset-0 z-[100] flex flex-col bg-white">
+      {/* 헤더 */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+        <button onClick={close}><X size={22} className="text-gray-600"/></button>
+        <h2 className="font-bold text-base">회사 설정</h2>
+        <div className="w-6"/>
+      </div>
+
+      {/* 탭 */}
+      <div className="flex border-b border-gray-100">
+        {[{key:"info",label:"회사 정보"},{key:"title",label:"제목 규칙"}].map(t=>(
+          <button key={t.key} onClick={()=>setTab(t.key)}
+            className={`flex-1 py-3 text-sm font-bold relative ${tab===t.key?"text-blue-600":"text-gray-400"}`}>
+            {t.label}
+            {tab===t.key && <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-blue-600 rounded-full"/>}
           </button>
-        </div>
-        <div className="p-5 flex flex-col items-center">
-          <label className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl overflow-hidden cursor-pointer bg-gray-100 border-2 border-dashed border-gray-300 hover:border-blue-500 transition-colors"
-            style={{background: logoUrl ? "#fff" : "linear-gradient(135deg,#1a56db,#2563eb)"}}>
-            {logoUrl ? <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" /> : "🏢"}
-            <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
-          </label>
-          <p className="text-xs text-gray-400 -mt-4 mb-4 text-center">로고 이미지를 클릭하여 변경 (선택)</p>
-          
-          <div className="w-full mb-6">
-            <label className="block text-xs font-bold text-gray-500 mb-1">회사명</label>
-            <input value={companyName} onChange={e=>setCompanyName(e.target.value)}
-              className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm font-bold outline-none focus:border-blue-500" />
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {/* ── 회사 정보 탭 ── */}
+        {tab === "info" && (
+          <div className="p-5 flex flex-col items-center">
+            <label className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl overflow-hidden cursor-pointer"
+              style={{background: logoUrl ? "#fff" : "linear-gradient(135deg,#1a56db,#2563eb)"}}>
+              {logoUrl ? <img src={logoUrl} alt="Logo" className="w-full h-full object-cover"/> : "🏢"}
+              <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload}/>
+            </label>
+            <p className="text-xs text-gray-400 -mt-4 mb-6 text-center">로고 클릭하여 변경 (선택)</p>
+            <div className="w-full mb-6">
+              <label className="block text-xs font-bold text-gray-500 mb-1">회사명</label>
+              <input value={companyName} onChange={e=>setCompanyName(e.target.value)}
+                className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm font-bold outline-none focus:border-blue-500"/>
+            </div>
+            <button onClick={handleSaveInfo} disabled={loading||!companyName.trim()}
+              className="w-full py-4 rounded-xl text-white font-bold"
+              style={{background:companyName.trim()?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb"}}>
+              {loading?"저장 중...":"저장하고 새로고침"}
+            </button>
           </div>
-          
-          <button onClick={handleSave} disabled={loading || !companyName.trim()}
-            className="w-full py-4 rounded-xl text-white font-bold transition-opacity"
-            style={{background:companyName.trim()?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb", opacity: loading ? 0.7 : 1}}>
-            {loading ? "저장 중..." : "저장하고 새로고침"}
-          </button>
-        </div>
+        )}
+
+        {/* ── 제목 규칙 탭 ── */}
+        {tab === "title" && (
+          <div className="p-4 flex flex-col gap-5">
+            {/* 미리보기 */}
+            <div className="bg-blue-50 rounded-2xl p-4">
+              <p className="text-xs font-bold text-blue-500 mb-1">미리보기</p>
+              <p className="text-lg font-bold text-gray-900">{previewTitle}</p>
+              <p className="text-xs text-gray-400 mt-1">샘플: "6월 25일 오전 역촌동 15평 입주청소"</p>
+            </div>
+
+            {/* 토큰 선택 및 순서 */}
+            <div>
+              <p className="text-xs font-bold text-gray-500 mb-3">제목에 포함할 항목 (순서대로 조합)</p>
+              {/* 활성 토큰 — 순서 변경 가능 */}
+              <div className="flex flex-col gap-2 mb-3">
+                {localRule.map((token, i) => (
+                  <div key={token} className="flex items-center gap-2 bg-blue-50 rounded-xl px-3 py-2">
+                    <div className="flex flex-col">
+                      <button onClick={()=>moveToken(token,-1)} disabled={i===0}
+                        className="text-[10px] text-gray-400 hover:text-blue-600 disabled:opacity-20">▲</button>
+                      <button onClick={()=>moveToken(token,1)} disabled={i===localRule.length-1}
+                        className="text-[10px] text-gray-400 hover:text-blue-600 disabled:opacity-20">▼</button>
+                    </div>
+                    <div className="flex-1">
+                      <span className="text-sm font-bold text-blue-700">{TITLE_TOKEN_LABELS[token]?.label}</span>
+                      <span className="text-xs text-blue-400 ml-1.5">{TITLE_TOKEN_LABELS[token]?.desc}</span>
+                    </div>
+                    <button onClick={()=>toggleToken(token)}
+                      className="text-xs text-red-400 hover:text-red-600 px-2 py-1 hover:bg-red-50 rounded-lg">제거</button>
+                  </div>
+                ))}
+              </div>
+              {/* 비활성 토큰 — 추가 가능 */}
+              <p className="text-xs text-gray-400 mb-2">추가 가능한 항목</p>
+              <div className="flex flex-wrap gap-2">
+                {ALL_TOKENS.filter(t => !localRule.includes(t)).map(token => (
+                  <button key={token} onClick={()=>toggleToken(token)}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 text-xs text-gray-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all">
+                    + {TITLE_TOKEN_LABELS[token]?.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 청소 종류 키워드 */}
+            <div>
+              <p className="text-xs font-bold text-gray-500 mb-1">청소 종류 키워드
+                <span className="font-normal text-gray-400 ml-1">(텍스트에서 인식할 단어)</span>
+              </p>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {localKw.map((kw, i) => (
+                  <div key={kw} className="flex items-center gap-1 bg-gray-100 rounded-full px-3 py-1">
+                    <span className="text-xs text-gray-700">{kw}</span>
+                    <button onClick={()=>setLocalKw(k=>k.filter((_,j)=>j!==i))}
+                      className="text-gray-400 hover:text-red-500"><X size={11}/></button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input value={newKw} onChange={e=>setNewKw(e.target.value)}
+                  onKeyDown={e=>{ if(e.key==="Enter"&&newKw.trim()){ setLocalKw(k=>[...k,newKw.trim()]); setNewKw(""); }}}
+                  placeholder="예: 줄눈청소"
+                  className="flex-1 text-sm px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 outline-none focus:border-blue-400"/>
+                <button onClick={()=>{ if(newKw.trim()){ setLocalKw(k=>[...k,newKw.trim()]); setNewKw(""); }}}
+                  className="px-4 py-2 bg-blue-600 text-white text-sm font-bold rounded-xl">추가</button>
+              </div>
+            </div>
+
+            {/* 저장 */}
+            <button onClick={()=>{ saveTitleRule(localRule, localKw); alert("저장됐습니다!"); }}
+              className="w-full py-4 rounded-xl text-white font-bold bg-blue-600">
+              규칙 저장
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
