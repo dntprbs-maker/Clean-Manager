@@ -416,10 +416,15 @@ function Provider({ children, loginUser, onLogout }) {
   }, [cals, companyRef]);
 
   const updateCal = useCallback(updated => {
-    const nextCals = cals.map(c => c.id === updated.id ? {...c, ...updated} : c);
-    setCals(nextCals);
+    // 함수형 업데이트로 stale closure 방지, 새 cal이면 추가
+    setCals(prev => {
+      const exists = prev.some(c => c.id === updated.id);
+      return exists
+        ? prev.map(c => c.id === updated.id ? {...c, ...updated} : c)
+        : [...prev, updated];
+    });
     setDoc(doc(companyRef, "cals", updated.id), updated);
-  }, [cals, companyRef]);
+  }, [companyRef]);
 
   // UI 상태
   const [modal,setModal]       = useState({open:false,date:null,editId:null});
@@ -3895,6 +3900,17 @@ function EmployeeFormModal() {
 // ── 팀 관리 모달 ───────────────────────────────────────────────
 function TeamManagementModal() {
   const { teamModal, setTeamModal, teams, saveTeams, users, companyId, cals, updateCal } = useC();
+
+  // 팀 열릴 때: isField 없는 기존 cal에 기본값 세팅 (청소 포함 → true, 그 외 → false)
+  useEffect(() => {
+    if (!teamModal) return;
+    cals.forEach(cal => {
+      if (cal.isField === undefined || cal.isField === null) {
+        const isField = cal.label?.includes("청소");
+        updateCal({ ...cal, isField: !!isField });
+      }
+    });
+  }, [teamModal]);
 
   // 팀 삭제/이름변경 시 소속 직원의 team 을 Firestore 에 반영
   const reassignTeam = (fromTeam, toTeam) => {
