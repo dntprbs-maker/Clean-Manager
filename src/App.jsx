@@ -77,7 +77,7 @@ const pd   = s=>{ if(!s)return null; const[y,m,d]=s.split("-").map(Number); retu
 const diff = (s,e)=>!s||!e?0:Math.round((pd(e)-pd(s))/864e5);
 const add  = (s,n)=>{ const d=pd(s); d.setDate(d.getDate()+n); return fmt(d); };
 const addMonths = (s,n)=>{ const d=pd(s); d.setMonth(d.getMonth()+n); return fmt(d); };
-const calById = id => CALS.find(c=>c.id===id)||CALS[0];
+const calById = id => CALS.find(c=>c.id===id) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af", checked:true };
 
 // ── 전화번호 정규화/표시 ───────────────────────────────────────────
 // 저장은 숫자만(canonical), 화면 표시는 하이픈 포맷으로.
@@ -447,7 +447,8 @@ function Provider({ children, loginUser, onLogout }) {
 
   const checkedIds     = useMemo(()=>new Set(cals.filter(c=>c.checked).map(c=>c.id)),[cals]);
   const visibleEvents  = useMemo(()=>{
-    let evs = events.filter(e=>checkedIds.has(e.calId));
+    // calId가 없거나 "unassigned"인 미배정 일정도 항상 표시
+    let evs = events.filter(e=>checkedIds.has(e.calId) || !e.calId || e.calId==="unassigned");
     if (!["관리팀", "영업팀"].includes(currentUser.team) && currentUser.role !== "최고관리자") {
       const myTeamKeyword = currentUser.team.replace("팀", "");
       evs = evs.filter(e => {
@@ -3033,7 +3034,7 @@ function ReportHistoryScreen() {
 
 // ── 캘린더 가져오기 화면 (.ics) ───────────────────────────────────────────────
 function ImportCalendarScreen() {
-  const { setCurrentScreen, addEvent, cals } = useC();
+  const { setCurrentScreen, addEvent, cals, companyId } = useC();
   const [step, setStep]                 = useState("upload");
   const [parsedEvents, setParsedEvents] = useState([]);
   const [selectedIds, setSelectedIds]   = useState([]);
@@ -3085,6 +3086,9 @@ function ImportCalendarScreen() {
           current.place = line.replace("LOCATION:", "").trim();
         } else if (line.startsWith("DESCRIPTION:")) {
           current.description = line.replace("DESCRIPTION:", "").trim();
+        } else if (line.startsWith("UID:")) {
+          // Firestore ID로 사용해 중복 가져오기 방지
+          current.icsUid = line.replace("UID:", "").trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
         }
       }
     }
@@ -3114,13 +3118,15 @@ function ImportCalendarScreen() {
     reader.readAsText(file, "utf-8");
   };
 
-  const handleImport = () => {
+  const handleImport = async () => {
     setImporting(true);
     const toImport = parsedEvents.filter((_, i) => selectedIds.includes(i));
-    toImport.forEach(ev => {
-      addEvent({
+    await Promise.all(toImport.map(ev => {
+      // icsUid가 있으면 그걸 문서 ID로 써서 중복 가져오기 시 덮어쓰기
+      const docId = ev.icsUid || uid();
+      const evData = {
         ...ev,
-        id: uid(),
+        id: docId,
         calId: selectedCal,
         end: ev.end || ev.start,
         startTime: ev.startTime || "09:00",
@@ -3128,9 +3134,12 @@ function ImportCalendarScreen() {
         allDay: ev.allDay || false,
         place: ev.place || "",
         description: ev.description || "",
-      });
-    });
-    setTimeout(() => { setImporting(false); setStep("done"); }, 800);
+      };
+      delete evData.icsUid;
+      return setDoc(doc(db, "companies", companyId, "events", docId), evData);
+    }));
+    setImporting(false);
+    setStep("done");
   };
 
   const toggleSelect = (i) => {

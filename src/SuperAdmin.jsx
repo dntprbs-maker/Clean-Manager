@@ -183,10 +183,13 @@ export default function SuperAdmin() {
   const [isAdding, setIsAdding]         = useState(false);
   const [addData, setAddData]           = useState({});
   const [addCompanyId, setAddCompanyId] = useState("");
+  const [sortCol, setSortCol]           = useState(null);
+  const [sortDir, setSortDir]           = useState("asc");
+  const [checkedIds, setCheckedIds]     = useState(new Set());
 
   // 탭 데이터 로드
   const loadTab = useCallback(async (tabId) => {
-    setLoading(true); setRows([]); setSearchTerm(""); setSelectedCompanyId("ALL");
+    setLoading(true); setRows([]); setSearchTerm(""); setSelectedCompanyId("ALL"); setCheckedIds(new Set());
     try { 
       const res = await loadData(tabId);
       setRows(res.rows); 
@@ -226,6 +229,21 @@ export default function SuperAdmin() {
       setRows(prev => prev.filter(r => r._id !== row._id));
       setDeleteTarget(null);
     } catch (e) { alert("삭제 실패: " + e.message); }
+  }
+
+  // ── 다중 삭제 ──
+  async function handleBulkDelete() {
+    if (!checkedIds.size) return;
+    if (!window.confirm(`선택한 ${checkedIds.size}개를 정말 삭제하시겠습니까?\n삭제된 데이터는 복구할 수 없습니다.`)) return;
+    const targets = filtered.filter(r => checkedIds.has(r._id));
+    await Promise.all(targets.map(row => {
+      const parts = row._path.split("/");
+      if (parts.length === 2) return deleteDoc(doc(db, parts[0], parts[1]));
+      if (parts.length === 4) return deleteDoc(doc(db, parts[0], parts[1], parts[2], parts[3]));
+      if (parts.length === 6) return deleteDoc(doc(db, parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]));
+    }));
+    setRows(prev => prev.filter(r => !checkedIds.has(r._id)));
+    setCheckedIds(new Set());
   }
 
   // ── 수정 ──
@@ -272,13 +290,25 @@ export default function SuperAdmin() {
     } catch (e) { alert("추가 실패: " + e.message); }
   }
 
-  // ── 필터링 & 컬럼 ──
-  const filtered = rows.filter(row => {
-    const matchCompany = selectedCompanyId === "ALL" || row._companyId === selectedCompanyId;
-    const matchSearch = !searchTerm || Object.values(row).some(v => String(v).toLowerCase().includes(searchTerm.toLowerCase()));
-    return matchCompany && matchSearch;
-  });
+  // ── 필터링 & 정렬 & 컬럼 ──
+  const filtered = rows
+    .filter(row => {
+      const matchCompany = selectedCompanyId === "ALL" || row._companyId === selectedCompanyId;
+      const matchSearch = !searchTerm || Object.values(row).some(v => String(v).toLowerCase().includes(searchTerm.toLowerCase()));
+      return matchCompany && matchSearch;
+    })
+    .sort((a, b) => {
+      if (!sortCol) return 0;
+      const av = String(a[sortCol] ?? "").toLowerCase();
+      const bv = String(b[sortCol] ?? "").toLowerCase();
+      return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+    });
   const columns = buildColumns(filtered, activeTab);
+
+  const handleSort = (col) => {
+    if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir("asc"); }
+  };
 
   // ── 공통 스타일 ──
   const bg = "min-h-screen bg-gray-950 text-gray-100 font-sans";
@@ -362,10 +392,10 @@ export default function SuperAdmin() {
 
   // ── 메인 관리자 화면 ──
   return (
-    <div className={`${bg} flex flex-col`} style={{ minHeight: "100vh" }}>
+    <div className={`${bg} flex flex-col`} style={{ height: "100vh", overflow: "hidden" }}>
 
       {/* ── 헤더 ── */}
-      <header className="bg-gray-900 border-b border-gray-800 sticky top-0 z-40">
+      <header className="bg-gray-900 border-b border-gray-800 shrink-0 z-40">
         <div className="mx-auto px-6 py-4 flex items-center justify-between w-full" style={{ maxWidth: "66%" }}>
           <div className="flex items-center gap-3">
             <span className="text-2xl">🛡️</span>
@@ -420,7 +450,7 @@ export default function SuperAdmin() {
       )}
 
       {/* ── 탭 바 ── */}
-      <div className="bg-gray-900 border-b border-gray-800 sticky top-[73px] z-30">
+      <div className="bg-gray-900 border-b border-gray-800 shrink-0 z-30">
         <div className="mx-auto px-4 flex gap-1 overflow-x-auto w-full" style={{ maxWidth: "66%" }}>
           <div className="flex items-center mr-2 shrink-0">
             <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold border-r border-gray-700 pr-2 py-3">테스트</span>
@@ -448,7 +478,7 @@ export default function SuperAdmin() {
       </div>
 
       {/* ── 툴바 ── */}
-      <div className="bg-gray-950 border-b border-gray-800 sticky top-[120px] z-20 py-3">
+      <div className="bg-gray-950 border-b border-gray-800 shrink-0 z-20 py-3">
         <div className="mx-auto flex items-center gap-3 px-6" style={{ maxWidth: "66%" }}>
           <select 
             value={selectedCompanyId} 
@@ -466,6 +496,12 @@ export default function SuperAdmin() {
             className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2 text-sm text-white outline-none focus:border-blue-500"
           />
           <span className="text-xs text-gray-500 shrink-0">{filtered.length}건</span>
+          {checkedIds.size > 0 && (
+            <button onClick={handleBulkDelete}
+              className="text-xs text-red-400 hover:text-red-300 border border-red-800 hover:border-red-600 px-3 py-2 rounded-xl transition-colors shrink-0 font-bold bg-red-950/50">
+              🗑️ 선택 {checkedIds.size}개 삭제
+            </button>
+          )}
           <button onClick={startAdd}
             className="text-xs text-blue-400 hover:text-blue-300 border border-blue-900 hover:border-blue-700 px-3 py-2 rounded-xl transition-colors shrink-0 font-bold">
             ➕ 데이터 추가
@@ -481,36 +517,63 @@ export default function SuperAdmin() {
         </div>
       </div>
 
-      {/* ── 테이블 영역 ── */}
-      <div className="flex-1 overflow-auto py-6">
-        <div className="mx-auto px-6" style={{ maxWidth: "66%" }}>
-          {loading ? (
-            <div className="flex items-center justify-center py-20 text-gray-400 text-sm">
-              ⏳ 데이터 불러오는 중...
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="flex items-center justify-center py-20 text-gray-500 text-sm">
-              데이터가 없습니다.
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-xl border border-gray-800">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="bg-gray-800 text-gray-300">
-                    {columns.map(col => (
-                      <th key={col} className="px-4 py-3 text-left font-semibold border-b border-gray-700 whitespace-nowrap text-xs uppercase tracking-wide">
-                        {col}
+      {/* ── 테이블 영역 — 단일 스크롤 컨테이너 ── */}
+      <div className="flex-1 overflow-auto">
+        {loading ? (
+          <div className="flex items-center justify-center py-20 text-gray-400 text-sm">
+            ⏳ 데이터 불러오는 중...
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex items-center justify-center py-20 text-gray-500 text-sm">
+            데이터가 없습니다.
+          </div>
+        ) : (
+          <div>
+            <table className="w-full text-sm border-separate border-spacing-0" style={{minWidth: "max-content"}}>
+              <thead className="sticky top-0 z-10">
+                <tr className="bg-gray-800 text-gray-300">
+                  <th className="px-3 py-3 border-b border-gray-700 bg-gray-800 w-10">
+                    <input type="checkbox"
+                      checked={filtered.length > 0 && filtered.every(r => checkedIds.has(r._id))}
+                      onChange={e => {
+                        if (e.target.checked) setCheckedIds(new Set(filtered.map(r => r._id)));
+                        else setCheckedIds(new Set());
+                      }}
+                      className="w-4 h-4 rounded cursor-pointer accent-blue-500"/>
+                  </th>
+                  {columns.map(col => {
+                    const isActive = sortCol === col;
+                    return (
+                      <th key={col} onClick={() => handleSort(col)}
+                        className="px-4 py-3 text-left font-semibold border-b border-gray-700 whitespace-nowrap text-xs uppercase tracking-wide cursor-pointer select-none hover:bg-gray-700 transition-colors">
+                        <span className="flex items-center gap-1">
+                          {col}
+                          <span className="text-[10px]">
+                            {isActive ? (sortDir === "asc" ? "▲" : "▼") : <span className="text-gray-600">⇅</span>}
+                          </span>
+                        </span>
                       </th>
-                    ))}
-                    <th className="px-4 py-3 text-center font-semibold border-b border-gray-700 text-xs uppercase tracking-wide whitespace-nowrap">
-                      작업
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((row, i) => (
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((row, i) => {
+                  const isChecked = checkedIds.has(row._id);
+                  return (
                     <tr key={row._id}
-                      className={`border-b border-gray-800 hover:bg-gray-800/50 transition-colors ${i % 2 === 0 ? "" : "bg-gray-900/30"}`}>
+                      onClick={() => startEdit(row)}
+                      className={`border-b border-gray-800 cursor-pointer transition-colors
+                        ${isChecked ? "bg-blue-950/60 hover:bg-blue-900/60" : i % 2 === 0 ? "hover:bg-gray-800/70" : "bg-gray-900/30 hover:bg-gray-800/70"}`}>
+                      <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={isChecked}
+                          onChange={e => {
+                            const next = new Set(checkedIds);
+                            e.target.checked ? next.add(row._id) : next.delete(row._id);
+                            setCheckedIds(next);
+                          }}
+                          className="w-4 h-4 rounded cursor-pointer accent-blue-500"/>
+                      </td>
                       {columns.map(col => (
                         <td key={col} className="px-4 py-2.5 text-gray-300 max-w-xs">
                           <span className="block truncate" title={displayVal(row[col])}>
@@ -518,23 +581,13 @@ export default function SuperAdmin() {
                           </span>
                         </td>
                       ))}
-                      <td className="px-4 py-2.5 text-center whitespace-nowrap">
-                        <button onClick={() => startEdit(row)}
-                          className="text-xs text-blue-400 hover:text-blue-300 border border-blue-900 hover:border-blue-700 px-2.5 py-1 rounded-lg mr-1.5 transition-colors">
-                          수정
-                        </button>
-                        <button onClick={() => setDeleteTarget(row)}
-                          className="text-xs text-red-400 hover:text-red-300 border border-red-900 hover:border-red-700 px-2.5 py-1 rounded-lg transition-colors">
-                          삭제
-                        </button>
-                      </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* ── 수정 모달 ── */}
@@ -558,7 +611,12 @@ export default function SuperAdmin() {
                 </div>
               ))}
             </div>
-            <div className="px-6 py-4 border-t border-gray-800 flex gap-2 justify-end">
+            <div className="px-6 py-4 border-t border-gray-800 flex gap-2">
+              <button onClick={() => { setDeleteTarget(editRow); setEditRow(null); setEditData({}); }}
+                className="text-sm text-red-400 hover:text-red-300 border border-red-900 hover:border-red-700 px-4 py-2 rounded-xl transition-colors">
+                🗑️ 삭제
+              </button>
+              <div className="flex-1"/>
               <button onClick={() => { setEditRow(null); setEditData({}); }}
                 className="text-sm text-gray-400 hover:text-white border border-gray-700 px-4 py-2 rounded-xl transition-colors">
                 취소
