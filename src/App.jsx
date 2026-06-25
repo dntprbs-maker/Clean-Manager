@@ -455,11 +455,13 @@ function Provider({ children, loginUser, onLogout }) {
     // calId가 없거나 "unassigned"인 미배정 일정도 항상 표시
     let evs = events.filter(e=>checkedIds.has(e.calId) || !e.calId || e.calId==="unassigned");
     if (!["관리팀", "영업팀"].includes(currentUser.team) && currentUser.role !== "최고관리자") {
-      const myTeamKeyword = currentUser.team.replace("팀", "");
-      evs = evs.filter(e => {
-        const cal = CALS.find(c=>c.id===e.calId);
-        return cal && cal.label.includes(myTeamKeyword);
-      });
+      // 팀명과 정확히 일치하는 cal 찾기
+      const myCal = CALS.find(c => c.label === currentUser.team);
+      if (myCal) {
+        // 매칭 cal이 있으면 해당 cal의 일정만 표시
+        evs = evs.filter(e => e.calId === myCal.id);
+      }
+      // 매칭 cal이 없으면 전체 표시 (팀에 대응하는 캘린더가 없는 경우)
     }
     return expandRecurring(evs); // 반복 일정을 개별 날짜로 펼침
   }, [events, checkedIds, currentUser.team, currentUser.role]);
@@ -659,7 +661,8 @@ function useDates(current) {
 
 // ── 시간표 시트 내용 ──────────────────────────────────────────────
 function ScheduleList({ selDate, compact=false }) {
-  const { visibleEvents, setDetEv, setSelDate, setCurrent, setSheetMode, openModal } = useC();
+  const { visibleEvents, setDetEv, setSelDate, setCurrent, setSheetMode, openModal, currentUser } = useC();
+  const canAdd = currentUser.role !== "팀원";
   const d=pd(selDate), dow=d.getDay();
   const DAYS=["일","월","화","수","목","금","토"];
   const isHol=!!HOLIDAYS[selDate];
@@ -778,7 +781,7 @@ function ScheduleList({ selDate, compact=false }) {
           <div className="flex flex-col items-center justify-center py-10 text-gray-300">
             <Calendar size={36} strokeWidth={1.2}/>
             <p className="text-sm mt-2">일정이 없습니다</p>
-            <button onClick={()=>openModal(selDate)} className="mt-3 text-blue-500 text-sm">일정 추가하기</button>
+            {canAdd && <button onClick={()=>openModal(selDate)} className="mt-3 text-blue-500 text-sm">일정 추가하기</button>}
           </div>
         )}
       </div>
@@ -1719,15 +1722,13 @@ function WheelPicker({ items, value, onChange, renderItem }) {
 
   return (
     <div className="relative flex-1 overflow-hidden select-none" style={{ height: ITEM_H * 5 }}>
-      {/* 선택 영역 하이라이트 */}
-      <div className="absolute left-1 right-1 rounded-xl bg-gray-100 pointer-events-none z-10"
-        style={{ top: ITEM_H * 2, height: ITEM_H }} />
-      {/* 상하 페이드 */}
-      <div className="absolute inset-0 pointer-events-none z-20"
-        style={{ background: "linear-gradient(to bottom,white 0%,transparent 30%,transparent 70%,white 100%)" }} />
+      {/* 선택 영역 하이라이트 — 텍스트 뒤에 */}
+      <div className="absolute left-1 right-1 rounded-xl bg-gray-100 pointer-events-none"
+        style={{ top: ITEM_H * 2, height: ITEM_H, zIndex: 1 }} />
+      {/* 스크롤 내용 — 하이라이트 위, 페이드 아래 */}
       <div ref={ref} onScroll={handleScroll}
         className="h-full overflow-y-scroll"
-        style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none" }}>
+        style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none", position: "relative", zIndex: 2 }}>
         <div style={{ height: ITEM_H * 2 }} />
         {items.map((item, i) => {
           const sel = item === value;
@@ -1742,6 +1743,9 @@ function WheelPicker({ items, value, onChange, renderItem }) {
         })}
         <div style={{ height: ITEM_H * 2 }} />
       </div>
+      {/* 상하 페이드 — 가장 위 */}
+      <div className="absolute inset-0 pointer-events-none"
+        style={{ background: "linear-gradient(to bottom,white 0%,transparent 30%,transparent 70%,white 100%)", zIndex: 3 }} />
     </div>
   );
 }
@@ -1751,39 +1755,44 @@ function DateTimePicker({ form, set, errs }) {
   const [activePicker, setActivePicker] = useState(null); // null | "start" | "end"
 
   // 피커 내부 상태 (ref로 항상 최신값 유지)
-  const ps = useRef({ year:2026, month:6, day:1, ampm:"오전", hour:9, min:0 });
+  // h24: 0~23 (오전/오후 합친 연속 시간)
+  const ps = useRef({ year:2026, month:6, day:1, h24:9, min:0 });
   const [pYear,  setPYear]  = useState(2026);
   const [pMonth, setPMonth] = useState(6);
   const [pDay,   setPDay]   = useState(1);
-  const [pAmpm,  setPAmpm]  = useState("오전");
-  const [pHour,  setPHour]  = useState(9);
+  const [pH24,   setPH24]   = useState(9);
   const [pMin,   setPMin]   = useState(0);
 
-  const parseTime = t => {
-    if (!t) return { ampm:"오전", h:9, m:0 };
+  const parseTimeH24 = t => {
+    if (!t) return { h24: 9, m: 0 };
     const [hh, mm] = t.split(":").map(Number);
-    const ampm = hh < 12 ? "오전" : "오후";
-    const h12  = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
-    return { ampm, h: h12, m: Math.round(mm / 5) * 5 % 60 };
+    return { h24: hh, m: Math.round(mm / 5) * 5 % 60 };
   };
-  const toTime24 = (ampm, h, m) => {
-    let h24 = h;
-    if (ampm === "오전" && h === 12) h24 = 0;
-    if (ampm === "오후" && h !== 12) h24 = h + 12;
-    return `${String(h24).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+  const fmtH24 = h => {
+    const ap = h < 12 ? "오전" : "오후";
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${ap} ${h12}시`;
+  };
+  const dispTime = t => {
+    if (!t) return "--:--";
+    const [hh, mm] = t.split(":").map(Number);
+    const ap = hh < 12 ? "오전" : "오후";
+    const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
+    return `${ap} ${h12}:${String(mm).padStart(2,"0")}`;
   };
 
-  const applyToForm = (y, mo, d, ampm, h, m) => {
+  const applyToForm = (y, mo, d, h24, m) => {
     if (!activePicker) return;
     const safeDay = Math.min(d, new Date(y, mo, 0).getDate());
     const dateStr = `${y}-${String(mo).padStart(2,"0")}-${String(safeDay).padStart(2,"0")}`;
+    const timeStr = `${String(h24).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
     if (activePicker === "start") {
       set("start", dateStr);
       if (dateStr > form.end) set("end", dateStr);
-      if (!form.allDay) set("startTime", toTime24(ampm, h, m));
+      if (!form.allDay) set("startTime", timeStr);
     } else {
       set("end", dateStr);
-      if (!form.allDay) set("endTime", toTime24(ampm, h, m));
+      if (!form.allDay) set("endTime", timeStr);
     }
   };
 
@@ -1792,27 +1801,26 @@ function DateTimePicker({ form, set, errs }) {
     const dateStr = field === "start" ? form.start : form.end;
     const timeStr = field === "start" ? form.startTime : form.endTime;
     const d = pd(dateStr) || new Date();
-    const t = parseTime(timeStr);
-    const state = { year: d.getFullYear(), month: d.getMonth()+1, day: d.getDate(), ampm: t.ampm, hour: t.h, min: t.m };
+    const t = parseTimeH24(timeStr);
+    const state = { year: d.getFullYear(), month: d.getMonth()+1, day: d.getDate(), h24: t.h24, min: t.m };
     ps.current = state;
     setPYear(state.year); setPMonth(state.month); setPDay(state.day);
-    setPAmpm(state.ampm); setPHour(state.hour);   setPMin(state.min);
+    setPH24(state.h24); setPMin(state.min);
     setActivePicker(field);
   };
 
   // 각 휠 변경 핸들러
-  const chYear  = v => { ps.current.year  = v; setPYear(v);  applyToForm(v, ps.current.month, ps.current.day, ps.current.ampm, ps.current.hour, ps.current.min); };
-  const chMonth = v => { ps.current.month = v; setPMonth(v); applyToForm(ps.current.year, v, ps.current.day, ps.current.ampm, ps.current.hour, ps.current.min); };
-  const chDay   = v => { ps.current.day   = v; setPDay(v);   applyToForm(ps.current.year, ps.current.month, v, ps.current.ampm, ps.current.hour, ps.current.min); };
-  const chAmpm  = v => { ps.current.ampm  = v; setPAmpm(v);  applyToForm(ps.current.year, ps.current.month, ps.current.day, v, ps.current.hour, ps.current.min); };
-  const chHour  = v => { ps.current.hour  = v; setPHour(v);  applyToForm(ps.current.year, ps.current.month, ps.current.day, ps.current.ampm, v, ps.current.min); };
-  const chMin   = v => { ps.current.min   = v; setPMin(v);   applyToForm(ps.current.year, ps.current.month, ps.current.day, ps.current.ampm, ps.current.hour, v); };
+  const chYear  = v => { ps.current.year  = v; setPYear(v);  applyToForm(v, ps.current.month, ps.current.day, ps.current.h24, ps.current.min); };
+  const chMonth = v => { ps.current.month = v; setPMonth(v); applyToForm(ps.current.year, v, ps.current.day, ps.current.h24, ps.current.min); };
+  const chDay   = v => { ps.current.day   = v; setPDay(v);   applyToForm(ps.current.year, ps.current.month, v, ps.current.h24, ps.current.min); };
+  const chH24   = v => { ps.current.h24   = v; setPH24(v);   applyToForm(ps.current.year, ps.current.month, ps.current.day, v, ps.current.min); };
+  const chMin   = v => { ps.current.min   = v; setPMin(v);   applyToForm(ps.current.year, ps.current.month, ps.current.day, ps.current.h24, v); };
 
   const daysInMonth = new Date(pYear, pMonth, 0).getDate();
   const years  = Array.from({length:8}, (_,i) => 2023+i);
   const months = Array.from({length:12},(_,i) => i+1);
   const days   = Array.from({length:daysInMonth},(_,i) => i+1);
-  const hours  = Array.from({length:12},(_,i) => i+1);
+  const hours24 = Array.from({length:24},(_,i) => i); // 0~23 연속
   const mins   = Array.from({length:12},(_,i) => i*5);
   const WD     = ["일","월","화","수","목","금","토"];
 
@@ -1821,11 +1829,6 @@ function DateTimePicker({ form, set, errs }) {
     const d = pd(s); if (!d) return "--";
     const yy = String(d.getFullYear()).slice(2);
     return `${yy}. ${d.getMonth()+1}. ${d.getDate()}.(${WD[d.getDay()]})`;
-  };
-  const dispTime = t => {
-    if (!t) return "--:--";
-    const p = parseTime(t);
-    return `${p.ampm} ${p.h}:${String(p.m).padStart(2,"0")}`;
   };
 
   return (
@@ -1876,9 +1879,8 @@ function DateTimePicker({ form, set, errs }) {
             <WheelPicker key={`${pYear}-${pMonth}-d`} items={days} value={pDay} onChange={chDay}
               renderItem={v=>`${v}일 ${WD[new Date(pYear,pMonth-1,v).getDay()]}`}/>
             {!form.allDay && <>
-              <WheelPicker key={`ap`} items={["오전","오후"]} value={pAmpm} onChange={chAmpm}/>
-              <WheelPicker key={`h`}  items={hours} value={pHour} onChange={chHour} renderItem={v=>String(v)}/>
-              <WheelPicker key={`m`}  items={mins}  value={pMin}  onChange={chMin}  renderItem={v=>String(v).padStart(2,"0")}/>
+              <WheelPicker key={`h24`} items={hours24} value={pH24} onChange={chH24} renderItem={fmtH24}/>
+              <WheelPicker key={`m`}   items={mins}    value={pMin} onChange={chMin} renderItem={v=>String(v).padStart(2,"0")}/>
             </>}
           </div>
           {/* 오늘 버튼 */}
@@ -1891,7 +1893,7 @@ function DateTimePicker({ form, set, errs }) {
               const y=t.getFullYear(), mo=t.getMonth()+1, d=t.getDate();
               ps.current = {...ps.current, year:y, month:mo, day:d};
               setPYear(y); setPMonth(mo); setPDay(d);
-              applyToForm(y, mo, d, ps.current.ampm, ps.current.hour, ps.current.min);
+              applyToForm(y, mo, d, ps.current.h24, ps.current.min);
             }} className={`px-5 py-1.5 rounded-full text-sm font-bold ${activePicker==="start"?"bg-yellow-400 text-white":"bg-gray-100 text-gray-600"}`}>
               오늘
             </button>
@@ -2399,7 +2401,8 @@ function TopHeader() {
 
 // ── 하단 플로팅 버튼 + 오늘 버튼 ─────────────────────────────────
 function FloatingButtons() {
-  const { openModal, selDate, setCurrent, setSelDate, sheetMode } = useC();
+  const { openModal, selDate, setCurrent, setSelDate, currentUser } = useC();
+  const canAdd = currentUser.role !== "팀원";
   return (
     <div className="absolute bottom-4 right-4 flex flex-col items-end gap-3 pointer-events-none">
       {/* 오늘 버튼 */}
@@ -2407,11 +2410,13 @@ function FloatingButtons() {
         className="pointer-events-auto flex items-center gap-1 bg-white rounded-full px-4 py-2 shadow-lg border border-gray-200 text-sm font-medium text-gray-700">
         ‹ 오늘
       </button>
-      {/* + 버튼 */}
-      <button onClick={()=>openModal(selDate)}
-        className="pointer-events-auto w-14 h-14 bg-gray-900 rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-transform">
-        <Plus size={24} className="text-white"/>
-      </button>
+      {/* + 버튼 — 팀원 제외 */}
+      {canAdd && (
+        <button onClick={()=>openModal(selDate)}
+          className="pointer-events-auto w-14 h-14 bg-gray-900 rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-transform">
+          <Plus size={24} className="text-white"/>
+        </button>
+      )}
     </div>
   );
 }
@@ -3090,7 +3095,8 @@ function ImportCalendarScreen() {
         } else if (line.startsWith("LOCATION:")) {
           current.place = line.replace("LOCATION:", "").trim();
         } else if (line.startsWith("DESCRIPTION:")) {
-          current.description = line.replace("DESCRIPTION:", "").trim();
+          // iCal 형식의 \n → 실제 줄바꿈으로 변환
+          current.description = line.replace("DESCRIPTION:", "").trim().replace(/\\n/g, "\n");
         } else if (line.startsWith("UID:")) {
           // Firestore ID로 사용해 중복 가져오기 방지
           current.icsUid = line.replace("UID:", "").trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
