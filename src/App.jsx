@@ -39,14 +39,7 @@ const CALS = [...DEFAULT_CALS];
 // ── 직원 관리 ───────────────────────────────────────────────
 const INIT_TEAMS = ["사장", "관리팀", "영업팀", "입주청소팀", "정기청소팀", "에어컨청소팀"];
 const ROLES = ["최고관리자", "팀장", "팀원"];
-const INIT_USERS = [
-  { id: "u1", name: "김사장", phone: "010-0000-0000", team: "사장", role: "최고관리자" },
-  { id: "u2", name: "이관리", phone: "010-1111-1111", team: "관리팀", role: "팀장" },
-  { id: "u3", name: "박영업", phone: "010-2222-2222", team: "영업팀", role: "팀장" },
-  { id: "u4", name: "최입주", phone: "010-3333-3333", team: "입주청소팀", role: "팀장" },
-  { id: "u5", name: "정팀원", phone: "010-4444-4444", team: "입주청소팀", role: "팀원" },
-  { id: "u6", name: "강정기", phone: "010-5555-5555", team: "정기청소팀", role: "팀장" },
-];
+const INIT_USERS = [];
 
 // ── 제목 규칙 기본값 ──────────────────────────────────────────────
 const DEFAULT_TITLE_RULE = ["time", "district", "area"];
@@ -491,6 +484,112 @@ function Provider({ children, loginUser, onLogout }) {
       titleRule,typeKeywords,saveTitleRule,
       reports,addReport,
       companyId: loginUser.companyId
+    }}>
+      {children}
+    </Ctx.Provider>
+  );
+}
+
+// ── 데모 모드 ─────────────────────────────────────────────────────
+const DEMO_USER = {
+  uid: "demo", id: "demo", name: "홍길동", companyId: "demo",
+  companyName: "크린드림 (데모)", role: "최고관리자", team: "사장",
+};
+const today = fmt(new Date());
+const d = (offset) => { const dt = new Date(); dt.setDate(dt.getDate()+offset); return fmt(dt); };
+const DEMO_EVENTS = [
+  { id:"de1", title:"오전 역촌동 입주청소 25평", start:today, end:today, startTime:"09:00", endTime:"12:00", allDay:false, calId:"team1", place:"서울 은평구 역촌동 51-43", contact:"김민수 010-1234-5678", description:"비밀번호 1234#", team:"입주청소팀" },
+  { id:"de2", title:"오후 상암동 정기청소", start:today, end:today, startTime:"14:00", endTime:"16:00", allDay:false, calId:"team2", place:"서울 마포구 상암동 115", contact:"이영희 010-9876-5432", description:"", team:"정기청소팀" },
+  { id:"de3", title:"오전 불광동 에어컨청소", start:d(1), end:d(1), startTime:"10:00", endTime:"12:00", allDay:false, calId:"team3", place:"서울 은평구 불광동 22-5", contact:"박철수 010-5555-6666", description:"에어컨 3대", team:"에어컨청소팀" },
+  { id:"de4", title:"오후 응암동 입주청소 33평", start:d(1), end:d(1), startTime:"13:00", endTime:"17:00", allDay:false, calId:"team1", place:"서울 은평구 응암동 88-1", contact:"최수진 010-7777-8888", description:"", team:"입주청소팀" },
+  { id:"de5", title:"종일 강서구 정기청소", start:d(2), end:d(2), startTime:"09:00", endTime:"18:00", allDay:false, calId:"team2", place:"서울 강서구 화곡동 101", contact:"정민호 010-2222-3333", description:"매월 2회 정기", team:"정기청소팀" },
+  { id:"de6", title:"오전 은평구 특수청소", start:d(-1), end:d(-1), startTime:"09:00", endTime:"13:00", allDay:false, calId:"team1", place:"서울 은평구 신사동 33", contact:"강지수 010-4444-9999", description:"", team:"입주청소팀" },
+  { id:"de7", title:"팀장 미팅", start:d(3), end:d(3), startTime:"10:00", endTime:"11:00", allDay:false, calId:"personal", place:"사무실", contact:"", description:"월간 업무 회의", team:"관리팀" },
+];
+const DEMO_USERS = [
+  { id:"du1", name:"홍길동", phone:"010-0000-0001", team:"사장",      role:"최고관리자" },
+  { id:"du2", name:"김민준", phone:"010-1111-0001", team:"관리팀",    role:"팀장" },
+  { id:"du3", name:"이서연", phone:"010-2222-0001", team:"입주청소팀",role:"팀장" },
+  { id:"du4", name:"박지훈", phone:"010-3333-0001", team:"입주청소팀",role:"팀원" },
+  { id:"du5", name:"최예린", phone:"010-4444-0001", team:"정기청소팀",role:"팀장" },
+  { id:"du6", name:"정승현", phone:"010-5555-0001", team:"에어컨청소팀",role:"팀장" },
+];
+const DEMO_TEAMS = ["사장","관리팀","영업팀","입주청소팀","정기청소팀","에어컨청소팀"];
+const DEMO_NOTICES = [
+  { id:"dn1", title:"7월 하계 휴가 안내", content:"7월 28일(월)~8월 1일(금) 하계 휴가입니다. 현장 일정 미리 조율해주세요.", createdAt:d(-3), author:"홍길동" },
+  { id:"dn2", title:"청소 용품 재고 확인 요청", content:"스팀청소기 2대 수리 완료. 창고 재고 수량 확인 후 팀장님들 보고 부탁드립니다.", createdAt:d(-7), author:"김민준" },
+];
+const DEMO_LOGS = [
+  { id:"dl1", time:new Date(Date.now()-1000*60*10).toISOString(), user:{name:"홍길동"}, action:"등록", detail:"'오전 역촌동 입주청소 25평' 일정을 등록했습니다." },
+  { id:"dl2", time:new Date(Date.now()-1000*60*60).toISOString(), user:{name:"이서연"}, action:"수정", detail:"'오후 상암동 정기청소' 일정을 수정했습니다." },
+  { id:"dl3", time:new Date(Date.now()-1000*60*60*3).toISOString(), user:{name:"김민준"}, action:"등록", detail:"'팀장 미팅' 일정을 등록했습니다." },
+];
+const DEMO_LINKS = [
+  { id:"dlink1", label:"네이버 지도", url:"https://map.naver.com", icon:"🗺️", category:"지도", order:0 },
+  { id:"dlink2", label:"카카오맵",   url:"https://map.kakao.com", icon:"🗺️", category:"지도", order:1 },
+  { id:"dlink3", label:"국세청 홈택스", url:"https://hometax.go.kr", icon:"🏛️", category:"업무", order:2 },
+];
+const DEMO_CALS = [
+  { id:"team1",    label:"입주청소팀",   name:"입주청소팀",   color:"#1a56db", checked:true },
+  { id:"team2",    label:"정기청소팀",   name:"정기청소팀",   color:"#16a34a", checked:true },
+  { id:"team3",    label:"에어컨청소팀", name:"에어컨청소팀", color:"#ea580c", checked:true },
+  { id:"personal", label:"개인",         name:"개인",         color:"#9333ea", checked:true },
+  { id:"unassigned",label:"미배정",      name:"미배정",       color:"#9ca3af", checked:true },
+];
+
+function DemoProvider({ children }) {
+  const noop = () => {};
+  const demoAlert = () => alert("데모 모드에서는 변경할 수 없습니다.");
+  const [currentScreen, setCurrentScreen] = useState("calendar");
+  const [modal, setModal] = useState({open:false,date:null,editId:null});
+  const [sheetMode, setSheetMode] = useState(1);
+  const [drawer, setDrawer] = useState(false);
+  const [selDate, setSelDate] = useState(today);
+  const [current, setCurrent] = useState(new Date());
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [detailSheet, setDetailSheet] = useState(null);
+  const [empModal, setEmpModal] = useState({open:false,editId:null});
+  const [teamModal, setTeamModal] = useState(false);
+  const [companySettingsModal, setCompanySettingsModal] = useState(false);
+  const [fieldReportEv, setFieldReportEv] = useState(null);
+  const [titleRule] = useState(["time","district","area"]);
+  const [typeKeywords] = useState(["입주청소","정기청소","에어컨청소","특수청소","줄눈청소"]);
+  const [linkCategories] = useState(["업무","지도","연락처","기타"]);
+  const openModal  = (date=null,editId=null) => setModal({open:true,date,editId});
+  const closeModal = () => setModal({open:false,date:null,editId:null});
+  const visibleEvents = DEMO_EVENTS.filter(e => DEMO_CALS.filter(c=>c.checked).map(c=>c.id).includes(e.calId));
+  return (
+    <Ctx.Provider value={{
+      isDemo: true,
+      events: DEMO_EVENTS, visibleEvents,
+      cals: DEMO_CALS, toggleCal: noop, updateCal: noop,
+      users: DEMO_USERS, setUsers: noop,
+      teams: DEMO_TEAMS, setTeams: noop, saveTeams: noop,
+      activityLogs: DEMO_LOGS, setActivityLogs: noop,
+      notices: DEMO_NOTICES,
+      links: DEMO_LINKS, addLink: noop, deleteLink: noop, updateLink: noop, persistLinkOrder: noop,
+      linkCategories, saveLinkCategories: noop,
+      reports: [],
+      currentUser: DEMO_USER, setCurrentUser: noop,
+      loginUser: DEMO_USER, onLogout: noop,
+      titleRule, typeKeywords, saveTitleRule: noop,
+      addEvent: demoAlert, updateEvent: demoAlert, deleteEvent: demoAlert,
+      addNotice: demoAlert, updateNotice: demoAlert, deleteNotice: demoAlert,
+      addLog: noop, addReport: demoAlert,
+      modal, openModal, closeModal,
+      current, setCurrent,
+      selDate, setSelDate,
+      sheetMode, setSheetMode,
+      drawer, setDrawer,
+      searchOpen, setSearchOpen,
+      searchQuery, setSearchQuery,
+      detailSheet, setDetailSheet,
+      empModal, setEmpModal,
+      teamModal, setTeamModal,
+      companySettingsModal, setCompanySettingsModal,
+      fieldReportEv, setFieldReportEv,
+      companyId: "demo",
     }}>
       {children}
     </Ctx.Provider>
@@ -1565,10 +1664,12 @@ function SideDrawer() {
               <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-xl border border-blue-100">🏠</div>
               <div><p className="font-bold text-base">{currentUser.name}</p><p className="text-xs text-gray-500">{currentUser.team} · {currentUser.role}</p></div>
             </div>
-            {/* 테스트용 계정 전환 (디버깅) */}
-            <select className="text-[10px] border border-gray-200 text-gray-500 p-1 rounded outline-none" onChange={e => setCurrentUser([loginUser, ...users].find(u=>u.id===e.target.value))} value={currentUser.id}>
-              {[loginUser, ...users.filter(u=>u.id!==loginUser.id)].map(u => <option key={u.id} value={u.id}>{u.name} ({u.team})</option>)}
-            </select>
+            {/* 테스트용 계정 전환 — 크린드림 사장 계정만 노출 */}
+            {currentUser.role === "최고관리자" && currentUser.team === "사장" && currentUser.companyName === "크린드림" && (
+              <select className="text-[10px] border border-gray-200 text-gray-500 p-1 rounded outline-none" onChange={e => setCurrentUser([loginUser, ...users].find(u=>u.id===e.target.value))} value={currentUser.id}>
+                {[loginUser, ...users.filter(u=>u.id!==loginUser.id)].map(u => <option key={u.id} value={u.id}>{u.name} ({u.team})</option>)}
+              </select>
+            )}
           </div>
           <div className="flex mt-3">
             <button onClick={()=>{setDrawer(false); setCurrentScreen("calendar");}} className="w-full py-2 rounded-xl border border-gray-200 text-xs text-gray-800 font-bold bg-white shadow-sm flex items-center justify-center gap-1 hover:bg-gray-50">
@@ -2055,7 +2156,7 @@ function EventModal() {
           </div>
 
           {/* 입력 영역 */}
-          <div className="flex-1 overflow-y-auto px-4 pt-4 pb-2">
+          <div className="flex-1 overflow-y-auto px-4 pt-4 pb-20">
             {inputMode === "memo" && (
               <>
                 <p className="text-xs text-gray-400 mb-3">카카오톡 문자나 메모를 붙여넣으면 날짜·장소·연락처를 자동으로 정리해드려요.</p>
@@ -2115,8 +2216,8 @@ function EventModal() {
             )}
           </div>
 
-          {/* 하단 버튼 */}
-          <div className="px-4 py-3 border-t border-gray-100">
+          {/* 하단 버튼 — 플로팅 */}
+          <div className="fixed bottom-0 left-0 right-0 px-4 py-3 bg-white border-t border-gray-100 z-50" style={{maxWidth:430,margin:"0 auto"}}>
             <button
               disabled={aiLoading}
               onClick={async ()=>{
@@ -2176,7 +2277,7 @@ function EventModal() {
               }}
               className={"w-full py-3 text-white text-sm font-bold rounded-2xl transition-all " + (aiLoading ? "bg-gray-300" : "bg-blue-600")}>
               {aiLoading ? "⏳ 분석 중..." :
-               inputMode === "memo"  ? (pasteText.trim() ? "✨ 자동 분석하고 계속" : "직접 입력하기") :
+               inputMode === "memo"  ? "✨ 자동 분석하고 계속" :
                inputMode === "chat"  ? "✨ AI로 분석하기" :
                inputMode === "image" ? "📷 이미지 분석하기" : "계속"}
             </button>
@@ -2405,17 +2506,18 @@ function FloatingButtons() {
   const { openModal, selDate, setCurrent, setSelDate, currentUser } = useC();
   const canAdd = currentUser.role !== "팀원";
   return (
-    <div className="absolute bottom-4 right-4 flex flex-col items-end gap-3 pointer-events-none">
+    <div className="fixed bottom-20 right-4 flex flex-col items-end gap-3 pointer-events-none z-40">
       {/* 오늘 버튼 */}
       <button onClick={()=>{setCurrent(new Date());setSelDate(fmt(new Date()));}}
         className="pointer-events-auto flex items-center gap-1 bg-white rounded-full px-4 py-2 shadow-lg border border-gray-200 text-sm font-medium text-gray-700">
         ‹ 오늘
       </button>
-      {/* + 버튼 — 팀원 제외 */}
+      {/* 일정추가 버튼 — 팀원 제외 */}
       {canAdd && (
         <button onClick={()=>openModal(selDate)}
-          className="pointer-events-auto w-14 h-14 bg-gray-900 rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-transform">
-          <Plus size={24} className="text-white"/>
+          className="pointer-events-auto flex items-center gap-1.5 bg-gray-900 rounded-full px-5 py-3 shadow-xl active:scale-95 transition-transform">
+          <Plus size={16} className="text-white"/>
+          <span className="text-white text-sm font-semibold">일정추가</span>
         </button>
       )}
     </div>
@@ -3424,7 +3526,7 @@ function LoginScreen({ onLogin }) {
         teams: INIT_TEAMS,
         linkCategories: ["업무", "지도", "연락처", "기타"],
       });
-      const user = {uid:adminId, id:id.trim(), name:id.trim(), companyId, companyName:"내 회사", role:"최고관리자", team:"사장", needsSetup:true};
+      const user = {uid:adminId, id:id.trim(), name:id.trim(), companyId, companyName:"", role:"최고관리자", team:"사장", needsSetup:true};
       try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
       onLogin(user);
     } catch(e) {
@@ -3619,27 +3721,75 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-// ── 앱 내부 뼈대 (로그인 후 메인 화면 라우팅) ───────────────────────────────────────────────
-function AppInner() {
-  const { currentScreen, setCompanySettingsModal, currentUser } = useC();
-  const [setupBanner, setSetupBanner] = useState(!!currentUser?.needsSetup);
+// ── 데모 배너 ────────────────────────────────────────────────────
+function DemoBanner() {
+  const [visible, setVisible] = useState(true);
+  if (!visible) return null;
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none">
+    <div className="fixed top-0 left-0 right-0 z-[1000] flex items-center gap-2 px-4 py-2 bg-amber-400 max-w-sm mx-auto"
+      style={{boxShadow:"0 2px 8px rgba(0,0,0,0.15)"}}>
+      <span className="text-sm font-bold text-amber-900 flex-1">🎭 데모 모드 — 실제 데이터에 영향 없음</span>
+      <button onClick={()=>setVisible(false)} className="text-amber-800 font-bold text-lg leading-none">×</button>
+    </div>
+  );
+}
+
+// ── 앱 내부 뼈대 (로그인 후 메인 화면 라우팅) ───────────────────────────────────────────────
+function SetupCompanyModal() {
+  const { currentUser } = useC();
+  const [companyName, setCompanyName] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSave = async () => {
+    if (!companyName.trim()) return;
+    setLoading(true);
+    try {
+      await updateDoc(doc(db, "companies", currentUser.companyId), { name: companyName.trim() });
+      await updateDoc(doc(db, "admins", currentUser.uid), { companyName: companyName.trim() });
+      try {
+        const saved = JSON.parse(localStorage.getItem("loginUser") || "{}");
+        localStorage.setItem("loginUser", JSON.stringify({ ...saved, companyName: companyName.trim(), needsSetup: false }));
+      } catch {}
+      window.location.reload();
+    } catch(e) {
+      alert("오류: " + e.message);
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[999] flex items-center justify-center px-6">
+      <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl">
+        <div className="text-4xl text-center mb-3">🏢</div>
+        <h2 className="text-xl font-extrabold text-gray-900 text-center mb-1">회사명을 입력해주세요</h2>
+        <p className="text-sm text-gray-400 text-center mb-6">앱 전체에 표시되는 회사 이름입니다</p>
+        <input
+          value={companyName}
+          onChange={e => setCompanyName(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && handleSave()}
+          placeholder="예) 크린드림 청소"
+          autoFocus
+          className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm font-bold outline-none focus:border-blue-500 mb-4"
+        />
+        <button
+          onClick={handleSave}
+          disabled={!companyName.trim() || loading}
+          className="w-full py-4 rounded-xl text-white font-bold text-sm transition-all"
+          style={{ background: companyName.trim() ? "linear-gradient(135deg,#1a56db,#2563eb)" : "#e5e7eb" }}>
+          {loading ? "저장 중..." : "시작하기"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AppInner() {
+  const { currentScreen, currentUser, isDemo } = useC();
+  const needsSetup = !isDemo && !currentUser?.companyName;
+  return (
+    <div className={`h-screen flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none${isDemo?" pt-9":""}`}>
       <style>{ANIM_CSS}</style>
       <TopHeader/>
-      {/* 첫 가입 후 회사 설정 안내 배너 */}
-      {setupBanner && (
-        <div className="bg-blue-600 px-4 py-2.5 flex items-center gap-2 shrink-0">
-          <span className="text-sm text-white flex-1">🏢 회사명·로고를 설정해보세요!</span>
-          <button onClick={()=>{ setCompanySettingsModal(true); setSetupBanner(false); }}
-            className="text-xs font-bold text-blue-100 bg-white/20 px-3 py-1 rounded-full">
-            설정하기
-          </button>
-          <button onClick={()=>setSetupBanner(false)} className="text-white/70 hover:text-white ml-1">
-            <X size={16}/>
-          </button>
-        </div>
-      )}
+      {needsSetup && <SetupCompanyModal />}
       {currentScreen === "calendar" && (
         <>
           <CalendarView/>
@@ -3675,6 +3825,18 @@ function FieldReportGate() {
 }
 
 export default function App() {
+  // 데모 모드 — #demo 또는 ?demo=true
+  const isDemo = window.location.hash === "#demo" ||
+    new URLSearchParams(window.location.search).get("demo") === "true";
+  if (isDemo) {
+    return (
+      <DemoProvider>
+        <DemoBanner/>
+        <AppInner/>
+      </DemoProvider>
+    );
+  }
+
   const [authState, setAuthState] = useState("loading"); // "loading" | "login" | "app"
   const [loginUser, setLoginUser] = useState(null);
 
@@ -5187,6 +5349,12 @@ function CompanySettingsModal() {
     setLoading(true);
     try {
       await updateDoc(doc(db, "companies", currentUser.companyId), { name: companyName, logoUrl });
+      // admins 문서의 companyName도 동기화 (로그인 후 localStorage에 반영되도록)
+      await updateDoc(doc(db, "admins", currentUser.uid), { companyName: companyName });
+      try {
+        const saved = JSON.parse(localStorage.getItem("loginUser") || "{}");
+        localStorage.setItem("loginUser", JSON.stringify({ ...saved, companyName, companyLogoUrl: logoUrl }));
+      } catch {}
       alert("저장됐습니다. 새로고침 시 적용됩니다."); window.location.reload();
     } catch(e) { alert("오류: " + e.message); } finally { setLoading(false); }
   };
