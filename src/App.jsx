@@ -18,8 +18,9 @@ import {
   CheckSquare, FileText, Camera, Download
 } from "lucide-react";
 
-import { db, functions } from "./firebase";
+import { db, functions, storage } from "./firebase";
 import { collection, doc, setDoc, getDoc, getDocs, updateDoc, onSnapshot, query, where, orderBy, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
 
 // ── 캘린더 목록 ───────────────────────────────────────────────
@@ -381,8 +382,9 @@ function Provider({ children, loginUser, onLogout }) {
   }, [loginUser, companyRef]);
 
   const addEvent = useCallback(ev => {
-    const evRef = doc(collection(companyRef, "events"));
-    setDoc(evRef, { ...ev });
+    const { _id, ...evData } = ev;
+    const evRef = _id ? doc(companyRef, "events", _id) : doc(collection(companyRef, "events"));
+    setDoc(evRef, evData);
     addLog("등록", `'${ev.title}' 일정을 등록했습니다.`);
   }, [addLog, companyRef]);
   
@@ -860,11 +862,32 @@ function ScheduleList({ selDate, compact=false }) {
                   {/* 컬러 바 */}
                   <div className="w-[3px] rounded-full shrink-0 mr-4"
                     style={{background:c.color, minHeight:"44px"}}/>
-                  {/* 제목 + 장소 */}
-                  <div className="flex-1 flex flex-col justify-center">
-                    <p className="text-sm font-semibold text-gray-900 leading-snug">{ev.title}</p>
+                  {/* 제목 + 장소 + 썸네일 */}
+                  <div className="flex-1 flex flex-col justify-center min-w-0">
+                    <div className="flex items-start justify-between gap-1">
+                      <p className="text-sm font-semibold text-gray-900 leading-snug">{ev.title}</p>
+                      {(ev.photos||[]).length > 0 && (
+                        <span className="text-xs text-gray-400 shrink-0 flex items-center gap-0.5">
+                          📎{(ev.photos||[]).length}
+                        </span>
+                      )}
+                    </div>
                     {ev.place&&(
                       <p className="text-xs text-gray-400 mt-0.5">{ev.place}</p>
+                    )}
+                    {(ev.photos||[]).length > 0 && (
+                      <div className="flex gap-1.5 mt-2">
+                        {(ev.photos||[]).slice(0,4).map((p,i)=>(
+                          <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden bg-gray-100 shrink-0">
+                            <img src={p.url} alt="" className="w-full h-full object-cover"/>
+                            {i===3 && (ev.photos||[]).length > 4 && (
+                              <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                <span className="text-white text-xs font-bold">+{(ev.photos||[]).length-4}</span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1396,6 +1419,23 @@ function DetailSheet() {
               </div>
             </div>
           )}
+          {/* 첨부사진 */}
+          {(detEv.photos||[]).length > 0 && (
+            <div className="px-5 py-5 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[15px] font-semibold text-gray-800">📎 첨부 파일 {(detEv.photos||[]).length}</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {(detEv.photos||[]).map((p,i)=>(
+                  <a key={i} href={p.url} target="_blank" rel="noopener noreferrer"
+                    className="w-[calc(25%-6px)] aspect-square rounded-xl overflow-hidden bg-gray-100 block">
+                    <img src={p.url} alt="" className="w-full h-full object-cover"/>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* 팀장 이상만 보이는 현장 완료 보고 버튼 */}
           {(currentUser.role === "팀장" || currentUser.role === "최고관리자") && (
             <div className="px-4 py-4 border-t border-gray-100 mt-2">
@@ -1780,7 +1820,7 @@ function SideDrawer() {
 }
 
 // ── 일정 추가 모달 ────────────────────────────────────────────────
-const blank=date=>({title:"",description:"",contact:"",team:"",start:date||fmt(new Date()),end:date||fmt(new Date()),allDay:false,startTime:"09:00",endTime:"10:00",place:"",url:"",calId:"",repeat:"none",repeatUntil:""});
+const blank=date=>({title:"",description:"",contact:"",team:"",start:date||fmt(new Date()),end:date||fmt(new Date()),allDay:false,startTime:"09:00",endTime:"10:00",place:"",url:"",calId:"",repeat:"none",repeatUntil:"",photos:[]});
 
 // ── 드럼롤 휠 피커 ────────────────────────────────────────────────
 function WheelPicker({ items, value, onChange, renderItem }) {
@@ -2061,7 +2101,7 @@ function RepeatUntilPicker({ form, set }) {
 }
 
 function EventModal() {
-  const { modal, closeModal, addEvent, updateEvent, deleteEvent, events, cals, titleRule, typeKeywords } = useC();
+  const { modal, closeModal, addEvent, updateEvent, deleteEvent, events, cals, titleRule, typeKeywords, companyId } = useC();
   const { open, date, editId } = modal;
   const editEv=editId?events.find(e=>e.id===editId):null;
   const [form,setForm]=useState(blank(date));
@@ -2105,7 +2145,35 @@ function EventModal() {
     if(!form.allDay&&form.startTime>=form.endTime) e.time="종료 시간은 시작 시간 이후여야 합니다.";
     setErrs(e); return !Object.keys(e).length;
   };
-  const submit=()=>{if(!validate())return;editId?updateEvent({...form,id:editId}):addEvent(form);closeModal();};
+  const [uploading, setUploading] = useState(false);
+  const submit = async () => {
+    if (!validate()) return;
+    setUploading(true);
+    try {
+      // base64(새 사진)는 Storage에 업로드, URL(기존)은 그대로 유지
+      const evId = editId || doc(collection(db, "companies", companyId, "events")).id;
+      const uploadedPhotos = await Promise.all((form.photos||[]).map(async (p) => {
+        if (p.url) return p; // 이미 업로드된 사진
+        const blob = await (await fetch(p.data)).blob();
+        const path = `companies/${companyId}/events/${evId}/${Date.now()}_${p.name}`;
+        const sRef = storageRef(storage, path);
+        await uploadBytes(sRef, blob);
+        const url = await getDownloadURL(sRef);
+        return { name: p.name, url, path };
+      }));
+      const finalForm = { ...form, photos: uploadedPhotos };
+      if (editId) {
+        updateEvent({ ...finalForm, id: editId });
+      } else {
+        addEvent({ ...finalForm, _id: evId });
+      }
+      closeModal();
+    } catch(e) {
+      alert("사진 업로드 중 오류: " + e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
   if(!open) return null;
 
   return (
@@ -2115,7 +2183,7 @@ function EventModal() {
         opacity:   anim ? 1 : 0,
         transition: "transform 0.35s cubic-bezier(0.32,0.72,0,1), opacity 0.35s ease",
       }}
-      className="absolute inset-0 z-50 bg-white flex flex-col">
+      className="absolute inset-0 z-50 bg-white flex flex-col overflow-hidden">
       {/* ═══ STEP 1: 입력 방법 선택 단계 ═══ */}
       {step === "paste" ? (
         <>
@@ -2154,13 +2222,12 @@ function EventModal() {
           </div>
 
           {/* 입력 영역 */}
-          <div className="flex-1 overflow-y-auto px-4 pt-4 pb-20">
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-4">
             {inputMode === "memo" && (
               <>
                 <p className="text-xs text-gray-400 mb-3">카카오톡 문자나 메모를 붙여넣으면 날짜·장소·연락처를 자동으로 정리해드려요.</p>
                 <textarea
                   ref={tRef}
-                  autoFocus
                   value={pasteText}
                   onChange={e=>setPasteText(e.target.value)}
                   placeholder={"여기에 내용을 붙여넣으세요...\n\n예)\n6월 15일 오전\n서울시 동대문구 망우로1길27\n이효림 010-2192-9533\n비밀번호 1469*"}
@@ -2172,7 +2239,6 @@ function EventModal() {
               <>
                 <p className="text-xs text-gray-400 mb-3">고객과 나눈 카카오톡 상담 대화를 통째로 붙여넣으면 AI가 예약 정보를 뽑아드려요.</p>
                 <textarea
-                  autoFocus
                   value={pasteText}
                   onChange={e=>setPasteText(e.target.value)}
                   placeholder={"[고객]\n안녕하세요! 청소 견적 문의드려요.\n\n[사장님]\n안녕하세요! 언제 원하세요?"}
@@ -2214,8 +2280,8 @@ function EventModal() {
             )}
           </div>
 
-          {/* 하단 버튼 — 플로팅 */}
-          <div className="fixed bottom-0 left-0 right-0 px-4 py-3 bg-white border-t border-gray-100 z-50" style={{maxWidth:430,margin:"0 auto"}}>
+          {/* 하단 버튼 — 모달 내부 고정 */}
+          <div className="shrink-0 px-4 py-3 bg-white border-t border-gray-100">
             <button
               disabled={aiLoading}
               onClick={async ()=>{
@@ -2291,7 +2357,9 @@ function EventModal() {
             {editId ? <X size={22} className="text-gray-600"/> : <ChevronLeft size={22} className="text-gray-600"/>}
           </button>
           <h2 className="font-bold text-base">{editId?"일정 수정":"일정 추가"}</h2>
-          <button onClick={submit} className="text-blue-500 font-bold text-base">완료</button>
+          <button onClick={submit} disabled={uploading} className="text-blue-500 font-bold text-base disabled:opacity-40">
+            {uploading ? "저장 중..." : "완료"}
+          </button>
         </div>
         {/* 담당팀 드롭다운 트리거 */}
         <div className="relative pb-2">
@@ -2413,6 +2481,46 @@ function EventModal() {
               <span className="text-xs text-gray-500 shrink-0">종료일</span>
               <RepeatUntilPicker form={form} set={set}/>
             </div>
+          )}
+        </div>
+
+        {/* 첨부사진 */}
+        <div className="px-4 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="text-gray-400 shrink-0 text-base">📎</span>
+            <span className="text-sm text-gray-700">첨부사진</span>
+            <label className="ml-auto text-xs text-blue-500 font-bold cursor-pointer">
+              + 추가
+              <input type="file" accept="image/*" multiple className="hidden"
+                onChange={e => {
+                  const files = Array.from(e.target.files);
+                  Promise.all(files.map(file => new Promise(resolve => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve({ name: file.name, data: reader.result });
+                    reader.readAsDataURL(file);
+                  }))).then(newPhotos => {
+                    set("photos", [...(form.photos||[]), ...newPhotos]);
+                  });
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+          {(form.photos||[]).length > 0 && (
+            <div className="flex flex-wrap gap-2 pl-7">
+              {(form.photos||[]).map((p, i) => (
+                <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200">
+                  <img src={p.data} alt={p.name} className="w-full h-full object-cover"/>
+                  <button onClick={() => set("photos", form.photos.filter((_,j)=>j!==i))}
+                    className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
+                    <X size={10} className="text-white"/>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {(form.photos||[]).length === 0 && (
+            <p className="text-xs text-gray-300 pl-7">사진을 첨부하세요</p>
           )}
         </div>
 
