@@ -37,7 +37,7 @@ const DEFAULT_CALS = [
 const CALS = [...DEFAULT_CALS];
 
 // ── 직원 관리 ───────────────────────────────────────────────
-const INIT_TEAMS = ["사장", "관리팀", "영업팀", "입주청소팀", "정기청소팀", "에어컨청소팀"];
+const INIT_TEAMS = ["사장", "관리팀", "영업팀", "입주청소팀"];
 const ROLES = ["최고관리자", "팀장", "팀원"];
 const INIT_USERS = [];
 
