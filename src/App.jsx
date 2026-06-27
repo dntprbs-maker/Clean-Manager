@@ -702,10 +702,10 @@ function DotCell({ ds, isCm, dots, onDate, selDate }) {
   const d=pd(ds), dow=d.getDay();
   const isHol=!!HOLIDAYS[ds], isSun=dow===0, isSat=dow===6;
 
-  let nc = !isCm ? "text-gray-300"
-         : (isSun||isHol) ? "text-red-500"
-         : isSat ? "text-blue-500"
-         : "text-gray-900";
+  let nc = !isCm ? "#d1d5db"
+         : (isSun||isHol) ? "#ef4444"
+         : isSat ? "#3b82f6"
+         : "#111827";
 
   return (
     <button onClick={()=>onDate(ds)}
