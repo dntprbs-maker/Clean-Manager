@@ -4,7 +4,7 @@
  */
 import { useState, useEffect, useCallback } from "react";
 import {
-  collection, getDocs, doc, deleteDoc, updateDoc, addDoc
+  collection, getDocs, doc, deleteDoc, updateDoc, addDoc, setDoc
 } from "firebase/firestore";
 import { db } from "./firebase";
 import * as XLSX from "xlsx";
@@ -25,12 +25,14 @@ function displayVal(v) {
 
 // ── 탭 정의 ───────────────────────────────────────────────────
 const TABS = [
-  { id: "events",    label: "📅 일정",      group: "test" },
-  { id: "notices",   label: "📢 공지사항",  group: "test" },
-  { id: "logs",      label: "📋 변경로그",  group: "test" },
-  { id: "companies", label: "🏢 회사목록",  group: "ops"  },
-  { id: "staffs",    label: "👤 직원목록",  group: "ops"  },
-  { id: "admins",    label: "🔑 관리자목록",group: "ops"  },
+  { id: "events",    label: "📅 일정",        group: "test" },
+  { id: "notices",   label: "📢 공지사항",    group: "test" },
+  { id: "logs",      label: "📋 변경로그",    group: "test" },
+  { id: "companies", label: "🏢 회사목록",    group: "ops"  },
+  { id: "staffs",    label: "👤 직원목록",    group: "ops"  },
+  { id: "admins",    label: "🔑 관리자목록",  group: "ops"  },
+  { id: "deleted",   label: "🗑️ 삭제목록",    group: "ops"  },
+  { id: "dupphone",  label: "📱 중복전화번호", group: "ops"  },
 ];
 
 // ── 탭별 숨길 컬럼 & 컬럼 순서 설정 ──────────────────────────
@@ -60,6 +62,14 @@ const TAB_COL_CONFIG = {
   logs: {
     hidden: [],
     order:  ["_company", "action", "user", "detail", "at"],
+  },
+  deleted: {
+    hidden: ["companyId", "status"],
+    order:  ["_type", "name", "_companyId", "_company", "deletedBy", "deletedAt", "createdAt"],
+  },
+  dupphone: {
+    hidden: [],
+    order:  ["phone", "이름1", "회사1", "등록일1", "이름2", "회사2", "등록일2", "이름3", "회사3", "등록일3"],
   },
 };
 
@@ -92,23 +102,64 @@ async function loadData(tabId) {
   });
 
   if (tabId === "companies") {
-    compSnap.forEach(d => rows.push({ _id: d.id, _path: `companies/${d.id}`, _companyId: d.id, ...d.data() }));
+    compSnap.forEach(d => { if (d.data().status !== "deleted") rows.push({ _id: d.id, _path: `companies/${d.id}`, _companyId: d.id, ...d.data() }); });
+
+  } else if (tabId === "deleted") {
+    // 삭제된 companies
+    compSnap.forEach(d => { if (d.data().status === "deleted") rows.push({ _id: d.id, _path: `companies/${d.id}`, _companyId: d.id, _type: "회사", ...d.data() }); });
+    // 삭제된 admins — company 연동 삭제는 제외 (회사 삭제 시 함께 삭제된 것)
+    const adminSnap2 = await getDocs(collection(db, "admins"));
+    adminSnap2.forEach(d => {
+      const data = d.data();
+      if (data.status === "deleted" && data.deletedBy !== "company")
+        rows.push({ _id: d.id, _path: `admins/${d.id}`, _companyId: data.companyId, _company: compMap[data.companyId] || data.companyId, _type: "관리자", ...data });
+    });
+    // 삭제된 staffs — company 연동 삭제는 제외, admin/superadmin이 삭제한 것만 표시
+    const staffSnap2 = await getDocs(collection(db, "staffs"));
+    staffSnap2.forEach(d => {
+      const data = d.data();
+      if (data.status === "deleted" && data.deletedBy !== "company")
+        rows.push({ _id: d.id, _path: `staffs/${d.id}`, _companyId: data.companyId, _company: compMap[data.companyId] || data.companyId, _type: "직원", ...data });
+    });
 
   } else if (tabId === "staffs") {
     const snap = await getDocs(collection(db, "staffs"));
-    snap.forEach(d => rows.push({ 
-      _id: d.id, _path: `staffs/${d.id}`, 
-      _companyId: d.data().companyId, _company: compMap[d.data().companyId] || d.data().companyId, 
-      ...d.data() 
-    }));
+    snap.forEach(d => { if (d.data().status !== "deleted") rows.push({
+      _id: d.id, _path: `staffs/${d.id}`,
+      _companyId: d.data().companyId, _company: compMap[d.data().companyId] || d.data().companyId,
+      ...d.data()
+    }); });
 
   } else if (tabId === "admins") {
     const snap = await getDocs(collection(db, "admins"));
-    snap.forEach(d => rows.push({ 
-      _id: d.id, _path: `admins/${d.id}`, 
-      _companyId: d.data().companyId, _company: compMap[d.data().companyId] || d.data().companyId, 
-      ...d.data() 
-    }));
+    snap.forEach(d => { if (d.data().status !== "deleted") rows.push({
+      _id: d.id, _path: `admins/${d.id}`,
+      _companyId: d.data().companyId, _company: compMap[d.data().companyId] || d.data().companyId,
+      ...d.data()
+    }); });
+
+  } else if (tabId === "dupphone") {
+    // 전화번호 기준으로 여러 회사에 등록된 직원 목록
+    const snap = await getDocs(collection(db, "staffs"));
+    const phoneMap = {};
+    snap.forEach(d => {
+      const data = d.data();
+      if (data.status === "deleted") return;
+      const phone = data.phone || "";
+      if (!phone) return;
+      if (!phoneMap[phone]) phoneMap[phone] = [];
+      phoneMap[phone].push({ ...data, _staffId: d.id, _company: compMap[data.companyId] || data.companyId });
+    });
+    Object.entries(phoneMap).forEach(([phone, staffs]) => {
+      if (staffs.length < 2) return;
+      const row = { _id: phone, _path: "", phone };
+      staffs.forEach((s, i) => {
+        row[`회사${i+1}`] = s._company;
+        row[`등록일${i+1}`] = s.createdAt || "";
+        row[`이름${i+1}`] = s.name || "";
+      });
+      rows.push(row);
+    });
 
   } else if (tabId === "events") {
     for (const compDoc of compSnap.docs) {
@@ -219,28 +270,130 @@ export default function SuperAdmin() {
     alert("✅ 비밀번호가 성공적으로 변경되었습니다!");
   }
 
-  // ── 삭제 ──
+  // ── 삭제 (삭제목록에서 삭제 시 영구 삭제, 일반 탭에서는 소프트 삭제) ──
   async function handleDelete(row) {
     try {
+      const isHardDelete = activeTab === "deleted";
       const parts = row._path.split("/");
-      if (parts.length === 2) await deleteDoc(doc(db, parts[0], parts[1]));
-      else if (parts.length === 4) await deleteDoc(doc(db, parts[0], parts[1], parts[2], parts[3]));
-      else if (parts.length === 6) await deleteDoc(doc(db, parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]));
+
+      if (isHardDelete) {
+        // 영구 삭제
+        if (parts.length === 2) {
+          await deleteDoc(doc(db, parts[0], parts[1]));
+          // admins 영구 삭제 시 연관 admins/staffs도 삭제
+          if (parts[0] === "companies") {
+            const companyId = parts[1];
+            const [adminSnap, staffSnap] = await Promise.all([
+              getDocs(collection(db, "admins")),
+              getDocs(collection(db, "staffs")),
+            ]);
+            await Promise.all([
+              ...adminSnap.docs.filter(d => d.data().companyId === companyId).map(d => deleteDoc(doc(db, "admins", d.id))),
+              ...staffSnap.docs.filter(d => d.data().companyId === companyId).map(d => deleteDoc(doc(db, "staffs", d.id))),
+            ]);
+          }
+        } else if (parts.length === 4) {
+          await deleteDoc(doc(db, parts[0], parts[1], parts[2], parts[3]));
+        }
+      } else {
+        // 소프트 삭제
+        const deletedAt = new Date().toISOString();
+        if (parts.length === 2) {
+          if (parts[0] === "companies") {
+            const companyId = parts[1];
+            // 1. 회사 소프트 삭제
+            await updateDoc(doc(db, "companies", companyId), { status: "deleted", deletedAt, deletedBy: "superadmin" });
+            // 2. admins 조회 및 삭제
+            const adminSnap = await getDocs(collection(db, "admins"));
+            const targetAdmins = adminSnap.docs.filter(d => d.data().companyId === companyId && d.data().status !== "deleted");
+            for (const d of targetAdmins) {
+              await updateDoc(doc(db, "admins", d.id), { status: "deleted", deletedAt, deletedBy: "company" });
+            }
+            // 3. staffs 조회 및 삭제
+            const staffSnap = await getDocs(collection(db, "staffs"));
+            const targetStaffs = staffSnap.docs.filter(d => d.data().companyId === companyId && d.data().status !== "deleted");
+            for (const d of targetStaffs) {
+              await updateDoc(doc(db, "staffs", d.id), { status: "deleted", deletedAt, deletedBy: "company" });
+            }
+            // 4. companies/{id}/users 서브컬렉션
+            const usersSnap = await getDocs(collection(db, "companies", companyId, "users"));
+            const targetUsers = usersSnap.docs.filter(d => d.data().status !== "deleted");
+            for (const d of targetUsers) {
+              await updateDoc(doc(db, "companies", companyId, "users", d.id), { status: "deleted", deletedAt, deletedBy: "company" });
+            }
+          } else {
+            // admins/staffs 개별 삭제 → deletedBy: "superadmin"
+            await updateDoc(doc(db, parts[0], parts[1]), { status: "deleted", deletedAt, deletedBy: "superadmin" });
+          }
+        } else if (parts.length === 4) {
+          await updateDoc(doc(db, parts[0], parts[1], parts[2], parts[3]), { status: "deleted", deletedAt, deletedBy: "superadmin" });
+        } else if (parts.length === 6) {
+          await updateDoc(doc(db, parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]), { status: "deleted", deletedAt, deletedBy: "superadmin" });
+        }
+      }
+
       setRows(prev => prev.filter(r => r._id !== row._id));
       setDeleteTarget(null);
     } catch (e) { alert("삭제 실패: " + e.message); }
   }
 
+  // ── 복구 ──
+  async function handleRestore(row) {
+    try {
+      const parts = row._path.split("/");
+      const restoreField = { status: "active", deletedAt: null, deletedBy: null };
+      if (parts.length === 2) {
+        await updateDoc(doc(db, parts[0], parts[1]), restoreField);
+        if (parts[0] === "companies") {
+          const companyId = parts[1];
+          const [adminSnap, staffSnap] = await Promise.all([
+            getDocs(collection(db, "admins")),
+            getDocs(collection(db, "staffs")),
+          ]);
+          // admins: deletedBy:"company" 인 것만 복원 + 아이디 충돌 체크
+          const myAdmins = adminSnap.docs.filter(d => d.data().companyId === companyId && d.data().status === "deleted" && d.data().deletedBy === "company");
+          for (const d of myAdmins) {
+            const adminId = d.data().id;
+            const conflict = adminSnap.docs.find(a => a.data().id === adminId && a.data().status !== "deleted" && a.id !== d.id);
+            if (conflict) {
+              alert(`⚠️ 아이디 충돌: "${adminId}"가 이미 다른 계정에서 사용 중입니다.\n해당 관리자는 복구되지 않았습니다. 관리자목록에서 아이디 변경 후 복구해주세요.`);
+            } else {
+              await updateDoc(doc(db, "admins", d.id), restoreField);
+            }
+          }
+          // staffs: deletedBy:"company" 인 것만 복원 (사장/슈퍼가 삭제한 직원은 제외)
+          const myStaffs = staffSnap.docs.filter(d => d.data().companyId === companyId && d.data().status === "deleted" && d.data().deletedBy === "company");
+          await Promise.all(myStaffs.map(d => updateDoc(doc(db, "staffs", d.id), restoreField)));
+          // companies/{id}/users 서브컬렉션도 deletedBy:"company" 인 것만 복원
+          const usersSnap = await getDocs(collection(db, "companies", companyId, "users"));
+          const myUsers = usersSnap.docs.filter(d => d.data().status === "deleted" && d.data().deletedBy === "company");
+          await Promise.all(myUsers.map(d => updateDoc(doc(db, "companies", companyId, "users", d.id), restoreField)));
+        }
+      } else if (parts.length === 4) {
+        // 개별 복원 (슈퍼어드민에서 직접)
+        await updateDoc(doc(db, parts[0], parts[1], parts[2], parts[3]), restoreField);
+      }
+      setRows(prev => prev.filter(r => r._id !== row._id));
+    } catch (e) { alert("복구 실패: " + e.message); }
+  }
+
   // ── 다중 삭제 ──
   async function handleBulkDelete() {
     if (!checkedIds.size) return;
-    if (!window.confirm(`선택한 ${checkedIds.size}개를 정말 삭제하시겠습니까?\n삭제된 데이터는 복구할 수 없습니다.`)) return;
+    const isHardDelete = activeTab === "deleted";
+    if (!window.confirm(`선택한 ${checkedIds.size}개를 ${isHardDelete ? "영구 삭제" : "삭제"}하시겠습니까?${isHardDelete ? "\n⚠️ 복구할 수 없습니다!" : ""}`)) return;
+    const deletedAt = new Date().toISOString();
     const targets = filtered.filter(r => checkedIds.has(r._id));
     await Promise.all(targets.map(row => {
       const parts = row._path.split("/");
-      if (parts.length === 2) return deleteDoc(doc(db, parts[0], parts[1]));
-      if (parts.length === 4) return deleteDoc(doc(db, parts[0], parts[1], parts[2], parts[3]));
-      if (parts.length === 6) return deleteDoc(doc(db, parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]));
+      if (isHardDelete) {
+        if (parts.length === 2) return deleteDoc(doc(db, parts[0], parts[1]));
+        if (parts.length === 4) return deleteDoc(doc(db, parts[0], parts[1], parts[2], parts[3]));
+      } else {
+        if (parts.length === 2) return updateDoc(doc(db, parts[0], parts[1]), { status: "deleted", deletedAt });
+        if (parts.length === 4) return updateDoc(doc(db, parts[0], parts[1], parts[2], parts[3]), { status: "deleted", deletedAt });
+        if (parts.length === 6) return updateDoc(doc(db, parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]), { status: "deleted", deletedAt });
+      }
     }));
     setRows(prev => prev.filter(r => !checkedIds.has(r._id)));
     setCheckedIds(new Set());
@@ -560,10 +713,13 @@ export default function SuperAdmin() {
               <tbody>
                 {filtered.map((row, i) => {
                   const isChecked = checkedIds.has(row._id);
+                  const isDeletedTab = activeTab === "deleted";
+                  const isReadOnly = activeTab === "deleted" || activeTab === "dupphone";
                   return (
                     <tr key={row._id}
-                      onClick={() => startEdit(row)}
-                      className={`border-b border-gray-800 cursor-pointer transition-colors
+                      onClick={() => !isReadOnly && startEdit(row)}
+                      className={`border-b border-gray-800 transition-colors
+                        ${isDeletedTab ? "" : "cursor-pointer"}
                         ${isChecked ? "bg-blue-950/60 hover:bg-blue-900/60" : i % 2 === 0 ? "hover:bg-gray-800/70" : "bg-gray-900/30 hover:bg-gray-800/70"}`}>
                       <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                         <input type="checkbox" checked={isChecked}
@@ -581,6 +737,14 @@ export default function SuperAdmin() {
                           </span>
                         </td>
                       ))}
+                      {isDeletedTab && (
+                        <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+                          <button onClick={() => handleRestore(row)}
+                            className="text-xs text-green-400 border border-green-800 hover:border-green-500 px-3 py-1 rounded-lg font-bold transition-colors">
+                            ↩ 복구
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -688,12 +852,18 @@ export default function SuperAdmin() {
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
           <div className="bg-gray-900 border border-red-900 rounded-2xl w-full max-w-sm shadow-2xl p-6 flex flex-col gap-4">
             <div className="text-center">
-              <div className="text-4xl mb-2">🗑️</div>
-              <h2 className="font-bold text-white text-lg">정말 삭제하시겠습니까?</h2>
+              <div className="text-4xl mb-2">{activeTab === "deleted" ? "💥" : "🗑️"}</div>
+              <h2 className="font-bold text-white text-lg">
+                {activeTab === "deleted" ? "영구 삭제하시겠습니까?" : "정말 삭제하시겠습니까?"}
+              </h2>
               <p className="text-xs text-gray-400 mt-3 break-all font-mono bg-gray-800 rounded-lg p-2">
                 {deleteTarget._path}
               </p>
-              <p className="text-xs text-red-400 mt-2">⚠️ 삭제된 데이터는 복구할 수 없습니다!</p>
+              <p className="text-xs text-red-400 mt-2">
+                {activeTab === "deleted"
+                  ? "⚠️ DB에서 완전히 제거되며 절대 복구할 수 없습니다!"
+                  : "⚠️ 삭제 후 삭제목록에서 복구할 수 있습니다."}
+              </p>
             </div>
             <div className="flex gap-2">
               <button onClick={() => setDeleteTarget(null)}

@@ -25,11 +25,9 @@ import { httpsCallable } from "firebase/functions";
 // ── 캘린더 목록 ───────────────────────────────────────────────
 // 신규 업체 가입 시 기본으로 깔리는 캘린더(=담당팀별 색상). 가입 시 Firestore에도 시드된다.
 const DEFAULT_CALS = [
-  { id: "clean0", label: "관리팀",      name: "관리팀",      color: "#1a56db", checked: true, isField: false },
-  { id: "clean1", label: "영업팀",      name: "영업팀",      color: "#16a34a", checked: true, isField: false },
-  { id: "clean2", label: "입주청소팀",  name: "입주청소팀",  color: "#ea580c", checked: true, isField: true  },
-  { id: "clean3", label: "정기청소팀",  name: "정기청소팀",  color: "#7c3aed", checked: true, isField: true  },
-  { id: "clean4", label: "에어컨청소팀", name: "에어컨청소팀", color: "#0891b2", checked: true, isField: true  },
+  { id: "clean0", label: "관리팀",     name: "관리팀",     color: "#1a56db", checked: true, isField: false },
+  { id: "clean1", label: "영업팀",     name: "영업팀",     color: "#16a34a", checked: true, isField: false },
+  { id: "clean2", label: "입주청소팀", name: "입주청소팀", color: "#ea580c", checked: true, isField: true  },
 ];
 // 모듈 전역에서 calById/색상 조회에 쓰는 "현재 캘린더" 미러.
 // Provider가 Firestore cals 스냅샷을 받을 때마다 내용물을 교체(splice)해서 항상 최신값을 유지한다.
@@ -293,7 +291,7 @@ function Provider({ children, loginUser, onLogout }) {
       setEvents(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     });
     const unsubUsers = onSnapshot(collection(companyRef, "users"), snap => {
-      if(!snap.empty) setUsers(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      if(!snap.empty) setUsers(snap.docs.filter(d => d.data().status !== "deleted").map(d => ({ ...d.data(), id: d.id })));
     });
     // 팀 목록 + 링크 카테고리는 단일 설정 문서(meta/config)에 배열로 저장 (순서 보존)
     const unsubConfig = onSnapshot(doc(companyRef, "meta", "config"), snap => {
@@ -2438,11 +2436,30 @@ function EventModal() {
 
 // ── 상단 헤더 ─────────────────────────────────────────────────────
 function TopHeader() {
-  const { current, setCurrent, setDrawer, sheetMode, setSheetMode, selDate, setSelDate, setSearchOpen, currentUser } = useC();
+  const { current, setCurrent, setDrawer, sheetMode, setSheetMode, selDate, setSelDate, setSearchOpen, currentUser, onLogout } = useC();
   const y=current.getFullYear(), m=current.getMonth();
   const [picker,setPicker]=useState(false);
+  const [companyPicker,setCompanyPicker]=useState(false);
+  const [multiList,setMultiList]=useState(null);
   const DAYS=["일","월","화","수","목","금","토"];
   const d=pd(selDate), dow=d?.getDay()??0;
+
+  // 다중 소속 여부 확인 (직원만)
+  const checkMulti = async () => {
+    if(currentUser.role !== "팀원" && currentUser.role !== "팀장") return;
+    const phone = currentUser.phone;
+    if(!phone) return;
+    let snap = await getDocs(query(collection(db,"staffs"), where("phone","==",phone)));
+    if(snap.empty) snap = await getDocs(query(collection(db,"staffs"), where("phone","==",fmtPhone(phone))));
+    const active = snap.docs.filter(d=>d.data().status !== "deleted");
+    if(active.length < 2) return;
+    const companies = await Promise.all(active.map(async d=>{
+      const compDoc = await getDoc(doc(db,"companies",d.data().companyId));
+      return { staffDoc:d, companyName:compDoc.exists()?compDoc.data().name:"알 수 없는 회사" };
+    }));
+    setMultiList(companies);
+    setCompanyPicker(true);
+  };
 
   return (
     <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-100 relative">
@@ -2455,12 +2472,46 @@ function TopHeader() {
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white shadow-sm overflow-hidden"
             style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
-            {currentUser?.companyLogoUrl 
+            {currentUser?.companyLogoUrl
               ? <img src={currentUser.companyLogoUrl} alt="Logo" className="w-full h-full object-cover" />
               : (currentUser?.companyName?.charAt(0) || "🏢")}
           </div>
           <span className="font-extrabold text-gray-900 text-lg">{currentUser?.companyName || "로딩중..."}</span>
+          {/* 직원만: 다중 소속 회사 전환 버튼 */}
+          {(currentUser?.role === "팀원" || currentUser?.role === "팀장") && (
+            <button onClick={checkMulti} className="text-xs text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full font-bold">전환</button>
+          )}
         </div>
+        {/* 회사 전환 모달 */}
+        {companyPicker && multiList && (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-6">
+            <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl">
+              <div className="text-3xl text-center mb-2">🔄</div>
+              <h2 className="text-lg font-extrabold text-gray-900 text-center mb-1">회사 전환</h2>
+              <p className="text-sm text-gray-400 text-center mb-5">어느 업체로 전환할까요?</p>
+              <div className="flex flex-col gap-3">
+                {multiList.map(({ staffDoc, companyName }) => (
+                  <button key={staffDoc.id}
+                    onClick={() => {
+                      const data = staffDoc.data();
+                      const user = { ...data, uid: staffDoc.id, companyName };
+                      try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch {}
+                      setCompanyPicker(false);
+                      window.location.reload();
+                    }}
+                    className={`w-full py-4 rounded-2xl font-bold text-sm transition-all ${staffDoc.data().companyId === currentUser.companyId ? "border-2 border-blue-500 text-blue-600 bg-blue-50" : "text-white"}`}
+                    style={staffDoc.data().companyId !== currentUser.companyId ? {background:"linear-gradient(135deg,#1a56db,#2563eb)"} : {}}>
+                    {companyName} {staffDoc.data().companyId === currentUser.companyId ? "✓ 현재" : ""}
+                  </button>
+                ))}
+                <button onClick={() => setCompanyPicker(false)}
+                  className="w-full py-3 rounded-2xl font-bold text-sm text-gray-500 bg-gray-100">
+                  취소
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 중앙 제목 */}
@@ -3419,6 +3470,7 @@ function LoginScreen({ onLogin }) {
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState("");
   const [pendingUser, setPendingUser] = useState(null);
+  const [multiCompanies, setMultiCompanies] = useState(null); // 다중 소속 회사 선택용
   const [hasPw, setHasPw]             = useState(null); // null=미확인, true=비번있음, false=최초
 
   const isPhone = id => id.replace(/-/g,"").startsWith("0");
@@ -3452,20 +3504,33 @@ function LoginScreen({ onLogin }) {
         if(staffSnap.empty){
           staffSnap = await getDocs(query(collection(db,"staffs"), where("phone","==",fmtPhone(phone))));
         }
-        if(staffSnap.empty){ setError("등록되지 않은 전화번호입니다."); setLoading(false); return; }
-        const staffData = staffSnap.docs[0].data();
-        const staffId   = staffSnap.docs[0].id;
-        // 첫 로그인 (비밀번호 없음)
-        if(!staffData.pw) {
-          const compDoc = await getDoc(doc(db,"companies",staffData.companyId));
-          setPendingUser({...staffData, uid:staffId, companyName:compDoc.exists()?compDoc.data().name:"클린메니져"});
+        // status:"deleted" 제외
+        const activeDocs = staffSnap.docs.filter(d => d.data().status !== "deleted");
+        if(activeDocs.length === 0){ setError("등록되지 않은 전화번호입니다."); setLoading(false); return; }
+
+        // 비밀번호 확인 (첫 번째 문서 기준)
+        const firstData = activeDocs[0].data();
+        if(!firstData.pw) {
+          const compDoc = await getDoc(doc(db,"companies",firstData.companyId));
+          setPendingUser({...firstData, uid:activeDocs[0].id, companyName:compDoc.exists()?compDoc.data().name:"클린메니져"});
           setMode("setPw"); setLoading(false); return;
         }
-        // 비밀번호 확인
         if(!pw.trim()){ setError("비밀번호를 입력하세요."); setLoading(false); return; }
-        if(staffData.pw !== pw){ setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
-        const compDoc = await getDoc(doc(db,"companies",staffData.companyId));
-        const user = {...staffData, uid:staffId, companyName:compDoc.exists()?compDoc.data().name:"클린메니져"};
+        if(firstData.pw !== pw){ setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
+
+        // 다중 소속 회사 처리
+        if(activeDocs.length > 1) {
+          const companies = await Promise.all(activeDocs.map(async d => {
+            const compDoc = await getDoc(doc(db,"companies",d.data().companyId));
+            return { staffDoc: d, companyName: compDoc.exists()?compDoc.data().name:"알 수 없는 회사" };
+          }));
+          setMultiCompanies({ companies, pw });
+          setLoading(false); return;
+        }
+
+        // 단일 소속
+        const compDoc = await getDoc(doc(db,"companies",firstData.companyId));
+        const user = {...firstData, uid:activeDocs[0].id, companyName:compDoc.exists()?compDoc.data().name:"클린메니져"};
         try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
         onLogin(user); return;
       } else {
@@ -3474,10 +3539,13 @@ function LoginScreen({ onLogin }) {
         const adminQ = query(collection(db,"admins"), where("id","==",id.trim()));
         const adminSnap = await getDocs(adminQ);
         if(adminSnap.empty){ setError("등록되지 않은 아이디입니다."); setLoading(false); return; }
-        const adminData = adminSnap.docs[0].data();
+        const activeAdmin = adminSnap.docs.find(d => d.data().status !== "deleted");
+        if(!activeAdmin){ setError("탈퇴 또는 삭제된 계정입니다."); setLoading(false); return; }
+        const adminData = activeAdmin.data();
         if(adminData.pw !== pw){ setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
         const compDoc = await getDoc(doc(db,"companies",adminData.companyId));
-        const user = {...adminData, uid:adminSnap.docs[0].id, companyName:compDoc.exists()?compDoc.data().name:"클린메니져", role:"최고관리자"};
+        if(compDoc.exists() && compDoc.data().status === "deleted"){ setError("탈퇴 또는 삭제된 업체입니다."); setLoading(false); return; }
+        const user = {...adminData, uid:activeAdmin.id, companyName:compDoc.exists()?compDoc.data().name:"클린메니져", role:"최고관리자"};
         try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
         onLogin(user); return;
       }
@@ -3514,7 +3582,8 @@ function LoginScreen({ onLogin }) {
     try {
       const adminQ = query(collection(db,"admins"), where("id","==",id.trim()));
       const adminSnap = await getDocs(adminQ);
-      if(!adminSnap.empty){ setError("이미 사용 중인 아이디입니다."); setLoading(false); return; }
+      const activeExists = adminSnap.docs.some(d => d.data().status !== "deleted");
+      if(activeExists){ setError("이미 사용 중인 아이디입니다."); setLoading(false); return; }
       const companyId = "c_" + Math.random().toString(36).slice(2,9);
       const adminId   = "a_" + Math.random().toString(36).slice(2,9);
       // 회사명은 기본값으로 설정 (나중에 회사 설정에서 변경)
@@ -3718,6 +3787,36 @@ function LoginScreen({ onLogin }) {
           </button>
         </p>
       </div>
+      {/* 다중 소속 회사 선택 모달 */}
+      {multiCompanies && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-6">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="text-3xl text-center mb-2">🏢</div>
+            <h2 className="text-lg font-extrabold text-gray-900 text-center mb-1">소속 회사 선택</h2>
+            <p className="text-sm text-gray-400 text-center mb-5">여러 업체에 등록되어 있습니다.<br/>어느 업체로 로그인할까요?</p>
+            <div className="flex flex-col gap-3">
+              {multiCompanies.companies.map(({ staffDoc, companyName }) => (
+                <button key={staffDoc.id}
+                  onClick={async () => {
+                    const data = staffDoc.data();
+                    const user = { ...data, uid: staffDoc.id, companyName };
+                    try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch {}
+                    setMultiCompanies(null);
+                    onLogin(user);
+                  }}
+                  className="w-full py-4 rounded-2xl font-bold text-sm text-white"
+                  style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
+                  {companyName}
+                </button>
+              ))}
+              <button onClick={() => setMultiCompanies(null)}
+                className="w-full py-3 rounded-2xl font-bold text-sm text-gray-500 bg-gray-100">
+                취소
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3900,12 +3999,12 @@ function EmployeeListScreen() {
     });
   };
 
-  // 팀 목록 (팀 없는 직원은 "기타" 그룹, 멤버 없는 팀 숨김)
+  // 팀 목록 (팀 없는 직원은 "기타" 그룹, 멤버 없어도 팀 표시)
   const allTeams = teams.length ? teams.filter(t => t !== "사장") : ["기타"];
   const grouped = allTeams.map(team => ({
     team,
     members: users.filter(u => u.team === team),
-  })).filter(g => g.members.length > 0); // 멤버 없는 팀 제외
+  }));
   const noTeam = users.filter(u => !teams.includes(u.team));
   if (noTeam.length) grouped.push({ team: "기타", members: noTeam });
 
@@ -4042,8 +4141,10 @@ function EmployeeFormModal() {
     if (confirm("정말 이 직원을 삭제하시겠습니까?")) {
       setLoading(true);
       try {
-        await deleteDoc(doc(db, "companies", companyId, "users", empModal.editId));
-        await deleteDoc(doc(db, "staffs", empModal.editId));
+        const deletedAt = new Date().toISOString();
+        // 사장이 삭제한 직원 → deletedBy:"admin" (회사 복원 시 제외)
+        await setDoc(doc(db, "companies", companyId, "users", empModal.editId), { status: "deleted", deletedAt, deletedBy: "admin" }, { merge: true });
+        await setDoc(doc(db, "staffs", empModal.editId), { status: "deleted", deletedAt, deletedBy: "admin" }, { merge: true });
         close();
       } catch(e) {
         alert("삭제 실패");
