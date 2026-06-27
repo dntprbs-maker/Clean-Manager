@@ -419,6 +419,11 @@ function Provider({ children, loginUser, onLogout }) {
     setDoc(doc(companyRef, "cals", updated.id), updated);
   }, [companyRef]);
 
+  const deleteCal = useCallback(calId => {
+    setCals(prev => prev.filter(c => c.id !== calId));
+    deleteDoc(doc(companyRef, "cals", calId));
+  }, [companyRef]);
+
   // UI 상태
   const [modal,setModal]       = useState({open:false,date:null,editId:null});
   const [current,setCurrent]   = useState(() => {
@@ -462,7 +467,7 @@ function Provider({ children, loginUser, onLogout }) {
     <Ctx.Provider value={{
       events,visibleEvents,addEvent,updateEvent,deleteEvent,
       fieldReportEv,setFieldReportEv,
-      cals,toggleCal,updateCal,
+      cals,toggleCal,updateCal,deleteCal,
       modal,openModal,closeModal,
       current,setCurrent,
       selDate,setSelDate,
@@ -632,22 +637,20 @@ function buildLayout(events, wk) {
 // ── 이벤트 텍스트 바 (MODE 0 전용) ───────────────────────────────
 function TextBar({ item, onClick }) {
   const {ev,isS,isE,isMulti}=item;
-  const c=calById(ev.calId);
+  const { cals } = useC();
+  const c = cals.find(c=>c.id===ev.calId) || { color:"#9ca3af" };
   return (
     <div onClick={e=>{e.stopPropagation();onClick(ev);}} title={ev.title}
       style={{
-        backgroundColor: isMulti ? c.color : "#fff",
-        color: isMulti ? "#fff" : c.color,
-        borderLeft: isMulti&&!isS ? "none" : `2.5px solid ${c.color}`,
+        backgroundColor: c.color,
+        color: "#fff",
         borderRadius:`${isS?"3px":"0"} ${isE?"3px":"0"} ${isE?"3px":"0"} ${isS?"3px":"0"}`,
         marginLeft: isMulti&&!isS ? 0 : 1,
         marginRight: isMulti&&!isE ? 0 : 1,
         paddingLeft: isMulti&&!isS ? 2 : 3,
-        boxShadow: isMulti ? "none" : `inset 0 0 0 1px ${c.color}22`,
       }}
-      className="text-[10px] leading-tight py-[2px] pr-0.5 mb-[2px] truncate cursor-pointer select-none font-medium">
-      {isS&&!ev.allDay&&ev.startTime&&<span className="opacity-60 mr-0.5">{ev.startTime.slice(0,5)}</span>}
-      {isS||isMulti ? ev.title : ev.title}
+      className="text-[8px] leading-none py-[1px] pr-0.5 mb-[1px] overflow-hidden whitespace-nowrap cursor-pointer select-none font-medium">
+      {isS ? ev.title : ""}
     </div>
   );
 }
@@ -759,7 +762,8 @@ function useDates(current) {
 
 // ── 시간표 시트 내용 ──────────────────────────────────────────────
 function ScheduleList({ selDate, compact=false }) {
-  const { visibleEvents, setDetEv, setSelDate, setCurrent, setSheetMode, openModal, currentUser } = useC();
+  const { visibleEvents, setDetEv, setSelDate, setCurrent, setSheetMode, openModal, currentUser, cals } = useC();
+  const calByIdLocal = id => cals.find(c=>c.id===id) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af", checked:true };
   const canAdd = currentUser.role !== "팀원";
   const d=pd(selDate), dow=d.getDay();
   const DAYS=["일","월","화","수","목","금","토"];
@@ -818,7 +822,7 @@ function ScheduleList({ selDate, compact=false }) {
       <div className="flex-1 overflow-y-auto pb-16">
         {/* 종일 */}
         {allDayEvts.map(ev=>{
-          const c=calById(ev.calId);
+          const c=calByIdLocal(ev.calId);
           const isMulti=diff(ev.start,ev.end||ev.start)>0;
           return(
             <div key={ev.id}
@@ -844,7 +848,7 @@ function ScheduleList({ selDate, compact=false }) {
         {timeKeys.map(tk=>(
           <div key={tk}>
             {grouped[tk].map((ev)=>{
-              const c=calById(ev.calId);
+              const c=calByIdLocal(ev.calId);
               return(
                 <div key={ev.id} onClick={()=>setDetEv(ev)}
                   className="flex items-stretch px-4 py-3 border-b border-gray-50 cursor-pointer active:bg-gray-50">
@@ -1120,7 +1124,7 @@ function CalendarView() {
     visibleEvents, current, setCurrent,
     selDate, setSelDate,
     sheetMode, setSheetMode,
-    setDetEv,
+    setDetEv, drawer,
   } = useC();
   const weeks  = useDates(current);
   const layouts = useMemo(
@@ -1176,8 +1180,8 @@ function CalendarView() {
     if (sheetMode === 0) setSheetMode(1);
   };
 
-  // ── 그리드용 스와이프
-  const gridSwipe = useSwipe({
+  // ── 그리드용 스와이프 (드로어 열려있으면 빈 객체)
+  const gridSwipeActive = useSwipe({
     onLeft:  goNextMonth,
     onRight: goPrevMonth,
     onUp:    () => setSheetMode(m => m < 2 ? m + 1 : m),
@@ -1185,9 +1189,10 @@ function CalendarView() {
     hThreshold: 30,
     vThreshold: 30,
   });
+  const gridSwipe = drawer ? {} : gridSwipeActive;
 
-  // ── 시간표용 스와이프
-  const listSwipe = useSwipe({
+  // ── 시간표용 스와이프 (드로어 열려있으면 빈 객체)
+  const listSwipeActive = useSwipe({
     onLeft:  goNextDay,
     onRight: goPrevDay,
     onUp:    () => setSheetMode(m => m < 2 ? m + 1 : m),
@@ -1195,6 +1200,7 @@ function CalendarView() {
     hThreshold: 30,
     vThreshold: 30,
   });
+  const listSwipe = drawer ? {} : listSwipeActive;
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -1318,11 +1324,11 @@ function CalendarView() {
 
 // ── 이벤트 상세 Bottom Sheet ──────────────────────────────────────
 function DetailSheet() {
-  const { detEv, setDetEv, deleteEvent, openModal, setFieldReportEv, currentUser } = useC();
+  const { detEv, setDetEv, deleteEvent, openModal, setFieldReportEv, currentUser, cals } = useC();
   const [vis,setVis]=useState(false);
   useEffect(()=>{ if(detEv)setTimeout(()=>setVis(true),10); else setVis(false); },[detEv]);
   if(!detEv) return null;
-  const cal=calById(detEv.calId);
+  const cal = cals.find(c=>c.id===detEv.calId) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af" };
   const close=()=>{ setVis(false); setTimeout(()=>setDetEv(null),280); };
 
   return (
@@ -1587,12 +1593,14 @@ function SideDrawer() {
   const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, onLogout } = useC();
 
   // 드래그 상태
-  const startX   = useRef(null);
-  const startY   = useRef(null);
-  const curX     = useRef(0);        // 현재 드래그 X 오프셋
-  const dragging = useRef(false);
-  const panelRef = useRef(null);
-  const DRAWER_W = 288; // w-72 = 18rem = 288px
+  const startX    = useRef(null);
+  const startY    = useRef(null);
+  const curX      = useRef(0);
+  const dragging  = useRef(false);
+  const panelRef  = useRef(null);
+  const drawerRef = useRef(drawer); // 클로저 문제 해결용
+  const DRAWER_W  = 288;
+  useEffect(() => { drawerRef.current = drawer; }, [drawer]);
 
   // 패널 translateX를 실시간 적용
   const applyX = x => {
@@ -1624,16 +1632,10 @@ function SideDrawer() {
     if (!dragging.current && dy > Math.abs(dx)) return; // 수직 스크롤 우선
     dragging.current = true;
 
-    if (drawer) {
+    if (drawerRef.current) {
       // 열린 상태 → 왼쪽으로 밀어 닫기
-      curX.current = Math.min(0, dx); // dx 음수일 때만
+      curX.current = Math.min(0, dx);
       applyX(curX.current);
-    } else {
-      // 닫힌 상태: 오른쪽 끝에서 시작한 스와이프만 (엣지 20px)
-      if (startX.current <= 20 && dx > 0) {
-        curX.current = -DRAWER_W + dx;
-        applyX(curX.current);
-      }
     }
   };
 
@@ -1641,14 +1643,10 @@ function SideDrawer() {
     if (!dragging.current) { dragging.current = false; return; }
     dragging.current = false;
     const threshold = DRAWER_W * 0.35;
-    if (drawer) {
+    if (drawerRef.current) {
       // 35% 이상 당기면 닫기
       if (curX.current < -threshold) { setDrawer(false); resetPanel(false); }
       else                            { resetPanel(true); }
-    } else {
-      // 35% 이상 밀면 열기
-      if (curX.current > -DRAWER_W + threshold) { setDrawer(true); resetPanel(true); }
-      else                                        { resetPanel(false); }
     }
   };
 
@@ -1666,6 +1664,9 @@ function SideDrawer() {
           pointerEvents: drawer ? "auto" : "none",
         }}
         onClick={() => setDrawer(false)}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
       />
 
       {/* 엣지 스와이프 감지 영역 (드로어 닫혀있을 때 왼쪽 20px) */}
@@ -1687,6 +1688,7 @@ function SideDrawer() {
           width: DRAWER_W,
           transform: `translateX(-${DRAWER_W}px)`,
           willChange: "transform",
+          touchAction: "pan-y",
         }}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
@@ -4356,7 +4358,7 @@ function EmployeeFormModal() {
 
 // ── 팀 관리 모달 ───────────────────────────────────────────────
 function TeamManagementModal() {
-  const { teamModal, setTeamModal, teams, saveTeams, users, companyId, cals, updateCal } = useC();
+  const { teamModal, setTeamModal, teams, saveTeams, users, companyId, cals, updateCal, deleteCal } = useC();
 
   // 팀 열릴 때: isField 없는 기존 cal에 기본값 세팅 (청소 포함 → true, 그 외 → false)
   useEffect(() => {
@@ -4378,6 +4380,10 @@ function TeamManagementModal() {
   };
   const [newTeam, setNewTeam]       = useState("");
   const [newTeamIsField, setNewTeamIsField] = useState(true);
+  const [newTeamColor, setNewTeamColor] = useState("#f59e0b");
+  const [colorPickerIdx, setColorPickerIdx] = useState(null);
+  const [addPopup, setAddPopup]     = useState(false);
+  const TEAM_COLORS = ["#f59e0b","#ec4899","#06b6d4","#84cc16","#8b5cf6","#f97316","#ef4444","#1a56db","#16a34a","#0891b2"];
   const [editIdx, setEditIdx]       = useState(null);
   const [editName, setEditName]     = useState("");
   const [dragIdx, setDragIdx]   = useState(null);
@@ -4398,14 +4404,13 @@ function TeamManagementModal() {
     const name = newTeam.trim();
     if (!name) return;
     if (teams.includes(name)) { alert("이미 존재하는 팀입니다."); return; }
-    saveTeams([...teams, name]);
+    saveTeams([teams[0], name, ...teams.slice(1)]);
     // 현장팀이면 캘린더(담당팀)도 생성
     if (newTeamIsField) {
-      const COLORS = ["#f59e0b","#ec4899","#06b6d4","#84cc16","#8b5cf6","#f97316"];
       const newCal = {
         id: `cal_${Date.now()}`,
         label: name, name,
-        color: COLORS[cals.length % COLORS.length],
+        color: newTeamColor,
         checked: true,
         isField: true,
       };
@@ -4413,12 +4418,17 @@ function TeamManagementModal() {
     }
     setNewTeam("");
     setNewTeamIsField(true);
+    setNewTeamColor("#f59e0b");
+    setAddPopup(false);
   };
 
   const handleDelete = (targetTeam) => {
     if (window.confirm("삭제하는 팀의 팀장,팀원은 소속이 미정으로 변경됩니다.")) {
       reassignTeam(targetTeam, "미정");
       saveTeams(teams.filter(t => t !== targetTeam));
+      // 해당 팀 캘린더도 같이 삭제
+      const teamCal = cals.find(c => c.label === targetTeam || c.name === targetTeam);
+      if (teamCal) deleteCal(teamCal.id);
     }
   };
 
@@ -4513,35 +4523,65 @@ function TeamManagementModal() {
       <div className="absolute inset-0 bg-black/40" onClick={close} />
       <div className="relative bg-white rounded-t-3xl h-[85vh] flex flex-col shadow-2xl">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
-          <h2 className="text-xl font-bold text-gray-900">팀 관리</h2>
+          <div className="flex items-center gap-4">
+            <h2 className="text-xl font-bold text-gray-900">팀 관리</h2>
+            <button onClick={() => setAddPopup(true)}
+              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors">
+              팀 추가
+            </button>
+          </div>
           <button onClick={close} className="p-2 -mr-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100">
             <X size={24}/>
           </button>
         </div>
 
-        {/* 새 팀 추가 */}
-        <div className="p-5 flex flex-col gap-2 border-b border-gray-50">
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="새 팀 이름 (예: 특수청소팀)"
-              value={newTeam}
-              onChange={e => setNewTeam(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleAdd()}
-              className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-sm outline-none focus:border-blue-500 transition-colors"
-            />
-            <button onClick={handleAdd} className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors">
-              추가
-            </button>
+        {/* 팀 추가 팝업 */}
+        {addPopup && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/30 rounded-t-3xl">
+            <div className="bg-white rounded-2xl p-5 w-72 shadow-2xl flex flex-col gap-4">
+              <h3 className="font-bold text-base text-gray-900">새 팀 추가</h3>
+              <input
+                autoFocus
+                type="text"
+                placeholder="팀 이름 (예: 특수청소팀)"
+                value={newTeam}
+                onChange={e => setNewTeam(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleAdd()}
+                className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500"
+              />
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <button onClick={()=>setNewTeamIsField(v=>!v)}
+                  className={`relative w-9 h-5 rounded-full transition-colors ${newTeamIsField?"bg-blue-500":"bg-gray-200"}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${newTeamIsField?"translate-x-4":"translate-x-0"}`}/>
+                </button>
+                <span className="text-xs text-gray-600">현장팀 <span className="text-gray-400">(일정 담당팀에 표시)</span></span>
+              </label>
+              {newTeamIsField && (
+                <div className="flex flex-col gap-2">
+                  <span className="text-xs text-gray-500">팀 컬러</span>
+                  <div className="flex gap-2 flex-wrap">
+                    {TEAM_COLORS.map(color => (
+                      <button key={color} onClick={() => setNewTeamColor(color)}
+                        className="w-7 h-7 rounded-full border-2 transition-transform"
+                        style={{
+                          background: color,
+                          borderColor: newTeamColor === color ? "#1a1a1a" : "transparent",
+                          transform: newTeamColor === color ? "scale(1.2)" : "scale(1)",
+                        }}/>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="flex gap-2 mt-1">
+                <button onClick={() => { setAddPopup(false); setNewTeam(""); }}
+                  className="flex-1 py-2.5 rounded-xl text-sm text-gray-500 bg-gray-100 font-bold">취소</button>
+                <button onClick={handleAdd} disabled={!newTeam.trim()}
+                  className="flex-1 py-2.5 rounded-xl text-sm text-white font-bold transition-colors"
+                  style={{background: newTeam.trim() ? "linear-gradient(135deg,#1a56db,#2563eb)" : "#e5e7eb"}}>추가</button>
+              </div>
+            </div>
           </div>
-          <label className="flex items-center gap-2 px-1 cursor-pointer select-none">
-            <button onClick={()=>setNewTeamIsField(v=>!v)}
-              className={`relative w-9 h-5 rounded-full transition-colors ${newTeamIsField?"bg-blue-500":"bg-gray-200"}`}>
-              <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${newTeamIsField?"translate-x-4":"translate-x-0"}`}/>
-            </button>
-            <span className="text-xs text-gray-500">현장팀 <span className="text-gray-400">(일정 추가 담당팀에 표시)</span></span>
-          </label>
-        </div>
+        )}
 
         {/* 팀 목록 */}
         <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-3 bg-gray-50">
@@ -4582,6 +4622,35 @@ function TeamManagementModal() {
                   className="text-gray-300 hover:text-gray-600 disabled:opacity-20 text-[10px] leading-none"
                 >▼</button>
               </div>
+
+              {/* 팀 컬러 원 */}
+              {(()=>{
+                const cal = cals.find(c => c.label === t || c.name === t);
+                if (!cal) return null;
+                return (
+                  <div className="relative">
+                    <button
+                      onClick={() => setColorPickerIdx(colorPickerIdx === i ? null : i)}
+                      className="w-5 h-5 rounded-full border-2 border-white shadow shrink-0"
+                      style={{ background: cal.color }}
+                    />
+                    {colorPickerIdx === i && (
+                      <div className="absolute left-0 top-7 bg-white rounded-xl shadow-xl border border-gray-100 p-2 z-50 flex flex-wrap gap-1.5" style={{width:140}}>
+                        {TEAM_COLORS.map(color => (
+                          <button key={color}
+                            onClick={() => { updateCal({...cal, color}); setColorPickerIdx(null); }}
+                            className="w-6 h-6 rounded-full border-2 transition-transform"
+                            style={{
+                              background: color,
+                              borderColor: cal.color === color ? "#1a1a1a" : "transparent",
+                              transform: cal.color === color ? "scale(1.2)" : "scale(1)",
+                            }}/>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* 팀명 */}
               {editIdx === i ? (
