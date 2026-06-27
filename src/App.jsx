@@ -2506,7 +2506,8 @@ function FloatingButtons() {
   const { openModal, selDate, setCurrent, setSelDate, currentUser } = useC();
   const canAdd = currentUser.role !== "팀원";
   return (
-    <div className="fixed bottom-20 right-4 flex flex-col items-end gap-3 pointer-events-none z-40">
+    <div className="fixed bottom-20 flex flex-col items-end gap-3 pointer-events-none z-40"
+      style={{right: "max(1rem, calc((100vw - 430px) / 2 + 1rem))"}}>
       {/* 오늘 버튼 */}
       <button onClick={()=>{setCurrent(new Date());setSelDate(fmt(new Date()));}}
         className="pointer-events-auto flex items-center gap-1 bg-white rounded-full px-4 py-2 shadow-lg border border-gray-200 text-sm font-medium text-gray-700">
