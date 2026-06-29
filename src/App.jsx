@@ -3922,8 +3922,8 @@ function LoginScreen({ onLogin }) {
   // ── 비밀번호 설정 화면 (첫 로그인) ──
   if(mode==="setPw") {
     return (
-      <div className="flex-1 flex flex-col bg-white" style={{minHeight:"100dvh"}}>
-        <div className="flex-1 flex flex-col items-center justify-center px-8 pt-12 pb-6">
+      <div className="flex flex-col bg-white w-full">
+        <div className="flex flex-col items-center justify-center px-8 pt-16 pb-8">
           <div className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mb-6 shadow-xl"
             style={{background:"linear-gradient(135deg,#16a34a,#15803d)"}}>👋</div>
           <h1 className="text-2xl font-extrabold text-gray-900 mb-2">처음 오셨군요!</h1>
@@ -3932,7 +3932,7 @@ function LoginScreen({ onLogin }) {
             사용할 비밀번호를 설정해주세요.
           </p>
         </div>
-        <div className="px-6 flex flex-col gap-3" style={{paddingBottom:"max(2rem, env(safe-area-inset-bottom))"}}>
+        <div className="px-6 flex flex-col gap-3" style={{paddingBottom:"max(2.5rem, env(safe-area-inset-bottom))"}}>
           <div className="p-4 rounded-2xl bg-green-50 border border-green-100 mb-1">
             <p className="text-sm font-bold text-green-600 mb-1">📱 로그인 정보</p>
             <p className="text-xs text-gray-500">전화번호: <span className="font-bold text-gray-800">{id}</span></p>
@@ -3966,15 +3966,15 @@ function LoginScreen({ onLogin }) {
   // ── 업체 가입 화면 ──
   if(mode==="register") {
     return (
-      <div className="flex-1 flex flex-col bg-white" style={{minHeight:"100dvh"}}>
-        <div className="flex-1 flex flex-col items-center justify-center px-8 pt-12 pb-6">
+      <div className="flex flex-col bg-white w-full">
+        <div className="flex flex-col items-center justify-center px-8 pt-12 pb-6">
           <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
             style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🧹</div>
           <h1 className="text-3xl font-extrabold text-gray-900 mb-1">클린메니져</h1>
           <p className="text-base font-bold text-blue-600 mb-2 tracking-widest uppercase">clean-manager</p>
           <p className="text-sm text-gray-400 font-medium">청소업체 관리 솔루션</p>
         </div>
-        <div className="px-6 flex flex-col gap-3" style={{paddingBottom:"max(2rem, env(safe-area-inset-bottom))"}}>
+        <div className="px-6 flex flex-col gap-3" style={{paddingBottom:"max(2.5rem, env(safe-area-inset-bottom))"}}>
           <div className="flex items-center justify-between mb-1">
             <p className="text-sm font-bold text-gray-700">회원가입</p>
             <button onClick={()=>{setMode("login");setError("");}}
@@ -4029,15 +4029,15 @@ function LoginScreen({ onLogin }) {
 
   // ── 로그인 화면 ──
   return (
-    <div className="flex-1 flex flex-col bg-white" style={{minHeight:"100dvh"}}>
-      <div className="flex-1 flex flex-col items-center justify-center px-8 pt-12 pb-6">
+    <div className="flex flex-col bg-white w-full">
+      <div className="flex flex-col items-center justify-center px-8 pt-16 pb-8">
         <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl"
           style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>🧹</div>
         <h1 className="text-3xl font-extrabold text-gray-900 mb-1">클린메니져</h1>
         <p className="text-base font-bold text-blue-600 mb-2 tracking-widest uppercase">clean-manager</p>
         <p className="text-sm text-gray-400 font-medium">청소업체 관리 솔루션</p>
       </div>
-      <div className="px-6 flex flex-col gap-3" style={{paddingBottom:"max(2rem, env(safe-area-inset-bottom))"}}>
+      <div className="px-6 flex flex-col gap-3" style={{paddingBottom:"max(2.5rem, env(safe-area-inset-bottom))"}}>
         {/* 아이디/전화번호 — 전화번호면 하이픈 자동 삽입 */}
         <div className="relative">
           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base">👤</span>
