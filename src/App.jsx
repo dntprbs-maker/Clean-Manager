@@ -3673,6 +3673,10 @@ function LoginScreen({ onLogin }) {
     setLoading(true); setError("");
     try {
       await updateDoc(doc(db,"staffs",pendingUser.uid), { pw });
+      // companies/{companyId}/users에도 동기화
+      if (pendingUser.companyId) {
+        await updateDoc(doc(db,"companies",pendingUser.companyId,"users",pendingUser.uid), { pw });
+      }
       const user = {...pendingUser, pw};
       try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
       onLogin(user);
