@@ -8,6 +8,11 @@ import SuperAdmin from './SuperAdmin.jsx'
 // #demo 또는 ?demo=true 는 App 내부에서 처리
 const isSuperAdmin = window.location.hash === "#superadmin";
 
+// 탭 타이틀 환경별 설정
+const isLocal = window.location.hostname === "localhost";
+const isVercel = window.location.hostname.includes("vercel.app");
+document.title = isLocal ? "클린메니져-로컬서버" : isVercel ? "클린메니져-개발" : "클린메니져";
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     {isSuperAdmin ? <SuperAdmin /> : <App />}

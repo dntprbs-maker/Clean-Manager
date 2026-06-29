@@ -378,7 +378,14 @@ function Provider({ children, loginUser, onLogout }) {
 
   const addLog = useCallback((action, detail) => {
     const newLogRef = doc(collection(companyRef, "activityLogs"));
-    setDoc(newLogRef, { time: new Date().toISOString(), user: loginUser, action, detail });
+    const now = new Date();
+    setDoc(newLogRef, {
+      time: now.toISOString(),
+      date: fmt(now),
+      user: loginUser?.name || "관리자",
+      action,
+      detail,
+    });
   }, [loginUser, companyRef]);
 
   const addEvent = useCallback(ev => {
@@ -826,7 +833,7 @@ function ScheduleList({ selDate, compact=false }) {
           const isMulti=diff(ev.start,ev.end||ev.start)>0;
           return(
             <div key={ev.id}
-              onClick={()=>setDetEv(ev)}
+              onClick={()=>currentUser.role==="팀원"?setDetEv(ev):openModal(null,ev.id)}
               className="flex items-center px-4 py-1.5 border-b border-gray-50 cursor-pointer">
               {isMulti
                 ? <span className="text-sm px-2 py-0.5 rounded text-white font-medium mr-2 truncate max-w-[80%]"
@@ -850,7 +857,7 @@ function ScheduleList({ selDate, compact=false }) {
             {grouped[tk].map((ev)=>{
               const c=calByIdLocal(ev.calId);
               return(
-                <div key={ev.id} onClick={()=>setDetEv(ev)}
+                <div key={ev.id} onClick={()=>currentUser.role==="팀원"?setDetEv(ev):openModal(null,ev.id)}
                   className="flex items-stretch px-4 py-3 border-b border-gray-50 cursor-pointer active:bg-gray-50">
                   {/* 시간 컬럼 — 시작위 / 종료아래 */}
                   <div className="w-[60px] shrink-0 flex flex-col justify-between mr-4">
@@ -1590,7 +1597,29 @@ function BottomTabBar() {
 
 // ── 사이드 드로어 (스와이프 열기/닫기 지원) ───────────────────────
 function SideDrawer() {
-  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, onLogout } = useC();
+  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, onLogout, companyId } = useC();
+  const [pwModal, setPwModal] = useState(false);
+  const [oldPw, setOldPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [newPw2, setNewPw2] = useState("");
+  const [pwError, setPwError] = useState("");
+  const [pwLoading, setPwLoading] = useState(false);
+
+  const handleChangePw = async () => {
+    if (!oldPw || !newPw || !newPw2) { setPwError("모든 항목을 입력하세요."); return; }
+    if (oldPw !== currentUser.pw) { setPwError("현재 비밀번호가 틀렸습니다."); return; }
+    if (newPw !== newPw2) { setPwError("새 비밀번호가 일치하지 않습니다."); return; }
+    if (newPw.length < 4) { setPwError("비밀번호는 4자 이상이어야 합니다."); return; }
+    setPwLoading(true);
+    try {
+      await updateDoc(doc(db, "staffs", currentUser.uid), { pw: newPw });
+      if (companyId) await updateDoc(doc(db, "companies", companyId, "users", currentUser.uid), { pw: newPw });
+      try { localStorage.setItem("loginUser", JSON.stringify({...currentUser, pw: newPw})); } catch {}
+      setPwModal(false); setOldPw(""); setNewPw(""); setNewPw2(""); setPwError("");
+      alert("비밀번호가 변경됐습니다.");
+    } catch(e) { setPwError("변경 실패: " + e.message); }
+    finally { setPwLoading(false); }
+  };
 
   // 드래그 상태
   const startX    = useRef(null);
@@ -1655,6 +1684,30 @@ function SideDrawer() {
 
   return (
     <>
+      {/* 비밀번호 변경 모달 */}
+      {pwModal && (
+        <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center px-6">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl flex flex-col gap-3">
+            <h2 className="font-extrabold text-lg text-gray-900">비밀번호 변경</h2>
+            <input type="password" placeholder="현재 비밀번호" value={oldPw} onChange={e=>{setOldPw(e.target.value);setPwError("");}}
+              className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+            <input type="password" placeholder="새 비밀번호 (4자 이상)" value={newPw} onChange={e=>{setNewPw(e.target.value);setPwError("");}}
+              className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+            <input type="password" placeholder="새 비밀번호 확인" value={newPw2} onChange={e=>{setNewPw2(e.target.value);setPwError("");}}
+              className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+            {pwError && <p className="text-xs text-red-500">{pwError}</p>}
+            <div className="flex gap-2 mt-1">
+              <button onClick={()=>{setPwModal(false);setOldPw("");setNewPw("");setNewPw2("");setPwError("");}}
+                className="flex-1 py-3 rounded-xl text-sm text-gray-500 bg-gray-100 font-bold">취소</button>
+              <button onClick={handleChangePw} disabled={pwLoading}
+                className="flex-1 py-3 rounded-xl text-sm text-white font-bold"
+                style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
+                {pwLoading ? "변경 중..." : "변경"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* 배경 오버레이 — 탭해서 닫기 */}
       <div
         className="absolute inset-0 z-40 transition-opacity duration-300"
@@ -1698,11 +1751,24 @@ function SideDrawer() {
         <div className="px-4 pt-12 pb-4 border-b border-gray-100">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <button onClick={() => { setDrawer(false); setCompanySettingsModal(true); }} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-800 rounded-full hover:bg-gray-100 transition-colors">
-                <Settings size={20} />
-              </button>
+              {currentUser.role === "최고관리자" && (
+                <button onClick={() => { setDrawer(false); setCompanySettingsModal(true); }} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-800 rounded-full hover:bg-gray-100 transition-colors">
+                  <Settings size={20} />
+                </button>
+              )}
               <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-xl border border-blue-100">🏠</div>
-              <div><p className="font-bold text-base">{currentUser.name}</p><p className="text-xs text-gray-500">{currentUser.team} · {currentUser.role}</p></div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="font-bold text-base">{currentUser.name}</p>
+                  {currentUser.role !== "최고관리자" && (
+                    <button onClick={() => { setPwModal(true); }}
+                      className="text-[10px] text-gray-400 border border-gray-200 px-1.5 py-0.5 rounded-full hover:text-blue-500 hover:border-blue-300 transition-colors">
+                      비밀번호
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500">{currentUser.team} · {currentUser.role}</p>
+              </div>
             </div>
             {/* 테스트용 계정 전환 — 크린드림 사장 계정만 노출 */}
             {currentUser.role === "최고관리자" && currentUser.team === "사장" && currentUser.companyName === "크린드림" && (
@@ -1830,7 +1896,25 @@ function WheelPicker({ items, value, onChange, renderItem }) {
   const ref = useRef(null);
   const timer = useRef(null);
   const scrolling = useRef(false);
+  const dragY = useRef(null);
   const display = renderItem || (v => String(v));
+
+  const onMouseDown = e => {
+    dragY.current = e.clientY;
+    const onMove = ev => {
+      if (dragY.current === null) return;
+      const dy = dragY.current - ev.clientY;
+      dragY.current = ev.clientY;
+      if (ref.current) ref.current.scrollTop += dy;
+    };
+    const onUp = () => {
+      dragY.current = null;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
 
   // items/value 변경 시 스크롤 위치 초기화
   useEffect(() => {
@@ -1869,7 +1953,9 @@ function WheelPicker({ items, value, onChange, renderItem }) {
         style={{ top: ITEM_H * 2, height: ITEM_H, zIndex: 1 }} />
       {/* 스크롤 내용 — 하이라이트 위, 페이드 아래 */}
       <div ref={ref} onScroll={handleScroll}
-        className="h-full overflow-y-scroll"
+        onWheel={e => { e.preventDefault(); if(ref.current) ref.current.scrollTop += e.deltaY; }}
+        onMouseDown={onMouseDown}
+        className="h-full overflow-y-scroll cursor-grab active:cursor-grabbing"
         style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none", position: "relative", zIndex: 2 }}>
         <div style={{ height: ITEM_H * 2 }} />
         {items.map((item, i) => {
@@ -1931,7 +2017,27 @@ function DateTimePicker({ form, set, errs }) {
     if (activePicker === "start") {
       set("start", dateStr);
       if (dateStr > form.end) set("end", dateStr);
-      if (!form.allDay) set("startTime", timeStr);
+      if (!form.allDay) {
+        // 기존 시간차(분)를 유지하면서 종료 시간 자동 조정
+        const [oldSH, oldSM] = (form.startTime||"09:00").split(":").map(Number);
+        const [oldEH, oldEM] = (form.endTime||"10:00").split(":").map(Number);
+        const diffMin = (oldEH*60+oldEM) - (oldSH*60+oldSM);
+        const newStartMin = h24*60 + m;
+        const totalEndMin = newStartMin + (diffMin > 0 ? diffMin : 60);
+        const dayOverflow = Math.floor(totalEndMin / (24*60)); // 넘어가는 날 수
+        const newEndMin = totalEndMin % (24*60);
+        const newEH = Math.floor(newEndMin/60);
+        const newEM = newEndMin%60;
+        const endTimeStr = `${String(newEH).padStart(2,"0")}:${String(newEM).padStart(2,"0")}`;
+        set("startTime", timeStr);
+        set("endTime", endTimeStr);
+        // 자정 넘어가면 종료 날짜도 다음날로
+        if (dayOverflow > 0) {
+          const endDate = new Date(dateStr);
+          endDate.setDate(endDate.getDate() + dayOverflow);
+          set("end", fmt(endDate));
+        }
+      }
     } else {
       set("end", dateStr);
       if (!form.allDay) set("endTime", timeStr);
@@ -1951,12 +2057,51 @@ function DateTimePicker({ form, set, errs }) {
     setActivePicker(field);
   };
 
-  // 각 휠 변경 핸들러
-  const chYear  = v => { ps.current.year  = v; setPYear(v);  applyToForm(v, ps.current.month, ps.current.day, ps.current.h24, ps.current.min); };
-  const chMonth = v => { ps.current.month = v; setPMonth(v); applyToForm(ps.current.year, v, ps.current.day, ps.current.h24, ps.current.min); };
-  const chDay   = v => { ps.current.day   = v; setPDay(v);   applyToForm(ps.current.year, ps.current.month, v, ps.current.h24, ps.current.min); };
-  const chH24   = v => { ps.current.h24   = v; setPH24(v);   applyToForm(ps.current.year, ps.current.month, ps.current.day, v, ps.current.min); };
-  const chMin   = v => { ps.current.min   = v; setPMin(v);   applyToForm(ps.current.year, ps.current.month, ps.current.day, ps.current.h24, v); };
+  // 각 휠 변경 핸들러 (오버플로우 캐스케이드)
+  const chYear  = v => { ps.current.year = v; setPYear(v); applyToForm(v, ps.current.month, ps.current.day, ps.current.h24, ps.current.min); };
+
+  const chMonth = v => {
+    const prev = ps.current.month;
+    let y = ps.current.year;
+    if (prev === 12 && v === 1) y += 1;
+    else if (prev === 1 && v === 12) y -= 1;
+    ps.current = {...ps.current, month: v, year: y};
+    setPMonth(v); setPYear(y);
+    applyToForm(y, v, ps.current.day, ps.current.h24, ps.current.min);
+  };
+
+  const chDay = v => {
+    const prev = ps.current.day;
+    const lastDay = new Date(ps.current.year, ps.current.month, 0).getDate();
+    let mo = ps.current.month, y = ps.current.year;
+    if (prev === lastDay && v === 1) {
+      mo += 1;
+      if (mo > 12) { mo = 1; y += 1; }
+    } else if (prev === 1 && v === lastDay) {
+      mo -= 1;
+      if (mo < 1) { mo = 12; y -= 1; }
+    }
+    ps.current = {...ps.current, day: v, month: mo, year: y};
+    setPDay(v); setPMonth(mo); setPYear(y);
+    applyToForm(y, mo, v, ps.current.h24, ps.current.min);
+  };
+
+  const chH24 = v => {
+    const prev = ps.current.h24;
+    let {day, month, year} = ps.current;
+    if (prev === 23 && v === 0) {
+      const next = new Date(year, month-1, day+1);
+      day = next.getDate(); month = next.getMonth()+1; year = next.getFullYear();
+    } else if (prev === 0 && v === 23) {
+      const prev2 = new Date(year, month-1, day-1);
+      day = prev2.getDate(); month = prev2.getMonth()+1; year = prev2.getFullYear();
+    }
+    ps.current = {...ps.current, h24: v, day, month, year};
+    setPH24(v); setPDay(day); setPMonth(month); setPYear(year);
+    applyToForm(year, month, day, v, ps.current.min);
+  };
+
+  const chMin = v => { ps.current.min = v; setPMin(v); applyToForm(ps.current.year, ps.current.month, ps.current.day, ps.current.h24, v); };
 
   const daysInMonth = new Date(pYear, pMonth, 0).getDate();
   const years  = Array.from({length:8}, (_,i) => 2023+i);
@@ -2012,9 +2157,13 @@ function DateTimePicker({ form, set, errs }) {
         </button>
       </div>
 
-      {/* 인라인 드럼롤 */}
+      {errs.end  && <p className="text-red-500 text-xs px-4 pb-2">{errs.end}</p>}
+      {errs.time && <p className="text-red-500 text-xs px-4 pb-2">{errs.time}</p>}
+
+      {/* 날짜/시간 팝업 — 버튼 바로 아래 인라인 */}
       {activePicker && (
-        <div className="border-t border-gray-100">
+        <div className="border-t border-gray-100 bg-white">
+          {/* 드럼롤 */}
           <div className="flex px-1" style={{height:220}}>
             <WheelPicker key={`y`}  items={years}  value={pYear}  onChange={chYear}  renderItem={v=>String(v)}/>
             <WheelPicker key={`mo`} items={months} value={pMonth} onChange={chMonth} renderItem={v=>`${v}월`}/>
@@ -2025,26 +2174,25 @@ function DateTimePicker({ form, set, errs }) {
               <WheelPicker key={`m`}   items={mins}    value={pMin} onChange={chMin} renderItem={v=>String(v).padStart(2,"0")}/>
             </>}
           </div>
-          {/* 오늘 버튼 */}
-          <div className="flex items-center justify-end px-4 py-2 gap-3 border-t border-gray-50">
-            <label className="flex items-center gap-1.5 text-sm text-gray-400 cursor-pointer">
-              <input type="checkbox" className="w-3.5 h-3.5"/> 음력
-            </label>
+          {/* 오늘/닫기 버튼 */}
+          <div className="flex items-center justify-between px-4 py-2 border-t border-gray-100">
             <button onClick={()=>{
               const t = new Date();
               const y=t.getFullYear(), mo=t.getMonth()+1, d=t.getDate();
               ps.current = {...ps.current, year:y, month:mo, day:d};
               setPYear(y); setPMonth(mo); setPDay(d);
               applyToForm(y, mo, d, ps.current.h24, ps.current.min);
-            }} className={`px-5 py-1.5 rounded-full text-sm font-bold ${activePicker==="start"?"bg-yellow-400 text-white":"bg-gray-100 text-gray-600"}`}>
+            }} className="px-4 py-1.5 rounded-full text-sm font-bold bg-gray-100 text-gray-600">
               오늘
+            </button>
+            <button onClick={()=>setActivePicker(null)}
+              className="px-6 py-1.5 rounded-full text-sm font-bold text-white"
+              style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
+              확인
             </button>
           </div>
         </div>
       )}
-
-      {errs.end  && <p className="text-red-500 text-xs px-4 pb-2">{errs.end}</p>}
-      {errs.time && <p className="text-red-500 text-xs px-4 pb-2">{errs.time}</p>}
     </div>
   );
 }
@@ -2119,12 +2267,19 @@ function EventModal() {
   const imgInputRef=useRef(null);
   // step: "paste"=입력단계, "form"=일정폼단계
   const [step,setStep]=useState("paste");
+  const [exitConfirm,setExitConfirm]=useState(false);
+  const origForm=useRef(null);
   const tRef=useRef(null);
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
+  const isDirty=()=>origForm.current && JSON.stringify(form)!==JSON.stringify(origForm.current);
+  const tryClose=()=>{ if(editId&&isDirty()) setExitConfirm(true); else closeModal(); };
 
   useEffect(()=>{
     if(open){
-      setForm(editEv?{...editEv}:blank(date));
+      const initForm = editEv?{...editEv}:blank(date);
+      setForm(initForm);
+      origForm.current = editEv ? {...editEv} : null;
+      setExitConfirm(false);
       setErrs({});
       setPasteText("");
       setInputMode("memo");
@@ -2186,6 +2341,28 @@ function EventModal() {
         transition: "transform 0.35s cubic-bezier(0.32,0.72,0,1), opacity 0.35s ease",
       }}
       className="absolute inset-0 z-50 bg-white flex flex-col overflow-hidden">
+
+      {/* 저장 확인 팝업 */}
+      {exitConfirm && (
+        <div className="absolute inset-0 bg-black/40 z-[100] flex items-center justify-center px-6">
+          <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl">
+            <p className="text-base font-bold text-gray-900 mb-1">변경사항이 있습니다</p>
+            <p className="text-sm text-gray-500 mb-5">저장하지 않고 나가시겠습니까?</p>
+            <div className="flex gap-2">
+              <button onClick={()=>{ setExitConfirm(false); closeModal(); }}
+                className="flex-1 py-3 rounded-xl text-sm font-bold text-gray-600 bg-gray-100">
+                저장없이 나가기
+              </button>
+              <button onClick={()=>{ setExitConfirm(false); submit(); }}
+                className="flex-1 py-3 rounded-xl text-sm font-bold text-white"
+                style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
+                저장하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ═══ STEP 1: 입력 방법 선택 단계 ═══ */}
       {step === "paste" ? (
         <>
@@ -2355,7 +2532,7 @@ function EventModal() {
       {/* 헤더 + 담당팀 드롭다운 */}
       <div className="flex flex-col px-4 pt-3 pb-0 border-b border-gray-100">
         <div className="flex items-center justify-between mb-1">
-          <button onClick={()=>editId ? closeModal() : setStep("paste")}>
+          <button onClick={()=>editId ? tryClose() : setStep("paste")}>
             {editId ? <X size={22} className="text-gray-600"/> : <ChevronLeft size={22} className="text-gray-600"/>}
           </button>
           <h2 className="font-bold text-base">{editId?"일정 수정":"일정 추가"}</h2>
@@ -2551,10 +2728,22 @@ function TopHeader() {
   const [picker,setPicker]=useState(false);
   const [companyPicker,setCompanyPicker]=useState(false);
   const [multiList,setMultiList]=useState(null);
+  const [isMulti,setIsMulti]=useState(false);
   const DAYS=["일","월","화","수","목","금","토"];
   const d=pd(selDate), dow=d?.getDay()??0;
 
-  // 다중 소속 여부 확인 (직원만)
+  // 로그인 시 다중 소속 여부 미리 확인
+  useEffect(()=>{
+    if(currentUser.role==="최고관리자") { setIsMulti(false); return; }
+    const phone = currentUser.phone;
+    if(!phone) { setIsMulti(false); return; }
+    getDocs(query(collection(db,"staffs"), where("phone","==",phone))).then(snap=>{
+      const active = snap.docs.filter(d=>d.data().status !== "deleted");
+      setIsMulti(active.length >= 2);
+    }).catch(()=>setIsMulti(false));
+  },[currentUser.uid]);
+
+  // 다중 소속 회사 목록 불러오기
   const checkMulti = async () => {
     if(currentUser.role !== "팀원" && currentUser.role !== "팀장") return;
     const phone = currentUser.phone;
@@ -2587,8 +2776,8 @@ function TopHeader() {
               : (currentUser?.companyName?.charAt(0) || "🏢")}
           </div>
           <span className="font-extrabold text-gray-900 text-lg">{currentUser?.companyName || "로딩중..."}</span>
-          {/* 직원만: 다중 소속 회사 전환 버튼 */}
-          {(currentUser?.role === "팀원" || currentUser?.role === "팀장") && (
+          {/* 다중 소속일 때만 전환 버튼 표시 */}
+          {isMulti && (
             <button onClick={checkMulti} className="text-xs text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full font-bold">전환</button>
           )}
         </div>
@@ -3057,11 +3246,11 @@ function FaqScreen() {
   return (
     <div className="flex flex-col flex-1 overflow-hidden bg-gray-50">
       {/* 헤더 */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-100">
-        <button onClick={()=>setCurrentScreen("calendar")} className="p-1 -ml-1">
-          <ChevronLeft size={22} className="text-gray-700"/>
+      <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-100">
+        <h2 className="font-bold text-base">설정 가이드 · FAQ</h2>
+        <button onClick={()=>setCurrentScreen("calendar")} className="p-1 rounded-full hover:bg-gray-100">
+          <X size={22} className="text-gray-500"/>
         </button>
-        <h2 className="font-bold text-base flex-1">설정 가이드 · FAQ</h2>
       </div>
 
       <div className="flex-1 overflow-y-auto pb-8">
@@ -3202,21 +3391,21 @@ function ReportHistoryScreen() {
       {/* 헤더 */}
       <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-0">
         <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
-              <ChevronLeft size={24} className="text-gray-700"/>
-            </button>
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">완료 보고 내역</h2>
-              <p className="text-xs text-gray-400 mt-0.5">총 {filtered.length}건</p>
-            </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">완료 보고 내역</h2>
+            <p className="text-xs text-gray-400 mt-0.5">총 {filtered.length}건</p>
           </div>
+          <div className="flex items-center gap-1">
           {/* 검색 버튼 */}
           <button onClick={()=>setShowSearch(p=>!p)}
             className="w-9 h-9 rounded-xl flex items-center justify-center transition-all"
             style={{background:showSearch?"#1a56db":"#f3f4f6", color:showSearch?"white":"#374151"}}>
             <Search size={16}/>
           </button>
+          <button onClick={()=>setCurrentScreen("calendar")} className="p-2 rounded-full hover:bg-gray-100">
+            <X size={22} className="text-gray-500"/>
+          </button>
+          </div>
         </div>
 
         {/* 검색창 */}
@@ -3526,11 +3715,11 @@ function ImportCalendarScreen() {
   return (
     <div className="flex-1 flex flex-col bg-gray-50 min-h-screen">
       <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-4">
-        <div className="flex items-center gap-3">
-          <button onClick={() => setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
-            <ChevronLeft size={24} className="text-gray-700"/>
-          </button>
+        <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold text-gray-900">캘린더 가져오기</h2>
+          <button onClick={() => setCurrentScreen("calendar")} className="p-2 rounded-full hover:bg-gray-100">
+            <X size={22} className="text-gray-500"/>
+          </button>
         </div>
       </div>
       <div className="px-5 py-6 flex flex-col gap-5">
@@ -3997,8 +4186,24 @@ function SetupCompanyModal() {
 }
 
 function AppInner() {
-  const { currentScreen, currentUser, isDemo } = useC();
+  const { currentScreen, setCurrentScreen, currentUser, isDemo } = useC();
   const needsSetup = !isDemo && !currentUser?.companyName;
+
+  // 안드로이드 뒤로가기 처리
+  useEffect(() => {
+    if (currentScreen !== "calendar") {
+      window.history.pushState({ screen: currentScreen }, "");
+    }
+  }, [currentScreen]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      setCurrentScreen("calendar");
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [setCurrentScreen]);
+
   return (
     <div className={`h-screen flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none${isDemo?" pt-9":""}`}>
       <style>{ANIM_CSS}</style>
@@ -4100,7 +4305,7 @@ export default function App() {
 
 // ── 직원 관리 메인 화면 (아코디언 방식) ───────────────────────────────────────────────
 function EmployeeListScreen() {
-  const { users, setEmpModal, teams, setTeamModal } = useC();
+  const { users, setEmpModal, teams, setTeamModal, setCurrentScreen } = useC();
   // 처음엔 모든 팀이 접힌 상태
   const [openTeams, setOpenTeams] = useState(() => new Set());
 
@@ -4131,6 +4336,9 @@ function EmployeeListScreen() {
           <span className="text-xs text-gray-400">총 {users.length}명</span>
           <button onClick={() => setTeamModal(true)} className="px-3 py-1.5 text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">
             팀 관리
+          </button>
+          <button onClick={() => setCurrentScreen("calendar")} className="p-1.5 rounded-full hover:bg-gray-100">
+            <X size={20} className="text-gray-500"/>
           </button>
         </div>
       </div>
@@ -4715,6 +4923,7 @@ function TeamScheduleScreen() {
   const { visibleEvents, setCurrentScreen, cals } = useC();
   const [selectedCal, setSelectedCal] = useState(null);
   const [dateOffset, setDateOffset]   = useState(0);
+  const [dropOpen, setDropOpen]       = useState(false);
   const touchStartX = useRef(null);
 
   const getDate = (offset) => {
@@ -4749,9 +4958,9 @@ function TeamScheduleScreen() {
     touchStartX.current = null;
   };
 
-  const filtered = visibleEvents.filter(e =>
-    (!selectedCal || e.calId === selectedCal) && e.start === dateLabel
-  );
+  const filtered = visibleEvents
+    .filter(e => (!selectedCal || e.calId === selectedCal) && e.start === dateLabel)
+    .sort((a,b) => (a.startTime||"00:00").localeCompare(b.startTime||"00:00"));
 
   const fmtTime = (t) => {
     if(!t) return "";
@@ -4764,11 +4973,46 @@ function TeamScheduleScreen() {
     <div className="flex-1 flex flex-col bg-gray-50 min-h-screen">
       {/* 헤더 */}
       <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-0">
-        <div className="flex items-center gap-3 mb-4">
-          <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
-            <ChevronLeft size={24} className="text-gray-700"/>
+        <div className="flex items-center gap-2 mb-4">
+          <h2 className="text-xl font-bold text-gray-900">팀별 일정</h2>
+          {/* 팀 선택 드롭다운 */}
+          <div className="relative flex-1">
+            <button onClick={()=>setDropOpen(o=>!o)}
+              className="flex items-center gap-1 text-sm font-bold px-3 py-1.5 rounded-xl border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-all">
+              {selectedCal ? (cals.find(c=>c.id===selectedCal)?.name||"팀 선택") : "팀 선택"}
+              <ChevronDown size={14} className={`transition-transform ${dropOpen?"rotate-180":""}`}/>
+            </button>
+            {dropOpen && (
+              <div className="absolute left-0 top-full mt-1 bg-white rounded-xl shadow-xl border border-gray-100 z-50 min-w-[140px] py-1">
+                <button onClick={()=>{setSelectedCal(null);setDropOpen(false);}}
+                  className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-bold text-gray-800 hover:bg-gray-50">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-gray-400"/>
+                    전체
+                    <span className="text-xs text-gray-400 font-normal">{visibleEvents.filter(e=>e.start===dateLabel).length}건</span>
+                  </div>
+                  {!selectedCal && <span className="text-blue-500">✓</span>}
+                </button>
+                {cals.filter(c=>c.isField!==false).map(cal=>{
+                  const cnt = visibleEvents.filter(e=>e.calId===cal.id&&e.start===dateLabel).length;
+                  return (
+                  <button key={cal.id} onClick={()=>{setSelectedCal(cal.id);setDropOpen(false);}}
+                    className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-bold hover:bg-gray-50"
+                    style={{color:selectedCal===cal.id?cal.color:"#374151"}}>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{background:cal.color}}/>
+                      {cal.name}
+                      <span className="text-xs text-gray-400 font-normal">{cnt}건</span>
+                    </div>
+                    {selectedCal===cal.id && <span style={{color:cal.color}}>✓</span>}
+                  </button>
+                )})}
+              </div>
+            )}
+          </div>
+          <button onClick={()=>setCurrentScreen("calendar")} className="p-2 rounded-full hover:bg-gray-100">
+            <X size={22} className="text-gray-500"/>
           </button>
-          <h2 className="text-xl font-bold text-gray-900 flex-1">팀별 일정</h2>
         </div>
 
         {/* 날짜 슬라이더 */}
@@ -4797,41 +5041,6 @@ function TeamScheduleScreen() {
         </div>
       </div>
 
-      {/* 팀 카드 필터 4개 한 줄 */}
-      <div className="px-4 py-3 grid gap-2" style={{gridTemplateColumns:"repeat(4,1fr)"}}>
-        {/* 전체 */}
-        <button onClick={()=>setSelectedCal(null)}
-          className="bg-white rounded-2xl py-3 text-center border cursor-pointer transition-all"
-          style={{borderColor:!selectedCal?"#111827":"#f3f4f6",
-            boxShadow:!selectedCal?"0 0 0 3px rgba(0,0,0,.08)":"0 1px 4px rgba(0,0,0,.04)"}}>
-          <div className="text-xs font-bold text-gray-400 mb-1">전체</div>
-          <div className="text-xl font-extrabold leading-none"
-            style={{color:!selectedCal?"#111827":"#d1d5db"}}>
-            {visibleEvents.filter(e=>e.start===dateLabel).length}
-          </div>
-          <div className="text-xs text-gray-400 mt-1">건</div>
-        </button>
-        {/* 팀별 카드 */}
-        {cals.map(cal=>{
-          const cnt = visibleEvents.filter(e=>e.calId===cal.id&&e.start===dateLabel).length;
-          const active = selectedCal===cal.id;
-          return (
-            <button key={cal.id} onClick={()=>setSelectedCal(active?null:cal.id)}
-              className="bg-white rounded-2xl py-3 text-center border cursor-pointer transition-all"
-              style={{borderColor:active?cal.color:"#f3f4f6",
-                boxShadow:active?`0 0 0 3px ${cal.color}22`:"0 1px 4px rgba(0,0,0,.04)"}}>
-              <div className="text-xs font-bold mb-1 overflow-hidden"
-                style={{color:active?cal.color:"#9ca3af",
-                  textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                {cal.label||cal.name}
-              </div>
-              <div className="text-xl font-extrabold leading-none"
-                style={{color:cnt>0?cal.color:"#d1d5db"}}>{cnt}</div>
-              <div className="text-xs text-gray-400 mt-1">건</div>
-            </button>
-          );
-        })}
-      </div>
 
       {/* 일정 목록 */}
       <div className="flex-1 overflow-y-auto px-4 pb-16 flex flex-col gap-2">
@@ -4924,22 +5133,22 @@ function DashboardScreen() {
       {/* 헤더 */}
       <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
-              <ChevronLeft size={24} className="text-gray-700"/>
-            </button>
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">
-                {currentUser.role==="최고관리자"?"사장님 대시보드":"일정 요약"}
-              </h2>
-              <p className="text-xs text-gray-400 mt-0.5">{currentUser.name} · {currentUser.role}</p>
-            </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">
+              {currentUser.role==="최고관리자"?"사장님 대시보드":"일정 요약"}
+            </h2>
+            <p className="text-xs text-gray-400 mt-0.5">{currentUser.name} · {currentUser.role}</p>
           </div>
-          <button onClick={()=>setEditing(p=>!p)}
-            className="text-sm font-bold px-4 py-2 rounded-full transition-all"
-            style={{background:editing?"#111827":"#f3f4f6", color:editing?"white":"#374151"}}>
-            {editing?"✅ 완료":"✏️ 편집"}
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={()=>setEditing(p=>!p)}
+              className="text-sm font-bold px-4 py-2 rounded-full transition-all"
+              style={{background:editing?"#111827":"#f3f4f6", color:editing?"white":"#374151"}}>
+              {editing?"✅ 완료":"✏️ 편집"}
+            </button>
+            <button onClick={()=>setCurrentScreen("calendar")} className="p-2 rounded-full hover:bg-gray-100">
+              <X size={22} className="text-gray-500"/>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -5131,21 +5340,21 @@ function NoticeScreen() {
     <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
       <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
-              <ChevronLeft size={24} className="text-gray-700"/>
-            </button>
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">팀 공지사항</h2>
-              {unread>0 && <p className="text-xs text-blue-500 font-semibold mt-0.5">읽지 않은 공지 {unread}개</p>}
-            </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">팀 공지사항</h2>
+            {unread>0 && <p className="text-xs text-blue-500 font-semibold mt-0.5">읽지 않은 공지 {unread}개</p>}
           </div>
+          <div className="flex items-center gap-2">
           {isAdmin && (
             <button onClick={()=>setWriting(true)}
               className="flex items-center gap-1 text-sm font-bold text-blue-600 px-4 py-2 rounded-full bg-blue-50">
               + 새 공지
             </button>
           )}
+            <button onClick={()=>setCurrentScreen("calendar")} className="p-2 rounded-full hover:bg-gray-100">
+              <X size={22} className="text-gray-500"/>
+            </button>
+          </div>
         </div>
       </div>
       <div className="px-4 py-4 flex flex-col gap-3">
@@ -5185,9 +5394,9 @@ function NoticeScreen() {
 
 // ── 최근 작업 내역 화면 (변경 로그) ───────────────────────────────────────────────
 function ActivityLogScreen() {
-  const { activityLogs, setCurrentScreen, cals, currentUser } = useC();
-  const [filter, setFilter]     = useState("전체");
-  const [calFilter, setCalFilter] = useState("전체");
+  const { activityLogs, setCurrentScreen } = useC();
+  const [filter, setFilter]   = useState("전체");
+  const [userFilter, setUserFilter] = useState("전체");
   const FILTERS = ["전체","등록","수정","삭제"];
 
   const ACTION_STYLE = {
@@ -5196,14 +5405,22 @@ function ActivityLogScreen() {
     "삭제": {bg:"#fef2f2", color:"#dc2626", icon:"🗑️"},
   };
 
+  // 수정자 목록 (중복 제거)
+  const users = [...new Set(activityLogs.map(l => typeof l.user==="string"?l.user:l.user?.name||"관리자"))];
+
   const filtered = activityLogs
     .filter(l=>filter==="전체"||l.action===filter)
-    .filter(l=>calFilter==="전체"||l.calId===calFilter);
+    .filter(l=>{
+      if(userFilter==="전체") return true;
+      const name = typeof l.user==="string"?l.user:l.user?.name||"관리자";
+      return name===userFilter;
+    });
 
   // 날짜별 그룹
   const grouped = filtered.reduce((acc,log)=>{
-    if(!acc[log.date]) acc[log.date]=[];
-    acc[log.date].push(log);
+    const date = log.date || log.time?.slice(0,10) || "기타";
+    if(!acc[date]) acc[date]=[];
+    acc[date].push(log);
     return acc;
   },{});
   const groupedDates = Object.keys(grouped).sort((a,b)=>b.localeCompare(a));
@@ -5215,44 +5432,41 @@ function ActivityLogScreen() {
   return (
     <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
       {/* 헤더 */}
-      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-0">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
-              <ChevronLeft size={24} className="text-gray-700"/>
-            </button>
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">변경 로그</h2>
-              <p className="text-xs text-gray-400 mt-0.5">전체 {activityLogs.length}건</p>
-            </div>
+      <div className="bg-white border-b border-gray-100 px-4 pt-4 pb-0">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">변경 로그</h2>
+            <p className="text-xs text-gray-400">전체 {activityLogs.length}건</p>
           </div>
+          <button onClick={()=>setCurrentScreen("calendar")} className="p-2 rounded-full hover:bg-gray-100">
+            <X size={22} className="text-gray-500"/>
+          </button>
         </div>
-        {/* 액션 필터 */}
-        <div className="flex gap-2 pb-3 overflow-x-auto">
+        {/* 액션 + 수정자 필터 한 줄 */}
+        <div className="flex gap-1.5 pb-3 overflow-x-auto">
           {FILTERS.map(f=>{
             const s = f==="전체"?null:ACTION_STYLE[f];
             const active = filter===f;
             return (
               <button key={f} onClick={()=>setFilter(f)}
-                className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-full transition-all"
-                style={{background:active?(s?s.color:"#111827"):"#f3f4f6",
-                  color:active?"white":"#6b7280"}}>
+                className="shrink-0 text-[11px] font-bold px-2.5 py-1 rounded-full transition-all"
+                style={{background:active?(s?s.color:"#111827"):"#f3f4f6", color:active?"white":"#6b7280"}}>
                 {f==="전체"?"전체":s.icon+" "+f}
               </button>
             );
           })}
-        </div>
-        {/* 팀 필터 */}
-        <div className="flex gap-2 pb-3 overflow-x-auto">
-          <button onClick={()=>setCalFilter("전체")}
-            className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-full transition-all"
-            style={{background:calFilter==="전체"?"#111827":"#f3f4f6",
-              color:calFilter==="전체"?"white":"#6b7280"}}>전체 팀</button>
-          {cals?.map(cal=>(
-            <button key={cal.id} onClick={()=>setCalFilter(calFilter===cal.id?"전체":cal.id)}
-              className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-full transition-all"
-              style={{background:calFilter===cal.id?cal.color:"#f3f4f6",
-                color:calFilter===cal.id?"white":"#6b7280"}}>{cal.name}</button>
+          <div className="w-px bg-gray-200 shrink-0 mx-0.5"/>
+          <button onClick={()=>setUserFilter("전체")}
+            className="shrink-0 text-[11px] font-bold px-2.5 py-1 rounded-full transition-all"
+            style={{background:userFilter==="전체"?"#6b7280":"#f3f4f6", color:userFilter==="전체"?"white":"#6b7280"}}>
+            전체
+          </button>
+          {users.map(u=>(
+            <button key={u} onClick={()=>setUserFilter(userFilter===u?"전체":u)}
+              className="shrink-0 text-[11px] font-bold px-2.5 py-1 rounded-full transition-all"
+              style={{background:userFilter===u?"#7c3aed":"#f3f4f6", color:userFilter===u?"white":"#6b7280"}}>
+              {u}
+            </button>
           ))}
         </div>
       </div>
@@ -5285,10 +5499,10 @@ function ActivityLogScreen() {
                         {cal && <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{background:cal.color+"22",color:cal.color}}>{cal.name}</span>}
                       </div>
                       <p className="text-sm font-bold truncate" style={{color:log.action==="삭제"?"#9ca3af":"#111827",
-                        textDecoration:log.action==="삭제"?"line-through":"none"}}>{log.title}</p>
+                        textDecoration:log.action==="삭제"?"line-through":"none"}}>{log.detail}</p>
                       <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
-                        <span className="font-semibold text-gray-600">{log.user||"관리자"}</span>
-                        <span>·</span><span>{log.time}</span>
+                        <span className="font-semibold text-gray-600">{typeof log.user==="string"?log.user:log.user?.name||"관리자"}</span>
+                        <span>·</span><span>{log.time?.slice(11,16)}</span>
                       </div>
                     </div>
                   </div>
@@ -5430,23 +5644,17 @@ function ExternalLinksScreen() {
       {/* 헤더 */}
       <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-0">
         <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <button onClick={()=>setCurrentScreen("calendar")} className="p-2 -ml-2 rounded-full hover:bg-gray-200">
-              <ChevronLeft size={24} className="text-gray-700"/>
-            </button>
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">외부 링크</h2>
-              <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
-                자주 쓰는 링크 모음
-                <button onClick={()=>setCatModal(true)}
-                  className="ml-2 text-xs font-bold text-blue-500 border-none bg-transparent cursor-pointer">
-                  카테고리 관리
-                </button>
-              </p>
-              <p className="text-xs text-gray-400 mt-0.5">자주 쓰는 링크 모음</p>
-            </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">외부 링크</h2>
+            <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+              자주 쓰는 링크 모음
+              <button onClick={()=>setCatModal(true)}
+                className="ml-2 text-xs font-bold text-blue-500 border-none bg-transparent cursor-pointer">
+                카테고리 관리
+              </button>
+            </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             {!adding && (
               <button onClick={()=>setSorting(p=>!p)}
                 className="text-sm font-bold px-3 py-2 rounded-xl transition-all"
@@ -5461,6 +5669,9 @@ function ExternalLinksScreen() {
                 {adding?"✕":"+"}
               </button>
             )}
+            <button onClick={()=>setCurrentScreen("calendar")} className="p-2 rounded-full hover:bg-gray-100">
+              <X size={22} className="text-gray-500"/>
+            </button>
           </div>
         </div>
         {!sorting && (
