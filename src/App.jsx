@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { db, functions, storage } from "./firebase";
+import { enablePush, listenForeground } from "./fcm";
 import { collection, doc, setDoc, getDoc, getDocs, updateDoc, onSnapshot, query, where, orderBy, deleteDoc, serverTimestamp } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
@@ -1870,6 +1871,19 @@ function SideDrawer() {
             className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
             <span className="text-lg">❓</span>
             <span className="text-sm font-medium text-gray-700 flex-1 text-left">설정 가이드 · FAQ</span>
+          </button>
+
+          {/* 알림 켜기 */}
+          <button
+            onClick={async () => {
+              const r = await enablePush(currentUser);
+              if (r.ok) alert("🔔 알림이 켜졌습니다!");
+              else alert("알림을 켤 수 없습니다.\n사유: " + r.reason);
+              setDrawer(false);
+            }}
+            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+            <Bell size={20} className="text-amber-500" />
+            <span className="text-sm font-medium text-gray-700 flex-1 text-left">🔔 알림 켜기</span>
           </button>
 
           {/* 로그아웃 */}
@@ -4214,6 +4228,15 @@ function AppInner() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, [setCurrentScreen]);
+
+  // FCM 푸시 — 포그라운드 수신 핸들러 + 이미 허용된 경우 토큰 갱신 (데모 제외)
+  useEffect(() => {
+    if (isDemo || !currentUser?.uid) return;
+    listenForeground();
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      enablePush(currentUser); // 이미 허용된 경우 토큰만 갱신
+    }
+  }, [isDemo, currentUser?.uid]);
 
   return (
     <div className={`flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none${isDemo?" pt-9":""}`}

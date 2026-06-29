@@ -3,6 +3,7 @@ import { getFirestore } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFunctions } from "firebase/functions";
 import { getStorage } from "firebase/storage";
+import { getMessaging, isSupported } from "firebase/messaging";
 
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
@@ -22,3 +23,12 @@ export const provider      = new GoogleAuthProvider();
 export const secondaryAuth = getAuth(secondaryApp);
 export const functions     = getFunctions(app);
 export const storage       = getStorage(app); // AI 상담 분석 등 Cloud Functions 호출용
+
+// FCM 푸시 알림 — 브라우저 지원 시에만 messaging 인스턴스 생성
+export const fcmVapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
+export const getMessagingIfSupported = async () => {
+  try {
+    if (await isSupported()) return getMessaging(app);
+  } catch { /* 미지원 환경 */ }
+  return null;
+};
