@@ -4216,7 +4216,8 @@ function AppInner() {
   }, [setCurrentScreen]);
 
   return (
-    <div className={`h-screen flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none${isDemo?" pt-9":""}`}>
+    <div className={`flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none${isDemo?" pt-9":""}`}
+      style={{height:"100dvh"}}>
       <style>{ANIM_CSS}</style>
       <TopHeader/>
       {needsSetup && <SetupCompanyModal />}
