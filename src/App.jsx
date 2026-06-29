@@ -1891,13 +1891,30 @@ function SideDrawer() {
 const blank=date=>({title:"",description:"",contact:"",team:"",start:date||fmt(new Date()),end:date||fmt(new Date()),allDay:false,startTime:"09:00",endTime:"10:00",place:"",url:"",calId:"",repeat:"none",repeatUntil:"",photos:[]});
 
 // ── 드럼롤 휠 피커 ────────────────────────────────────────────────
-function WheelPicker({ items, value, onChange, renderItem }) {
+function WheelPicker({ items, value, onChange, renderItem, loop=false }) {
   const ITEM_H = 44;
+  const L = items.length;
+  const REPEAT = loop ? 9 : 1;          // 순환용 복제 횟수 (홀수)
+  const CENTER = Math.floor(REPEAT / 2); // 가운데 블록 인덱스
+  const centerOffset = loop ? CENTER * L : 0;
   const ref = useRef(null);
   const timer = useRef(null);
   const scrolling = useRef(false);
   const dragY = useRef(null);
   const display = renderItem || (v => String(v));
+
+  // 순환 모드면 items를 REPEAT번 복제
+  const rendered = loop
+    ? Array.from({ length: REPEAT * L }, (_, i) => items[i % L])
+    : items;
+
+  const idxOf = () => { const i = items.indexOf(value); return i >= 0 ? i : 0; };
+  const posFor = vIdx => (centerOffset + vIdx) * ITEM_H;
+
+  // 가운데(선택)에 위치한 렌더 행 인덱스 — 굵게 표시용
+  const [centerRow, setCenterRow] = useState(centerOffset + idxOf());
+  // 마지막으로 확정한 렌더 행 (delta 계산용)
+  const lastRow = useRef(centerOffset + idxOf());
 
   const onMouseDown = e => {
     dragY.current = e.clientY;
@@ -1916,33 +1933,47 @@ function WheelPicker({ items, value, onChange, renderItem }) {
     document.addEventListener("mouseup", onUp);
   };
 
-  // items/value 변경 시 스크롤 위치 초기화
+  // items 변경 시 위치 초기화 (가운데 블록)
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const idx = items.indexOf(value);
-    if (idx >= 0) el.scrollTop = idx * ITEM_H;
+    el.scrollTop = posFor(idxOf());
+    setCenterRow(centerOffset + idxOf());
+    lastRow.current = centerOffset + idxOf();
   }, [items]);
 
-  // 외부 value 변경 시 부드럽게 이동
+  // 외부 value 변경 시 위치 동기화 (스크롤 중이 아닐 때만)
   useEffect(() => {
     if (scrolling.current) return;
     const el = ref.current;
     if (!el) return;
-    const idx = items.indexOf(value);
-    if (idx >= 0) el.scrollTo({ top: idx * ITEM_H, behavior: "smooth" });
+    el.scrollTop = posFor(idxOf());
+    setCenterRow(centerOffset + idxOf());
+    lastRow.current = centerOffset + idxOf();
   }, [value]);
 
   const handleScroll = () => {
     scrolling.current = true;
+    // 실시간으로 가운데 행 추적 (굵게 표시)
+    const el = ref.current;
+    if (el) {
+      const ci = Math.round(el.scrollTop / ITEM_H);
+      if (ci !== centerRow) setCenterRow(ci);
+    }
     clearTimeout(timer.current);
     timer.current = setTimeout(() => {
+      const el2 = ref.current;
+      if (!el2) { scrolling.current = false; return; }
+      const rawIdx = Math.round(el2.scrollTop / ITEM_H);
+      const vIdx = loop ? ((rawIdx % L) + L) % L : Math.max(0, Math.min(L - 1, rawIdx));
+      const newVal = items[vIdx];
+      const delta = rawIdx - lastRow.current; // 움직인 칸 수 (부호 포함)
+      // 가운데 블록으로 재중앙화 (같은 값이 보이므로 시각적 점프 없음)
+      el2.scrollTop = posFor(vIdx);
+      setCenterRow(centerOffset + vIdx);
+      lastRow.current = centerOffset + vIdx;
       scrolling.current = false;
-      const el = ref.current;
-      if (!el) return;
-      const idx = Math.max(0, Math.min(items.length - 1, Math.round(el.scrollTop / ITEM_H)));
-      el.scrollTo({ top: idx * ITEM_H, behavior: "smooth" });
-      if (items[idx] !== value) onChange(items[idx]);
+      if (delta !== 0) onChange(newVal, delta);
     }, 120);
   };
 
@@ -1951,15 +1982,15 @@ function WheelPicker({ items, value, onChange, renderItem }) {
       {/* 선택 영역 하이라이트 — 텍스트 뒤에 */}
       <div className="absolute left-1 right-1 rounded-xl bg-gray-100 pointer-events-none"
         style={{ top: ITEM_H * 2, height: ITEM_H, zIndex: 1 }} />
-      {/* 스크롤 내용 — 하이라이트 위, 페이드 아래 */}
+      {/* 스크롤 내용 */}
       <div ref={ref} onScroll={handleScroll}
         onWheel={e => { e.preventDefault(); if(ref.current) ref.current.scrollTop += e.deltaY; }}
         onMouseDown={onMouseDown}
         className="h-full overflow-y-scroll cursor-grab active:cursor-grabbing"
         style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none", position: "relative", zIndex: 2 }}>
         <div style={{ height: ITEM_H * 2 }} />
-        {items.map((item, i) => {
-          const sel = item === value;
+        {rendered.map((item, i) => {
+          const sel = i === centerRow;
           return (
             <div key={i} style={{ height: ITEM_H, scrollSnapAlign: "center",
               display: "flex", alignItems: "center", justifyContent: "center",
@@ -1971,7 +2002,7 @@ function WheelPicker({ items, value, onChange, renderItem }) {
         })}
         <div style={{ height: ITEM_H * 2 }} />
       </div>
-      {/* 상하 페이드 — 가장 위 */}
+      {/* 상하 페이드 */}
       <div className="absolute inset-0 pointer-events-none"
         style={{ background: "linear-gradient(to bottom,white 0%,transparent 30%,transparent 70%,white 100%)", zIndex: 3 }} />
     </div>
@@ -2057,51 +2088,31 @@ function DateTimePicker({ form, set, errs }) {
     setActivePicker(field);
   };
 
-  // 각 휠 변경 핸들러 (오버플로우 캐스케이드)
+  // ps.current → Date 객체
+  const baseDate = () => new Date(ps.current.year, ps.current.month-1, ps.current.day, ps.current.h24, ps.current.min);
+  // Date → ps.current 동기화 + 폼 반영
+  const reSync = b => {
+    ps.current = { year: b.getFullYear(), month: b.getMonth()+1, day: b.getDate(), h24: b.getHours(), min: b.getMinutes() };
+    setPYear(ps.current.year); setPMonth(ps.current.month); setPDay(ps.current.day);
+    setPH24(ps.current.h24); setPMin(ps.current.min);
+    applyToForm(ps.current.year, ps.current.month, ps.current.day, ps.current.h24, ps.current.min);
+  };
+
+  // 연도는 순환 안 함 → 값 직접 적용
   const chYear  = v => { ps.current.year = v; setPYear(v); applyToForm(v, ps.current.month, ps.current.day, ps.current.h24, ps.current.min); };
-
-  const chMonth = v => {
-    const prev = ps.current.month;
-    let y = ps.current.year;
-    if (prev === 12 && v === 1) y += 1;
-    else if (prev === 1 && v === 12) y -= 1;
-    ps.current = {...ps.current, month: v, year: y};
-    setPMonth(v); setPYear(y);
-    applyToForm(y, v, ps.current.day, ps.current.h24, ps.current.min);
+  // 월/일/시/분은 delta(움직인 칸 수)를 Date 연산으로 적용 → 자릿수 올림 자동
+  const chMonth = (v, delta=0) => {
+    const b = baseDate();
+    const targetDay = b.getDate();
+    b.setDate(1);
+    b.setMonth(b.getMonth() + delta);
+    const lastDay = new Date(b.getFullYear(), b.getMonth()+1, 0).getDate();
+    b.setDate(Math.min(targetDay, lastDay));
+    reSync(b);
   };
-
-  const chDay = v => {
-    const prev = ps.current.day;
-    const lastDay = new Date(ps.current.year, ps.current.month, 0).getDate();
-    let mo = ps.current.month, y = ps.current.year;
-    if (prev === lastDay && v === 1) {
-      mo += 1;
-      if (mo > 12) { mo = 1; y += 1; }
-    } else if (prev === 1 && v === lastDay) {
-      mo -= 1;
-      if (mo < 1) { mo = 12; y -= 1; }
-    }
-    ps.current = {...ps.current, day: v, month: mo, year: y};
-    setPDay(v); setPMonth(mo); setPYear(y);
-    applyToForm(y, mo, v, ps.current.h24, ps.current.min);
-  };
-
-  const chH24 = v => {
-    const prev = ps.current.h24;
-    let {day, month, year} = ps.current;
-    if (prev === 23 && v === 0) {
-      const next = new Date(year, month-1, day+1);
-      day = next.getDate(); month = next.getMonth()+1; year = next.getFullYear();
-    } else if (prev === 0 && v === 23) {
-      const prev2 = new Date(year, month-1, day-1);
-      day = prev2.getDate(); month = prev2.getMonth()+1; year = prev2.getFullYear();
-    }
-    ps.current = {...ps.current, h24: v, day, month, year};
-    setPH24(v); setPDay(day); setPMonth(month); setPYear(year);
-    applyToForm(year, month, day, v, ps.current.min);
-  };
-
-  const chMin = v => { ps.current.min = v; setPMin(v); applyToForm(ps.current.year, ps.current.month, ps.current.day, ps.current.h24, v); };
+  const chDay = (v, delta=0) => { const b = baseDate(); b.setDate(b.getDate() + delta); reSync(b); };
+  const chH24 = (v, delta=0) => { const b = baseDate(); b.setHours(b.getHours() + delta); reSync(b); };
+  const chMin = (v, delta=0) => { const b = baseDate(); b.setMinutes(b.getMinutes() + delta*5); reSync(b); };
 
   const daysInMonth = new Date(pYear, pMonth, 0).getDate();
   const years  = Array.from({length:8}, (_,i) => 2023+i);
@@ -2166,12 +2177,12 @@ function DateTimePicker({ form, set, errs }) {
           {/* 드럼롤 */}
           <div className="flex px-1" style={{height:220}}>
             <WheelPicker key={`y`}  items={years}  value={pYear}  onChange={chYear}  renderItem={v=>String(v)}/>
-            <WheelPicker key={`mo`} items={months} value={pMonth} onChange={chMonth} renderItem={v=>`${v}월`}/>
+            <WheelPicker key={`mo`} items={months} value={pMonth} onChange={chMonth} renderItem={v=>`${v}월`} loop/>
             <WheelPicker key={`${pYear}-${pMonth}-d`} items={days} value={pDay} onChange={chDay}
-              renderItem={v=>`${v}일 ${WD[new Date(pYear,pMonth-1,v).getDay()]}`}/>
+              renderItem={v=>`${v}일 ${WD[new Date(pYear,pMonth-1,v).getDay()]}`} loop/>
             {!form.allDay && <>
-              <WheelPicker key={`h24`} items={hours24} value={pH24} onChange={chH24} renderItem={fmtH24}/>
-              <WheelPicker key={`m`}   items={mins}    value={pMin} onChange={chMin} renderItem={v=>String(v).padStart(2,"0")}/>
+              <WheelPicker key={`h24`} items={hours24} value={pH24} onChange={chH24} renderItem={fmtH24} loop/>
+              <WheelPicker key={`m`}   items={mins}    value={pMin} onChange={chMin} renderItem={v=>String(v).padStart(2,"0")} loop/>
             </>}
           </div>
           {/* 오늘/닫기 버튼 */}
