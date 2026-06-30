@@ -36,15 +36,25 @@ export async function enablePush(user) {
   }
 }
 
-// 포그라운드(앱이 화면에 떠 있을 때) 메시지 수신 → 브라우저 알림 표시
+// 포그라운드(앱이 화면에 떠 있을 때) 메시지 수신 → 알림 표시
+// 모바일 브라우저는 new Notification()을 지원하지 않으므로 서비스워커의 showNotification 사용
 export async function listenForeground() {
   const messaging = await getMessagingIfSupported();
   if (!messaging) return;
-  onMessage(messaging, payload => {
+  onMessage(messaging, async payload => {
+    if (Notification.permission !== "granted") return;
     const title = payload.notification?.title || "클린메니져";
-    const body  = payload.notification?.body || "";
-    if (Notification.permission === "granted") {
-      new Notification(title, { body, icon: `${import.meta.env.BASE_URL}favicon.svg` });
-    }
+    const options = {
+      body: payload.notification?.body || "",
+      icon: `${import.meta.env.BASE_URL}favicon.svg`,
+      data: payload.data || {},
+    };
+    try {
+      const reg = await navigator.serviceWorker.getRegistration(`${import.meta.env.BASE_URL}firebase-messaging-sw.js`)
+        || await navigator.serviceWorker.ready;
+      if (reg?.showNotification) { reg.showNotification(title, options); return; }
+    } catch { /* SW 없으면 아래로 */ }
+    // 데스크톱 폴백
+    try { new Notification(title, options); } catch { /* 미지원 무시 */ }
   });
 }
