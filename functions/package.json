@@ -1,0 +1,14 @@
+{
+  "name": "clean-manager-functions",
+  "description": "Cloud Functions for Clean-Manager",
+  "type": "module",
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^12.7.0",
+    "firebase-functions": "^6.1.0"
+  },
+  "private": true
+}

@@ -33,6 +33,7 @@ const TABS = [
   { id: "admins",    label: "🔑 관리자목록",  group: "ops"  },
   { id: "deleted",   label: "🗑️ 삭제목록",    group: "ops"  },
   { id: "dupphone",  label: "📱 중복전화번호", group: "ops"  },
+  { id: "cals",      label: "🎨 팀 캘린더",    group: "ops"  },
 ];
 
 // ── 탭별 숨길 컬럼 & 컬럼 순서 설정 ──────────────────────────
@@ -71,21 +72,29 @@ const TAB_COL_CONFIG = {
     hidden: [],
     order:  ["phone", "이름1", "회사1", "등록일1", "이름2", "회사2", "등록일2", "이름3", "회사3", "등록일3"],
   },
+  cals: {
+    hidden: ["checked"],
+    order:  ["_company", "name", "label", "color", "isField"],
+  },
 };
 
 // ── 컬럼 목록 생성 (숨김·순서 적용) ─────────────────────────
+// 행마다 필드가 달라도 컬럼은 항상 동일하게: cfg.order + 모든 행의 필드 합집합
 function buildColumns(rows, tabId) {
-  if (!rows.length) return [];
   const cfg    = TAB_COL_CONFIG[tabId] || { hidden: [], order: [] };
   const hidden = new Set(["_id", "_path", ...cfg.hidden]);
-  const all    = Object.keys(rows[0]).filter(k => !hidden.has(k));
 
-  // cfg.order 에 있는 것 먼저, 나머지는 뒤에
-  const ordered = [
+  // 모든 행의 키 합집합 (첫 행만 보지 않음 → 컬럼 누락 방지)
+  const union = new Set();
+  rows.forEach(r => Object.keys(r).forEach(k => union.add(k)));
+  // 설정된 순서 컬럼은 데이터가 없어도 항상 포함
+  cfg.order.forEach(k => union.add(k));
+
+  const all = [...union].filter(k => !hidden.has(k));
+  return [
     ...cfg.order.filter(k => all.includes(k)),
     ...all.filter(k => !cfg.order.includes(k)),
   ];
-  return ordered;
 }
 
 // ── Firebase 데이터 로더 ──────────────────────────────────────
@@ -103,6 +112,19 @@ async function loadData(tabId) {
 
   if (tabId === "companies") {
     compSnap.forEach(d => { if (d.data().status !== "deleted") rows.push({ _id: d.id, _path: `companies/${d.id}`, _companyId: d.id, ...d.data() }); });
+
+  } else if (tabId === "cals") {
+    // 회사별 팀 캘린더(색상) — 중복 정리용
+    for (const compDoc of compSnap.docs) {
+      const calSnap = await getDocs(collection(db, "companies", compDoc.id, "cals"));
+      calSnap.forEach(d => rows.push({
+        _id: d.id,
+        _path: `companies/${compDoc.id}/cals/${d.id}`,
+        _companyId: compDoc.id,
+        _company: compMap[compDoc.id] || compDoc.id,
+        ...d.data(),
+      }));
+    }
 
   } else if (tabId === "deleted") {
     // 삭제된 companies
@@ -270,10 +292,10 @@ export default function SuperAdmin() {
     alert("✅ 비밀번호가 성공적으로 변경되었습니다!");
   }
 
-  // ── 삭제 (삭제목록에서 삭제 시 영구 삭제, 일반 탭에서는 소프트 삭제) ──
+  // ── 삭제 (삭제목록/캘린더 탭은 영구 삭제, 그 외 일반 탭은 소프트 삭제) ──
   async function handleDelete(row) {
     try {
-      const isHardDelete = activeTab === "deleted";
+      const isHardDelete = activeTab === "deleted" || activeTab === "cals";
       const parts = row._path.split("/");
 
       if (isHardDelete) {
@@ -332,7 +354,7 @@ export default function SuperAdmin() {
         }
       }
 
-      setRows(prev => prev.filter(r => r._id !== row._id));
+      setRows(prev => prev.filter(r => (r._path || r._id) !== (row._path || row._id)));
       setDeleteTarget(null);
     } catch (e) { alert("삭제 실패: " + e.message); }
   }
@@ -380,7 +402,7 @@ export default function SuperAdmin() {
   // ── 다중 삭제 ──
   async function handleBulkDelete() {
     if (!checkedIds.size) return;
-    const isHardDelete = activeTab === "deleted";
+    const isHardDelete = activeTab === "deleted" || activeTab === "cals";
     if (!window.confirm(`선택한 ${checkedIds.size}개를 ${isHardDelete ? "영구 삭제" : "삭제"}하시겠습니까?${isHardDelete ? "\n⚠️ 복구할 수 없습니다!" : ""}`)) return;
     const deletedAt = new Date().toISOString();
     const targets = filtered.filter(r => checkedIds.has(r._id));
@@ -456,7 +478,7 @@ export default function SuperAdmin() {
       const bv = String(b[sortCol] ?? "").toLowerCase();
       return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
     });
-  const columns = buildColumns(filtered, activeTab);
+  const columns = buildColumns(rows, activeTab); // 필터와 무관하게 전체 행 기준으로 컬럼 고정
 
   const handleSort = (col) => {
     if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -716,7 +738,7 @@ export default function SuperAdmin() {
                   const isDeletedTab = activeTab === "deleted";
                   const isReadOnly = activeTab === "deleted" || activeTab === "dupphone";
                   return (
-                    <tr key={row._id}
+                    <tr key={row._path || row._id}
                       onClick={() => !isReadOnly && startEdit(row)}
                       className={`border-b border-gray-800 transition-colors
                         ${isDeletedTab ? "" : "cursor-pointer"}

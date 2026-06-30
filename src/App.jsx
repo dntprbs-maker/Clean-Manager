@@ -316,7 +316,7 @@ function Provider({ children, loginUser, onLogout }) {
         .sort((a,b) => (a.order ?? 0) - (b.order ?? 0)));
     });
     const unsubCals = onSnapshot(collection(companyRef, "cals"), snap => {
-      if (!snap.empty) setCals(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      if (!snap.empty) setCals(snap.docs.filter(d => d.data().status !== "deleted").map(d => ({ ...d.data(), id: d.id })));
     });
     const unsubReports = onSnapshot(collection(companyRef, "reports"), snap => {
       setReports(snap.docs.map(d => ({ ...d.data(), id: d.id }))
@@ -4652,16 +4652,14 @@ function TeamManagementModal() {
     if (!name) return;
     if (teams.includes(name)) { alert("이미 존재하는 팀입니다."); return; }
     saveTeams([teams[0], name, ...teams.slice(1)]);
-    // 현장팀이면 캘린더(담당팀)도 생성
+    // 현장팀이면 캘린더(담당팀)도 생성 — 같은 이름 캘린더가 이미 있으면 새로 만들지 않음
     if (newTeamIsField) {
-      const newCal = {
-        id: `cal_${Date.now()}`,
-        label: name, name,
-        color: newTeamColor,
-        checked: true,
-        isField: true,
-      };
-      updateCal(newCal);
+      const existing = cals.find(c => c.label === name || c.name === name);
+      if (existing) {
+        updateCal({ ...existing, color: newTeamColor, isField: true });
+      } else {
+        updateCal({ id: `cal_${Date.now()}`, label: name, name, color: newTeamColor, checked: true, isField: true });
+      }
     }
     setNewTeam("");
     setNewTeamIsField(true);
@@ -4673,9 +4671,8 @@ function TeamManagementModal() {
     if (window.confirm("삭제하는 팀의 팀장,팀원은 소속이 미정으로 변경됩니다.")) {
       reassignTeam(targetTeam, "미정");
       saveTeams(teams.filter(t => t !== targetTeam));
-      // 해당 팀 캘린더도 같이 삭제
-      const teamCal = cals.find(c => c.label === targetTeam || c.name === targetTeam);
-      if (teamCal) deleteCal(teamCal.id);
+      // 해당 팀명과 일치하는 모든 캘린더 삭제 (중복 포함)
+      cals.filter(c => c.label === targetTeam || c.name === targetTeam).forEach(c => deleteCal(c.id));
     }
   };
 
