@@ -1360,7 +1360,7 @@ function DetailSheet() {
             {currentUser.role !== "팀원" && <>
               <button onClick={()=>{close();setTimeout(()=>openModal(null,detEv.id),300);}}
                 className="p-2 rounded-full hover:bg-gray-100"><Edit3 size={19} className="text-gray-600"/></button>
-              <button onClick={()=>{deleteEvent(detEv.id);close();}}
+              <button onClick={()=>{ if(window.confirm("이 일정을 삭제하시겠습니까?")){ deleteEvent(detEv.id); close(); } }}
                 className="p-2 rounded-full hover:bg-gray-100"><Trash2 size={19} className="text-gray-600"/></button>
             </>}
           </div>
@@ -2731,7 +2731,7 @@ function EventModal() {
         {/* 삭제 버튼 */}
         {editId&&(
           <div className="px-4 py-4">
-            <button onClick={()=>{deleteEvent(editId);closeModal();}}
+            <button onClick={()=>{ if(window.confirm("이 일정을 삭제하시겠습니까?")){ deleteEvent(editId); closeModal(); } }}
               className="w-full py-3.5 rounded-2xl text-red-500 text-sm font-bold bg-red-50">
               이 일정 삭제
             </button>
@@ -3893,11 +3893,20 @@ function LoginScreen({ onLogin }) {
       }
       const user = {...pendingUser, pw};
       try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
-      onLogin(user);
+      setPendingUser(user);
+      setMode("notifyConsent"); // 비번 설정 후 알림 동의 단계로
     } catch(e) {
       console.error(e);
       setError("비밀번호 설정 중 오류가 발생했습니다.");
     } finally { setLoading(false); }
+  };
+
+  // 알림 동의 → 권한 요청 + 토큰 등록 후 앱 진입
+  const handleNotifyConsent = async () => {
+    setLoading(true);
+    try { await enablePush(pendingUser); } catch { /* 실패해도 진입은 허용 */ }
+    onLogin(pendingUser);
+    setLoading(false);
   };
 
   // 업체 가입
@@ -3934,6 +3943,37 @@ function LoginScreen({ onLogin }) {
   };
 
   // ── 비밀번호 설정 화면 (첫 로그인) ──
+  if(mode==="notifyConsent") {
+    return (
+      <div className="flex flex-col justify-center bg-white w-full px-6 py-10" style={{minHeight:"100dvh"}}>
+        <div className="flex flex-col items-center justify-center px-2 mb-8">
+          <div className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mb-6 shadow-xl"
+            style={{background:"linear-gradient(135deg,#f59e0b,#d97706)"}}>🔔</div>
+          <h1 className="text-2xl font-extrabold text-gray-900 mb-3 text-center">알림 받기</h1>
+          <p className="text-sm text-gray-500 text-center leading-relaxed">
+            새로운 청소 일정이 등록되면<br/>
+            <span className="font-bold text-gray-800">스마트폰 알림</span>으로 바로 알려드려요.
+          </p>
+          <div className="mt-6 w-full bg-amber-50 border border-amber-100 rounded-2xl p-4">
+            <p className="text-xs text-amber-700 leading-relaxed">
+              📌 업무 일정을 놓치지 않으려면 알림을 켜는 것을 권장합니다.<br/>
+              다음 화면에서 <span className="font-bold">"허용"</span>을 눌러주세요.
+            </p>
+          </div>
+        </div>
+        <button onClick={handleNotifyConsent} disabled={loading}
+          className="w-full py-4 rounded-2xl text-white text-base font-bold"
+          style={{background:"linear-gradient(135deg,#f59e0b,#d97706)",opacity:loading?0.7:1}}>
+          {loading ? "설정 중..." : "🔔 알림 받기"}
+        </button>
+        <button onClick={() => onLogin(pendingUser)} disabled={loading}
+          className="w-full py-3 mt-2 text-sm text-gray-400 font-semibold">
+          나중에 설정
+        </button>
+      </div>
+    );
+  }
+
   if(mode==="setPw") {
     return (
       <div className="flex flex-col justify-center bg-white w-full px-6 py-10" style={{minHeight:"100dvh"}}>
