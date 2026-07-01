@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 
 import { db, functions, storage } from "./firebase";
-import { enablePush, listenForeground } from "./fcm";
+import { enablePush, disablePush, listenForeground } from "./fcm";
 import { collection, doc, setDoc, getDoc, getDocs, updateDoc, onSnapshot, query, where, orderBy, deleteDoc, serverTimestamp } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
@@ -4350,7 +4350,8 @@ export default function App() {
     setAuthState("login");
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try { await disablePush(loginUser); } catch { /* 무시 */ } // 이 기기 토큰 제거 → 로그아웃 상태에선 알림 안 옴
     try { localStorage.removeItem("loginUser"); } catch (e) { /* ignore */ }
     setLoginUser(null);
     setAuthState("login");

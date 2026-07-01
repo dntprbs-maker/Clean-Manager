@@ -60,6 +60,30 @@ export async function enablePush(user) {
   }
 }
 
+// 로그아웃 시 이 기기 토큰을 모든 직원 문서에서 제거 → 로그아웃 상태에선 알림 안 옴
+export async function disablePush(user) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  if (!fcmVapidKey || !("serviceWorker" in navigator)) return;
+  const messaging = await getMessagingIfSupported();
+  if (!messaging) return;
+  try {
+    const swReg = await navigator.serviceWorker.getRegistration(`${import.meta.env.BASE_URL}firebase-messaging-sw.js`)
+      || await navigator.serviceWorker.ready;
+    const token = await getToken(messaging, { vapidKey: fcmVapidKey, serviceWorkerRegistration: swReg });
+    if (!token) return;
+
+    // 이 회사 users + staffs 전체에서 이 토큰 제거
+    if (user?.companyId) {
+      const q = query(collection(db, "companies", user.companyId, "users"), where("fcmTokens", "array-contains", token));
+      const snap = await getDocs(q);
+      await Promise.all(snap.docs.map(d => updateDoc(d.ref, { fcmTokens: arrayRemove(token) }).catch(()=>{})));
+    }
+    const sq = query(collection(db, "staffs"), where("fcmTokens", "array-contains", token));
+    const ssnap = await getDocs(sq);
+    await Promise.all(ssnap.docs.map(d => updateDoc(d.ref, { fcmTokens: arrayRemove(token) }).catch(()=>{})));
+  } catch (e) { console.warn("[FCM] 로그아웃 토큰 제거 실패:", e); }
+}
+
 // 포그라운드(앱이 화면에 떠 있을 때) 메시지 수신 → 알림 표시
 // 모바일 브라우저는 new Notification()을 지원하지 않으므로 서비스워커의 showNotification 사용
 export async function listenForeground() {
