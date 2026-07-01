@@ -84,31 +84,38 @@
 
 ---
 
-## 🔔 FCM 푸시 알림 (진행 중)
+## 🔔 FCM 푸시 알림 (✅ 완료)
 
-**완료 (클라이언트):**
+**클라이언트:**
 - [x] 알림 권한 요청 + FCM 토큰 발급 (`src/fcm.js`)
 - [x] 토큰을 직원 문서(users/staffs)의 `fcmTokens` 배열에 저장 (여러 기기 누적)
 - [x] 백그라운드 서비스워커 (`public/firebase-messaging-sw.js`)
-- [x] 포그라운드 메시지 수신 핸들러
+- [x] 포그라운드 메시지 수신 (서비스워커 showNotification — 모바일 대응)
 - [x] 사이드 드로어 "🔔 알림 켜기" 버튼
+- [x] 첫 로그인 시 알림 동의 화면 (비번 설정 → 알림 동의 → 진입)
 - [x] VAPID 키 발급 + .env 등록
 
-**남은 작업:**
-- [ ] **Vercel 환경변수에 `VITE_FIREBASE_VAPID_KEY` 추가** (배포본 작동용)
-- [ ] **GitHub Secrets에 `VITE_FIREBASE_VAPID_KEY` 추가** (main 운영 배포 시)
-- [ ] **서버 발송 (Cloud Functions)** — 일정 등록/변경 시 해당 팀원 토큰으로 실제 알림 발송. Firestore onWrite 트리거 + admin SDK 필요. Blaze 플랜 확인 필요.
+**서버 (Cloud Functions, asia-northeast3, Blaze):**
+- [x] `sendEventNotification` — 일정 등록 시 담당 팀원에게 알림
+- [x] `sendEventUpdateNotification` — 일정 수정 시 알림 (핵심 필드 변경 시에만)
+- [x] `sendEventDeleteNotification` — 일정 삭제 시 "일정 취소" 알림
+- [x] 무효 토큰 자동 정리, 미배정 일정은 사장/관리팀에게 알림
 
-**결정 사항 / 메모:**
-- 알림 켜기는 **기기·브라우저마다 한 번씩** 눌러야 함 (FCM 토큰이 기기 단위 발급)
-- 현재는 **수동 방식** (메뉴에서 직접 "알림 켜기"). 나중에 **로그인 시 자동 권한 요청**으로 바꾸는 것 검토 가능 (직원들이 깜빡할 수 있으므로)
+**검증 완료:** 백그라운드/포그라운드 모두 수신 확인 (모바일 포함)
+
+**남은 작업 / 메모:**
+- [ ] **GitHub Secrets에 `VITE_FIREBASE_VAPID_KEY` 추가** (main 운영 배포 시 필요)
+- [ ] Vercel 환경변수 `VITE_FIREBASE_VAPID_KEY` — 배포본에서 토큰 등록하려면 추가 필요
+- [ ] (검토) 사장/관리팀도 모든 팀 일정 알림 받기 — 현재는 담당팀만
+- [ ] (검토) 공지사항 등록 시 전 직원 알림
+- 알림 켜기는 **기기·브라우저마다 한 번씩** 필요 (FCM 토큰이 기기 단위)
 - VAPID 키: `BG2GEiG-Snv3Hhp9u14vRN4Tvnk7vMFdsSSDciFf0i_4wjhyrYPOiEbsylOg_RzDfHZVqRwk-F0zk3K5ROyFYOc`
 
 ---
 
 ## 📌 미구현 / 예정
 
-- [ ] ~~**알림 구현** — FCM/카톡~~ → 위 "FCM 푸시 알림" 섹션으로 이동
+- [x] ~~**알림 구현** — FCM 푸시 알림 완료 (위 "FCM 푸시 알림" 섹션 참고)~~
 
 - [ ] **직원 다중 팀 소속**
   - 직원 한 명이 여러 팀에 동시 소속 가능하도록
