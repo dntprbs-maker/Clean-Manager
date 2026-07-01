@@ -1,9 +1,36 @@
 // FCM 클라이언트 헬퍼 — 알림 권한 요청 + 토큰 발급 + Firestore 저장
 import { getToken, onMessage } from "firebase/messaging";
-import { doc, updateDoc, arrayUnion } from "firebase/firestore";
+import { doc, updateDoc, arrayUnion, arrayRemove, collection, query, where, getDocs } from "firebase/firestore";
 import { db, fcmVapidKey, getMessagingIfSupported } from "./firebase";
 
-// 알림 권한 요청 → 토큰 발급 → 직원 문서에 토큰 저장
+// 이 기기 토큰을 "현재 로그인한 사람" 소유로 이전
+// (다른 직원 문서에서 이 토큰 제거 → 현재 사용자에게만 등록)
+// 한 기기 = 마지막 로그인한 사람만 알림 받음
+async function claimToken(user, token) {
+  // 1) 같은 회사의 다른 직원 문서에서 이 토큰 제거
+  try {
+    const q = query(collection(db, "companies", user.companyId, "users"), where("fcmTokens", "array-contains", token));
+    const snap = await getDocs(q);
+    await Promise.all(snap.docs.map(d =>
+      d.id === user.uid ? null : updateDoc(d.ref, { fcmTokens: arrayRemove(token) }).catch(()=>{})
+    ));
+  } catch { /* 무시 */ }
+  // 2) staffs 컬렉션에서도 다른 사람 문서에서 제거
+  try {
+    const sq = query(collection(db, "staffs"), where("fcmTokens", "array-contains", token));
+    const ssnap = await getDocs(sq);
+    await Promise.all(ssnap.docs.map(d =>
+      d.id === user.uid ? null : updateDoc(d.ref, { fcmTokens: arrayRemove(token) }).catch(()=>{})
+    ));
+  } catch { /* 무시 */ }
+  // 3) 현재 로그인한 직원에게 등록 (관리자는 user 문서가 없어 실패해도 무시 → 알림 안 받음)
+  await Promise.all([
+    updateDoc(doc(db, "companies", user.companyId, "users", user.uid), { fcmTokens: arrayUnion(token) }).catch(()=>{}),
+    updateDoc(doc(db, "staffs", user.uid), { fcmTokens: arrayUnion(token) }).catch(()=>{}),
+  ]);
+}
+
+// 알림 권한 요청 → 토큰 발급 → 현재 사용자 소유로 이전
 // 성공 시 { ok:true, token }, 실패 시 { ok:false, reason } 반환
 export async function enablePush(user) {
   if (!user?.uid || !user?.companyId) return { ok:false, reason:"사용자 정보 없음" };
@@ -25,10 +52,7 @@ export async function enablePush(user) {
     const token = await getToken(messaging, { vapidKey: fcmVapidKey, serviceWorkerRegistration: swReg });
     if (!token) return { ok:false, reason:"토큰 빈 값" };
 
-    await Promise.all([
-      updateDoc(doc(db, "companies", user.companyId, "users", user.uid), { fcmTokens: arrayUnion(token) }).catch(()=>{}),
-      updateDoc(doc(db, "staffs", user.uid), { fcmTokens: arrayUnion(token) }).catch(()=>{}),
-    ]);
+    await claimToken(user, token);
     return { ok:true, token };
   } catch (e) {
     console.error("[FCM] 토큰 발급 실패:", e);

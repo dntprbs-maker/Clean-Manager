@@ -4273,7 +4273,7 @@ function AppInner() {
     if (isDemo || !currentUser?.uid) return;
     listenForeground();
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-      enablePush(currentUser); // 이미 허용된 경우 토큰만 갱신
+      enablePush(currentUser); // 로그인 시 이 기기 토큰을 현재 사용자 소유로 이전
     }
   }, [isDemo, currentUser?.uid]);
 
