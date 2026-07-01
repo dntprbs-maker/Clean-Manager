@@ -4266,11 +4266,14 @@ function IphoneInstallGuide() {
   const dismissed = typeof sessionStorage !== "undefined" &&
     sessionStorage.getItem("iphoneGuideDismissed") === "1";
 
-  const show = forcePreview || (isIOS && !isStandalone && !dismissed && !closed);
+  // 닫기(closed)를 최우선으로 — 미리보기 모드에서도 X 누르면 닫힘
+  const show = !closed && (forcePreview || (isIOS && !isStandalone && !dismissed));
   if (!show) return null;
 
   const close = () => {
     setClosed(true);
+    // 미리보기(#iphonebanner) 상태면 해시 제거해서 다시 안 뜨게
+    if (forcePreview) { try { history.replaceState(null, "", window.location.pathname + window.location.search); } catch {} }
     try { sessionStorage.setItem("iphoneGuideDismissed", "1"); } catch {}
   };
 
