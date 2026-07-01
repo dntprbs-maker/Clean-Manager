@@ -58,13 +58,13 @@ async function notifyTeam(companyId, eventId, ev, action) {
   const title = `${prefix}${label}`;
   const body = `${ev.title || "제목 없음"}\n${dateLine}${ev.place ? " · " + ev.place : ""}`;
 
-  // 4) 발송
+  // 4) 발송 — data-only 메시지 (notification 필드 넣으면 브라우저가 자동 표시 + SW 표시로 중복됨)
+  //         표시는 클라이언트(SW onBackgroundMessage / 포그라운드 onMessage)에서 한 번만 처리
   const tokens = [...new Set(targets.map((t) => t.token))];
   const resp = await getMessaging().sendEachForMulticast({
     tokens,
-    notification: { title, body },
-    data: { companyId, eventId, type: `event_${action}` },
-    webpush: { notification: { icon: "/favicon.svg" }, fcmOptions: { link: "/" } },
+    data: { title, body, companyId, eventId, type: `event_${action}` },
+    webpush: { fcmOptions: { link: "/" } },
   });
   console.log(`[알림:${action}] 발송 ${resp.successCount}/${tokens.length} (team=${teamName || "미지정"})`);
 

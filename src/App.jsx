@@ -2561,9 +2561,17 @@ function EventModal() {
             {editId ? <X size={22} className="text-gray-600"/> : <ChevronLeft size={22} className="text-gray-600"/>}
           </button>
           <h2 className="font-bold text-base">{editId?"일정 수정":"일정 추가"}</h2>
-          <button onClick={submit} disabled={uploading} className="text-blue-500 font-bold text-base disabled:opacity-40">
-            {uploading ? "저장 중..." : "완료"}
-          </button>
+          <div className="flex items-center gap-3">
+            {editId && (
+              <button onClick={()=>{ if(window.confirm("이 일정을 삭제하시겠습니까?")){ deleteEvent(editId); closeModal(); } }}
+                className="text-red-500 font-bold text-base">
+                삭제
+              </button>
+            )}
+            <button onClick={submit} disabled={uploading} className="text-blue-500 font-bold text-base disabled:opacity-40">
+              {uploading ? "저장 중..." : "저장"}
+            </button>
+          </div>
         </div>
         {/* 담당팀 드롭다운 트리거 */}
         <div className="relative pb-2">
@@ -2728,15 +2736,6 @@ function EventModal() {
           )}
         </div>
 
-        {/* 삭제 버튼 */}
-        {editId&&(
-          <div className="px-4 py-4">
-            <button onClick={()=>{ if(window.confirm("이 일정을 삭제하시겠습니까?")){ deleteEvent(editId); closeModal(); } }}
-              className="w-full py-3.5 rounded-2xl text-red-500 text-sm font-bold bg-red-50">
-              이 일정 삭제
-            </button>
-          </div>
-        )}
         <div className="h-8"/>
       </div>
       </>

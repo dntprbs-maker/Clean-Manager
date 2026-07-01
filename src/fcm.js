@@ -43,11 +43,13 @@ export async function listenForeground() {
   if (!messaging) return;
   onMessage(messaging, async payload => {
     if (Notification.permission !== "granted") return;
-    const title = payload.notification?.title || "클린메니져";
+    const d = payload.data || {};
+    const title = d.title || payload.notification?.title || "클린메니져";
     const options = {
-      body: payload.notification?.body || "",
+      body: d.body || payload.notification?.body || "",
       icon: `${import.meta.env.BASE_URL}favicon.svg`,
-      data: payload.data || {},
+      tag: d.eventId || undefined,
+      data: d,
     };
     try {
       const reg = await navigator.serviceWorker.getRegistration(`${import.meta.env.BASE_URL}firebase-messaging-sw.js`)

@@ -16,13 +16,16 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 // 백그라운드(앱이 꺼져있거나 다른 탭일 때) 알림 수신
+// data-only 메시지이므로 payload.data에서 제목/본문을 읽는다 (중복 표시 방지)
 messaging.onBackgroundMessage(payload => {
-  const title = payload.notification?.title || "클린메니져";
+  const d = payload.data || {};
+  const title = d.title || "클린메니져";
   const options = {
-    body: payload.notification?.body || "",
+    body: d.body || "",
     icon: "/favicon.svg",
     badge: "/favicon.svg",
-    data: payload.data || {},
+    tag: d.eventId || undefined,   // 같은 일정 알림은 하나로 합침
+    data: d,
   };
   self.registration.showNotification(title, options);
 });
