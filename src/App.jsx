@@ -4249,6 +4249,80 @@ function SetupCompanyModal() {
   );
 }
 
+// ── 아이폰 홈 화면 추가 안내 배너 ───────────────────────────────────
+function IphoneInstallGuide() {
+  const [closed, setClosed] = useState(false);
+
+  // 강제 미리보기: 주소 뒤에 #iphonebanner 붙이면 어떤 기기에서도 표시
+  const forcePreview = typeof window !== "undefined" && window.location.hash.includes("iphonebanner");
+
+  const isIOS = typeof navigator !== "undefined" &&
+    /iPad|iPhone|iPod/.test(navigator.userAgent);
+  // 이미 홈 화면 앱으로 실행 중이면 안내 불필요
+  const isStandalone = typeof window !== "undefined" &&
+    (window.navigator.standalone === true ||
+     window.matchMedia?.("(display-mode: standalone)")?.matches);
+  // 이 세션에서 이미 닫았으면 다시 안 띄움
+  const dismissed = typeof sessionStorage !== "undefined" &&
+    sessionStorage.getItem("iphoneGuideDismissed") === "1";
+
+  const show = forcePreview || (isIOS && !isStandalone && !dismissed && !closed);
+  if (!show) return null;
+
+  const close = () => {
+    setClosed(true);
+    try { sessionStorage.setItem("iphoneGuideDismissed", "1"); } catch {}
+  };
+
+  return (
+    <div className="fixed inset-0 z-[500] flex items-end justify-center bg-black/50" onClick={close}>
+      <div className="w-full max-w-sm bg-white rounded-t-3xl p-6 shadow-2xl" onClick={e=>e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-extrabold text-gray-900">📱 알림 받기 설정</h2>
+          <button onClick={close} className="p-1 text-gray-400"><X size={22}/></button>
+        </div>
+        <p className="text-sm text-gray-500 mb-5 leading-relaxed">
+          아이폰은 <span className="font-bold text-gray-800">홈 화면에 추가</span>해야<br/>
+          청소 일정 알림을 받을 수 있어요. 아래 순서대로 해주세요!
+        </p>
+
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-3 bg-gray-50 rounded-2xl p-4">
+            <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center shrink-0">1</div>
+            <p className="text-sm text-gray-800">
+              사파리 아래쪽 <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-blue-100 text-blue-600 font-bold align-middle">⬆️</span> <span className="font-bold">공유 버튼</span>을 누르세요
+            </p>
+          </div>
+          <div className="flex items-center gap-3 bg-gray-50 rounded-2xl p-4">
+            <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center shrink-0">2</div>
+            <p className="text-sm text-gray-800">
+              메뉴에서 <span className="font-bold">"홈 화면에 추가"</span>를 누르세요
+            </p>
+          </div>
+          <div className="flex items-center gap-3 bg-gray-50 rounded-2xl p-4">
+            <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center shrink-0">3</div>
+            <p className="text-sm text-gray-800">
+              홈 화면에 생긴 <span className="font-bold">🧹 클린메니져 아이콘</span>으로 다시 열어주세요
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 bg-amber-50 border border-amber-100 rounded-2xl p-3">
+          <p className="text-xs text-amber-700 leading-relaxed">
+            ⚠️ 이렇게 안 하면 아이폰에서는 알림이 오지 않아요.<br/>
+            잘 모르겠으면 팀장님께 도움을 요청하세요.
+          </p>
+        </div>
+
+        <button onClick={close}
+          className="w-full mt-4 py-3.5 rounded-2xl text-sm font-bold text-gray-500 bg-gray-100">
+          나중에 하기
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AppInner() {
   const { currentScreen, setCurrentScreen, currentUser, isDemo } = useC();
   const needsSetup = !isDemo && !currentUser?.companyName;
@@ -4283,6 +4357,7 @@ function AppInner() {
       <style>{ANIM_CSS}</style>
       <TopHeader/>
       {needsSetup && <SetupCompanyModal />}
+      <IphoneInstallGuide />
       {currentScreen === "calendar" && (
         <>
           <CalendarView/>
