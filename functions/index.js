@@ -299,7 +299,18 @@ function toIcsUtc(dateStr, timeStr) {
 const toIcsDate = dateStr => dateStr.replace(/-/g, "");
 
 export const calendarFeed = onRequest({ region: REGION, cors: true }, async (req, res) => {
-  const { company, cal, token } = req.query;
+  // 네이버 등 일부 캘린더 앱은 URL이 .ics 로 끝나야 구독 대상으로 인식하므로
+  // 경로 방식(/calendarFeed/{company}/{cal}/{token}.ics)을 우선 지원하고,
+  // 기존 쿼리 파라미터 방식(?company=...&cal=...&token=...)도 하위 호환으로 유지
+  const pathParts = req.path.split("/").filter(Boolean);
+  let company, cal, token;
+  if (pathParts.length >= 3) {
+    company = pathParts[0];
+    cal = pathParts[1];
+    token = pathParts[2].replace(/\.ics$/i, "");
+  } else {
+    ({ company, cal, token } = req.query);
+  }
   if (!company || !cal || !token) {
     res.status(400).send("잘못된 요청입니다.");
     return;

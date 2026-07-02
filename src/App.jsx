@@ -91,7 +91,7 @@ const genFeedToken = () => {
   return Array.from({ length: 48 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
 };
 const feedUrl = (companyId, calId, token) =>
-  `https://asia-northeast3-${import.meta.env.VITE_FIREBASE_PROJECT_ID}.cloudfunctions.net/calendarFeed?company=${companyId}&cal=${calId}&token=${token}`;
+  `https://asia-northeast3-${import.meta.env.VITE_FIREBASE_PROJECT_ID}.cloudfunctions.net/calendarFeed/${companyId}/${calId}/${token}.ics`;
 
 // ── 전화번호 정규화/표시 ───────────────────────────────────────────
 // 저장은 숫자만(canonical), 화면 표시는 하이픈 포맷으로.
