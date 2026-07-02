@@ -31,9 +31,9 @@ const TABS = [
   { id: "companies", label: "🏢 회사목록",    group: "ops"  },
   { id: "staffs",    label: "👤 직원목록",    group: "ops"  },
   { id: "admins",    label: "🔑 관리자목록",  group: "ops"  },
-  { id: "deleted",   label: "🗑️ 삭제목록",    group: "ops"  },
   { id: "dupphone",  label: "📱 중복전화번호", group: "ops"  },
   { id: "cals",      label: "🎨 팀 캘린더",    group: "ops"  },
+  { id: "deleted",   label: "🗑️ 삭제목록",    group: "trash" },
 ];
 
 // ── 탭별 숨길 컬럼 & 컬럼 순서 설정 ──────────────────────────
@@ -672,6 +672,17 @@ export default function SuperAdmin() {
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}
               className={`px-4 py-3 text-sm font-medium shrink-0 border-b-2 transition-colors ${
                 activeTab === tab.id ? "border-purple-500 text-purple-400" : "border-transparent text-gray-400 hover:text-gray-200"
+              }`}>
+              {tab.label}
+            </button>
+          ))}
+          <div className="flex items-center mx-2 shrink-0">
+            <span className="text-[10px] text-red-500/70 uppercase tracking-widest font-bold border-l border-r border-gray-700 px-2 py-3">휴지통</span>
+          </div>
+          {TABS.filter(t => t.group === "trash").map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-3 text-sm font-medium shrink-0 border-b-2 transition-colors ${
+                activeTab === tab.id ? "border-red-500 text-red-400" : "border-transparent text-red-500/70 hover:text-red-400"
               }`}>
               {tab.label}
             </button>
