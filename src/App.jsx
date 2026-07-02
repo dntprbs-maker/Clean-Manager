@@ -243,6 +243,28 @@ function parseEventText(text, titleRule = DEFAULT_TITLE_RULE, typeKeywords = DEF
 // ── Context ───────────────────────────────────────────────────
 const Ctx = createContext(null);
 const useC = () => useContext(Ctx);
+
+// ── 사진 확대 보기(라이트박스) — 핀치 줌 지원, 전역 오버레이 ──────────
+let _setLightboxUrl = null;
+const openLightbox = (url) => { if (url && _setLightboxUrl) _setLightboxUrl(url); };
+function PhotoLightbox() {
+  const [url, setUrl] = useState(null);
+  useEffect(() => { _setLightboxUrl = setUrl; return () => { _setLightboxUrl = null; }; }, []);
+  if (!url) return null;
+  return (
+    <div className="fixed inset-0 z-[9999] bg-black/90 flex" onClick={() => setUrl(null)}>
+      <button onClick={() => setUrl(null)}
+        className="absolute top-4 right-4 z-10 w-9 h-9 rounded-full bg-white/20 text-white flex items-center justify-center text-xl">
+        <X size={20}/>
+      </button>
+      <div className="w-full h-full overflow-auto" style={{ touchAction: "pinch-zoom" }} onClick={e => e.stopPropagation()}>
+        <div className="min-w-full min-h-full flex items-center justify-center p-4">
+          <img src={url} alt="" style={{ touchAction: "pinch-zoom", maxWidth: "100%", maxHeight: "100dvh" }} className="object-contain"/>
+        </div>
+      </div>
+    </div>
+  );
+}
 let _i=1; const uid=()=>`e${_i++}`;
 
 // ── 샘플 데이터 (사진 실제 내용 기반) ────────────────────────
@@ -1441,10 +1463,10 @@ function DetailSheet() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {(detEv.photos||[]).map((p,i)=>(
-                  <a key={i} href={p.url} target="_blank" rel="noopener noreferrer"
+                  <button key={i} onClick={()=>openLightbox(p.url)}
                     className="w-[calc(25%-6px)] aspect-square rounded-xl overflow-hidden bg-gray-100 block">
                     <img src={p.url} alt="" className="w-full h-full object-cover"/>
-                  </a>
+                  </button>
                 ))}
               </div>
             </div>
@@ -2722,7 +2744,7 @@ function EventModal() {
             <div className="flex flex-wrap gap-2 pl-7">
               {(form.photos||[]).map((p, i) => (
                 <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200">
-                  <img src={p.url || p.data} alt={p.name} onClick={() => window.open(p.url || p.data, "_blank")} className="w-full h-full object-cover cursor-pointer"/>
+                  <img src={p.url || p.data} alt={p.name} onClick={() => openLightbox(p.url || p.data)} className="w-full h-full object-cover cursor-pointer"/>
                   <button onClick={() => set("photos", form.photos.filter((_,j)=>j!==i))}
                     className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
                     <X size={10} className="text-white"/>
@@ -4361,6 +4383,7 @@ function AppInner() {
       <TopHeader/>
       {needsSetup && <SetupCompanyModal />}
       <IphoneInstallGuide />
+      <PhotoLightbox />
       {currentScreen === "calendar" && (
         <>
           <CalendarView/>
