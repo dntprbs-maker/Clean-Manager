@@ -186,13 +186,16 @@ async function loadData(tabId) {
   } else if (tabId === "events") {
     for (const compDoc of compSnap.docs) {
       const evSnap = await getDocs(collection(db, "companies", compDoc.id, "events"));
-      evSnap.forEach(d => rows.push({
-        _id: d.id,
-        _path: `companies/${compDoc.id}/events/${d.id}`,
-        _companyId: compDoc.id,
-        _company: compMap[compDoc.id],
-        ...d.data(),
-      }));
+      evSnap.forEach(d => {
+        if (d.data().status === "deleted") return;
+        rows.push({
+          _id: d.id,
+          _path: `companies/${compDoc.id}/events/${d.id}`,
+          _companyId: compDoc.id,
+          _company: compMap[compDoc.id],
+          ...d.data(),
+        });
+      });
     }
 
   } else if (tabId === "notices") {
