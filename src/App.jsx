@@ -61,8 +61,21 @@ const HOLIDAYS = {
 const WD = ["일","월","화","수","목","금","토"];
 const REPEAT_OPTS = [
   {value:"none",label:"반복 없음"},{value:"daily",label:"매일"},
-  {value:"weekly",label:"매주"},{value:"monthly",label:"매월"},
+  {value:"weekly",label:"매주"},{value:"monthly",label:"매월"},{value:"yearly",label:"매년"},
 ];
+const REPEAT_ORD_OPTS = [{v:1,l:"첫째"},{v:2,l:"둘째"},{v:3,l:"셋째"},{v:4,l:"넷째"},{v:5,l:"다섯째"},{v:-1,l:"마지막"}];
+// 해당 연/월에서 n번째(ordinal, -1은 마지막) weekday(0=일~6=토)의 날짜
+const nthWeekdayOfMonth = (year, monthIndex, weekday, ordinal) => {
+  if (ordinal === -1) {
+    const last = new Date(year, monthIndex+1, 0);
+    const back = (last.getDay() - weekday + 7) % 7;
+    last.setDate(last.getDate() - back);
+    return last;
+  }
+  const first = new Date(year, monthIndex, 1);
+  const fwd = (weekday - first.getDay() + 7) % 7;
+  return new Date(year, monthIndex, 1 + fwd + (ordinal-1)*7);
+};
 
 // ── 유틸 ──────────────────────────────────────────────────────
 const fmt  = d=>{ if(!d)return""; const dt=typeof d==="string"?new Date(d+"T00:00:00"):d; return`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`; };
@@ -92,16 +105,57 @@ function expandRecurring(events) {
   const out = [];
   for (const ev of events) {
     if (!ev.repeat || ev.repeat === "none") { out.push(ev); continue; }
-    const dur   = diff(ev.start, ev.end || ev.start); // 일정 길이(일)
-    const until = ev.repeatUntil || defaultUntil;
-    let cur = ev.start, count = 0;
-    while (cur <= until && count < HARD_CAP) {
-      out.push({ ...ev, start: cur, end: add(cur, dur), _recurring: true });
-      count++;
-      if      (ev.repeat === "daily")   cur = add(cur, 1);
-      else if (ev.repeat === "weekly")  cur = add(cur, 7);
-      else if (ev.repeat === "monthly") cur = addMonths(cur, 1);
-      else break;
+    const dur      = diff(ev.start, ev.end || ev.start); // 일정 길이(일)
+    const until    = ev.repeatUntil || defaultUntil;
+    const untilD   = pd(until);
+    const startD   = pd(ev.start);
+    const interval = Math.max(1, Number(ev.repeatInterval) || 1);
+    const push = (dStr) => { out.push({ ...ev, start: dStr, end: add(dStr, dur), _recurring: true }); };
+    let count = 0;
+
+    if (ev.repeat === "daily") {
+      let cur = ev.start;
+      while (cur <= until && count < HARD_CAP) { push(cur); count++; cur = add(cur, interval); }
+
+    } else if (ev.repeat === "weekly") {
+      const weekdays  = (ev.repeatWeekdays && ev.repeatWeekdays.length) ? ev.repeatWeekdays : [startD.getDay()];
+      const weekStart = new Date(startD); weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      let cur = new Date(startD);
+      while (cur <= untilD && count < HARD_CAP) {
+        const weekIdx = Math.floor((cur - weekStart) / (7*864e5));
+        if (weekIdx % interval === 0 && weekdays.includes(cur.getDay())) { push(fmt(cur)); count++; }
+        cur.setDate(cur.getDate() + 1);
+      }
+
+    } else if (ev.repeat === "monthly") {
+      let idx = 0;
+      while (count < HARD_CAP && idx < 400) {
+        const monTotal = startD.getMonth() + idx*interval;
+        const y  = startD.getFullYear() + Math.floor(monTotal/12);
+        const mo = ((monTotal%12)+12)%12;
+        const d  = ev.repeatMonthlyType === "weekday"
+          ? nthWeekdayOfMonth(y, mo, ev.repeatMonthlyWeekday ?? startD.getDay(), ev.repeatMonthlyOrdinal || 1)
+          : new Date(y, mo, Math.min(ev.repeatMonthlyDay || startD.getDate(), new Date(y, mo+1, 0).getDate()));
+        if (d > untilD) break;
+        if (d >= startD) { push(fmt(d)); count++; }
+        idx++;
+      }
+
+    } else if (ev.repeat === "yearly") {
+      let idx = 0;
+      while (count < HARD_CAP && idx < 200) {
+        const year = startD.getFullYear() + idx*interval;
+        const mo   = (ev.repeatYearlyMonth || startD.getMonth()+1) - 1;
+        const d    = ev.repeatYearlyType === "weekday"
+          ? nthWeekdayOfMonth(year, mo, ev.repeatYearlyWeekday ?? startD.getDay(), ev.repeatYearlyOrdinal || 1)
+          : new Date(year, mo, Math.min(ev.repeatYearlyDay || startD.getDate(), new Date(year, mo+1, 0).getDate()));
+        if (d > untilD) break;
+        if (d >= startD) { push(fmt(d)); count++; }
+        idx++;
+      }
+
+    } else {
+      out.push(ev);
     }
   }
   return out;
@@ -1957,7 +2011,11 @@ function SideDrawer() {
 }
 
 // ── 일정 추가 모달 ────────────────────────────────────────────────
-const blank=date=>({title:"",description:"",contact:"",team:"",start:date||fmt(new Date()),end:date||fmt(new Date()),allDay:false,startTime:"09:00",endTime:"10:00",place:"",url:"",calId:"",repeat:"none",repeatUntil:"",photos:[]});
+const blank=date=>({title:"",description:"",contact:"",team:"",start:date||fmt(new Date()),end:date||fmt(new Date()),allDay:false,startTime:"09:00",endTime:"10:00",place:"",url:"",calId:"",
+  repeat:"none",repeatInterval:1,repeatWeekdays:[],
+  repeatMonthlyType:"day",repeatMonthlyDay:null,repeatMonthlyOrdinal:1,repeatMonthlyWeekday:null,
+  repeatYearlyType:"date",repeatYearlyMonth:null,repeatYearlyDay:null,repeatYearlyOrdinal:1,repeatYearlyWeekday:null,
+  repeatUntil:"",photos:[]});
 
 // ── 드럼롤 휠 피커 ────────────────────────────────────────────────
 function WheelPicker({ items, value, onChange, renderItem, loop=false }) {
@@ -2081,6 +2139,7 @@ function WheelPicker({ items, value, onChange, renderItem, loop=false }) {
 // ── 날짜/시간 피커 (네이버 앱 스타일 — 인라인 드럼롤) ──────────────
 function DateTimePicker({ form, set, errs }) {
   const [activePicker, setActivePicker] = useState(null); // null | "start" | "end"
+  const [repeatOpen, setRepeatOpen] = useState(false);
 
   // 피커 내부 상태 (ref로 항상 최신값 유지)
   // h24: 0~23 (오전/오후 합친 연속 시간)
@@ -2200,17 +2259,24 @@ function DateTimePicker({ form, set, errs }) {
 
   return (
     <div className="border-b border-gray-100">
-      {/* 종일 토글 */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <div className="flex items-center gap-3">
-          <Clock size={18} className="text-gray-400"/>
+      {/* 종일 토글(좌) + 반복(우) — 각 절반씩 */}
+      <div className="flex items-stretch border-b border-gray-100">
+        <div className="flex-1 flex items-center gap-3 px-4 py-3">
+          <Clock size={18} className="text-gray-400 shrink-0"/>
           <span className="text-sm text-gray-700">종일</span>
+          <button onClick={()=>set("allDay",!form.allDay)}
+            className={`relative w-12 h-6 rounded-full transition-colors duration-200 ml-auto ${form.allDay?"bg-blue-600":"bg-gray-200"}`}>
+            <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.allDay?"translate-x-6":"translate-x-0"}`}/>
+          </button>
         </div>
-        <button onClick={()=>set("allDay",!form.allDay)}
-          className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${form.allDay?"bg-blue-600":"bg-gray-200"}`}>
-          <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.allDay?"translate-x-6":"translate-x-0"}`}/>
-        </button>
+        <div className="w-px bg-gray-100 my-2"/>
+        <div className="flex-1 px-4 py-3">
+          <RepeatToggleButton form={form} open={repeatOpen} setOpen={setRepeatOpen}/>
+        </div>
       </div>
+
+      {/* 반복 설정 패널 — 전체 너비로 펼쳐짐 */}
+      {repeatOpen && <RepeatPanel form={form} set={set}/>}
 
       {/* 시작/종료 날짜시간 버튼 */}
       <div className="flex items-center px-4 py-3 gap-2">
@@ -2271,6 +2337,165 @@ function DateTimePicker({ form, set, errs }) {
               확인
             </button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 반복 버튼(라벨) — 종일 토글과 절반씩 나눠 쓰는 트리거 ────────────
+function RepeatToggleButton({ form, open, setOpen }) {
+  const label = () => {
+    switch (form.repeat) {
+      case "daily":   return `${form.repeatInterval||1}일마다`;
+      case "weekly":  return `${form.repeatInterval||1}주마다`;
+      case "monthly": return `${form.repeatInterval||1}개월마다`;
+      case "yearly":  return "매년";
+      default:        return "반복 안함";
+    }
+  };
+  return (
+    <button onClick={()=>setOpen(o=>!o)} className="w-full flex items-center gap-2">
+      <RotateCcw size={18} className={`shrink-0 ${form.repeat!=="none"?"text-blue-500":"text-gray-400"}`}/>
+      <span className={`text-sm ${form.repeat!=="none"?"text-blue-600 font-semibold":"text-gray-700"}`}>{label()}</span>
+      <ChevronRight size={14} className={`text-gray-300 ml-auto transition-transform ${open?"rotate-90":""}`}/>
+    </button>
+  );
+}
+
+// ── 반복 설정 패널 — 없음/매일/매주/매월/매년 + 세부 옵션 ────────────
+function RepeatPanel({ form, set }) {
+  const stepper = (value, onChange, min=1, max=99) => (
+    <div className="flex items-center gap-1.5 bg-white rounded-full px-1 border border-gray-200 shrink-0">
+      <button onClick={()=>onChange(Math.max(min, (value||1)-1))} className="w-7 h-7 rounded-full text-gray-600 font-bold">−</button>
+      <span className="w-6 text-center text-sm font-bold text-gray-800">{value||1}</span>
+      <button onClick={()=>onChange(Math.min(max, (value||1)+1))} className="w-7 h-7 rounded-full text-gray-600 font-bold">+</button>
+    </div>
+  );
+
+  const applyDefaults = (type) => {
+    const d = pd(form.start) || new Date();
+    if (type === "weekly" && !(form.repeatWeekdays||[]).length) set("repeatWeekdays", [d.getDay()]);
+    if (type === "monthly") {
+      if (!form.repeatMonthlyDay) set("repeatMonthlyDay", d.getDate());
+      if (form.repeatMonthlyWeekday == null) set("repeatMonthlyWeekday", d.getDay());
+      if (!form.repeatMonthlyOrdinal) set("repeatMonthlyOrdinal", Math.min(5, Math.ceil(d.getDate()/7)));
+    }
+    if (type === "yearly") {
+      if (!form.repeatYearlyMonth) set("repeatYearlyMonth", d.getMonth()+1);
+      if (!form.repeatYearlyDay)   set("repeatYearlyDay", d.getDate());
+      if (form.repeatYearlyWeekday == null) set("repeatYearlyWeekday", d.getDay());
+      if (!form.repeatYearlyOrdinal) set("repeatYearlyOrdinal", Math.min(5, Math.ceil(d.getDate()/7)));
+    }
+  };
+  const selectType = (v) => { set("repeat", v); if (v !== "none") applyDefaults(v); };
+
+  const daysInMonth = Array.from({length:31},(_,i)=>i+1);
+  const monthsOfYear = Array.from({length:12},(_,i)=>i+1);
+
+  return (
+    <div className="px-4 pb-4">
+      <div className="flex flex-wrap gap-2 mb-3">
+        {REPEAT_OPTS.map(opt=>(
+          <button key={opt.value} onClick={()=>selectType(opt.value)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition
+              ${form.repeat===opt.value?"bg-blue-500 border-blue-400 text-white":"bg-white border-gray-200 text-gray-600"}`}>
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {form.repeat === "daily" && (
+        <div className="flex items-center gap-2 bg-gray-50 rounded-xl p-3">
+          {stepper(form.repeatInterval, v=>set("repeatInterval",v))}
+          <span className="text-xs text-gray-500">일마다</span>
+        </div>
+      )}
+
+      {form.repeat === "weekly" && (
+        <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            {stepper(form.repeatInterval, v=>set("repeatInterval",v))}
+            <span className="text-xs text-gray-500">주마다</span>
+          </div>
+          <div className="flex gap-1.5">
+            {WD.map((w,i)=>{
+              const sel = (form.repeatWeekdays||[]).includes(i);
+              return (
+                <button key={i} onClick={()=>{
+                  const cur = form.repeatWeekdays||[];
+                  const next = sel ? cur.filter(x=>x!==i) : [...cur,i];
+                  set("repeatWeekdays", next.sort((a,b)=>a-b));
+                }}
+                  className={`w-8 h-8 rounded-full text-xs font-bold shrink-0 ${sel?"bg-blue-500 text-white":"bg-white text-gray-500 border border-gray-200"}`}>
+                  {w}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {form.repeat === "monthly" && (
+        <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            {stepper(form.repeatInterval, v=>set("repeatInterval",v))}
+            <span className="text-xs text-gray-500">개월마다</span>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-gray-700">
+            <input type="radio" checked={form.repeatMonthlyType!=="weekday"} onChange={()=>set("repeatMonthlyType","day")}/>
+            매월
+            <select value={form.repeatMonthlyDay||1} onChange={e=>{set("repeatMonthlyType","day");set("repeatMonthlyDay",Number(e.target.value));}}
+              className="border border-gray-200 rounded-lg px-1.5 py-1 text-xs bg-white">
+              {daysInMonth.map(d=><option key={d} value={d}>{d}일</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs text-gray-700">
+            <input type="radio" checked={form.repeatMonthlyType==="weekday"} onChange={()=>set("repeatMonthlyType","weekday")}/>
+            매월
+            <select value={form.repeatMonthlyOrdinal||1} onChange={e=>{set("repeatMonthlyType","weekday");set("repeatMonthlyOrdinal",Number(e.target.value));}}
+              className="border border-gray-200 rounded-lg px-1.5 py-1 text-xs bg-white">
+              {REPEAT_ORD_OPTS.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+            </select>
+            <select value={form.repeatMonthlyWeekday??0} onChange={e=>{set("repeatMonthlyType","weekday");set("repeatMonthlyWeekday",Number(e.target.value));}}
+              className="border border-gray-200 rounded-lg px-1.5 py-1 text-xs bg-white">
+              {WD.map((w,i)=><option key={i} value={i}>{w}요일</option>)}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {form.repeat === "yearly" && (
+        <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-3">
+          <label className="flex items-center gap-2 text-xs text-gray-700 flex-wrap">
+            <input type="radio" checked={form.repeatYearlyType!=="weekday"} onChange={()=>set("repeatYearlyType","date")}/>
+            <select value={form.repeatYearlyMonth||1} onChange={e=>{set("repeatYearlyType","date");set("repeatYearlyMonth",Number(e.target.value));}}
+              className="border border-gray-200 rounded-lg px-1.5 py-1 text-xs bg-white">
+              {monthsOfYear.map(m=><option key={m} value={m}>{m}월</option>)}
+            </select>
+            <select value={form.repeatYearlyDay||1} onChange={e=>{set("repeatYearlyType","date");set("repeatYearlyDay",Number(e.target.value));}}
+              className="border border-gray-200 rounded-lg px-1.5 py-1 text-xs bg-white">
+              {daysInMonth.map(d=><option key={d} value={d}>{d}일</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs text-gray-700 flex-wrap">
+            <input type="radio" checked={form.repeatYearlyType==="weekday"} onChange={()=>set("repeatYearlyType","weekday")}/>
+            <select value={form.repeatYearlyOrdinal||1} onChange={e=>{set("repeatYearlyType","weekday");set("repeatYearlyOrdinal",Number(e.target.value));}}
+              className="border border-gray-200 rounded-lg px-1.5 py-1 text-xs bg-white">
+              {REPEAT_ORD_OPTS.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+            </select>
+            <select value={form.repeatYearlyWeekday??0} onChange={e=>{set("repeatYearlyType","weekday");set("repeatYearlyWeekday",Number(e.target.value));}}
+              className="border border-gray-200 rounded-lg px-1.5 py-1 text-xs bg-white">
+              {WD.map((w,i)=><option key={i} value={i}>{w}요일</option>)}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {form.repeat !== "none" && (
+        <div className="flex items-center gap-2 mt-3">
+          <span className="text-xs text-gray-500 shrink-0">종료일</span>
+          <RepeatUntilPicker form={form} set={set}/>
         </div>
       )}
     </div>
@@ -2721,34 +2946,6 @@ function EventModal() {
             className="flex-1 text-sm text-gray-800 outline-none resize-none placeholder-gray-300 leading-relaxed overflow-hidden"
             style={{minHeight: "120px"}}
           />
-        </div>
-
-        {/* 반복 — 정기청소 등 반복 일정용 (항상 표시) */}
-        <div className="px-4 py-4 border-b border-gray-100">
-          <div className="flex items-center gap-3 mb-3">
-            <RotateCcw size={18} className="text-gray-400 shrink-0"/>
-            <span className="text-sm text-gray-700">반복</span>
-          </div>
-          <div className="flex flex-wrap gap-2 pl-9">
-            {REPEAT_OPTS.map(opt=>{
-              const sel=form.repeat===opt.value;
-              return(
-                <button key={opt.value}
-                  onClick={()=>set("repeat",opt.value)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition
-                    ${sel?"bg-blue-500 border-blue-400 text-white":"border-gray-200 text-gray-600"}`}>
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
-          {/* 반복 종료일 — 반복일 때만 */}
-          {form.repeat!=="none" && (
-            <div className="flex items-center gap-2 pl-9 mt-3">
-              <span className="text-xs text-gray-500 shrink-0">종료일</span>
-              <RepeatUntilPicker form={form} set={set}/>
-            </div>
-          )}
         </div>
 
         {/* 첨부사진 */}
