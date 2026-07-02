@@ -66,7 +66,7 @@ const TAB_COL_CONFIG = {
   },
   deleted: {
     hidden: ["companyId", "status"],
-    order:  ["_type", "name", "_companyId", "_company", "deletedBy", "deletedAt", "createdAt"],
+    order:  ["_type", "name", "title", "_companyId", "_company", "deletedBy", "deletedAt", "createdAt"],
   },
   dupphone: {
     hidden: [],
@@ -117,13 +117,16 @@ async function loadData(tabId) {
     // 회사별 팀 캘린더(색상) — 중복 정리용
     for (const compDoc of compSnap.docs) {
       const calSnap = await getDocs(collection(db, "companies", compDoc.id, "cals"));
-      calSnap.forEach(d => rows.push({
-        _id: d.id,
-        _path: `companies/${compDoc.id}/cals/${d.id}`,
-        _companyId: compDoc.id,
-        _company: compMap[compDoc.id] || compDoc.id,
-        ...d.data(),
-      }));
+      calSnap.forEach(d => {
+        if (d.data().status === "deleted") return;
+        rows.push({
+          _id: d.id,
+          _path: `companies/${compDoc.id}/cals/${d.id}`,
+          _companyId: compDoc.id,
+          _company: compMap[compDoc.id] || compDoc.id,
+          ...d.data(),
+        });
+      });
     }
 
   } else if (tabId === "deleted") {
@@ -143,6 +146,19 @@ async function loadData(tabId) {
       if (data.status === "deleted" && data.deletedBy !== "company")
         rows.push({ _id: d.id, _path: `staffs/${d.id}`, _companyId: data.companyId, _company: compMap[data.companyId] || data.companyId, _type: "직원", ...data });
     });
+    // 삭제된 events/notices/logs/cals — 회사별 서브컬렉션 순회
+    for (const compDoc of compSnap.docs) {
+      const [evSnap, nSnap, lSnap, cSnap] = await Promise.all([
+        getDocs(collection(db, "companies", compDoc.id, "events")),
+        getDocs(collection(db, "companies", compDoc.id, "notices")),
+        getDocs(collection(db, "companies", compDoc.id, "activityLogs")),
+        getDocs(collection(db, "companies", compDoc.id, "cals")),
+      ]);
+      evSnap.forEach(d => { if (d.data().status === "deleted") rows.push({ _id: d.id, _path: `companies/${compDoc.id}/events/${d.id}`, _companyId: compDoc.id, _company: compMap[compDoc.id], _type: "일정", ...d.data() }); });
+      nSnap.forEach(d => { if (d.data().status === "deleted") rows.push({ _id: d.id, _path: `companies/${compDoc.id}/notices/${d.id}`, _companyId: compDoc.id, _company: compMap[compDoc.id], _type: "공지사항", ...d.data() }); });
+      lSnap.forEach(d => { if (d.data().status === "deleted") rows.push({ _id: d.id, _path: `companies/${compDoc.id}/activityLogs/${d.id}`, _companyId: compDoc.id, _company: compMap[compDoc.id], _type: "변경로그", ...d.data() }); });
+      cSnap.forEach(d => { if (d.data().status === "deleted") rows.push({ _id: d.id, _path: `companies/${compDoc.id}/cals/${d.id}`, _companyId: compDoc.id, _company: compMap[compDoc.id], _type: "팀 캘린더", ...d.data() }); });
+    }
 
   } else if (tabId === "staffs") {
     const snap = await getDocs(collection(db, "staffs"));
@@ -201,25 +217,31 @@ async function loadData(tabId) {
   } else if (tabId === "notices") {
     for (const compDoc of compSnap.docs) {
       const nSnap = await getDocs(collection(db, "companies", compDoc.id, "notices"));
-      nSnap.forEach(d => rows.push({
-        _id: d.id,
-        _path: `companies/${compDoc.id}/notices/${d.id}`,
-        _companyId: compDoc.id,
-        _company: compMap[compDoc.id],
-        ...d.data(),
-      }));
+      nSnap.forEach(d => {
+        if (d.data().status === "deleted") return;
+        rows.push({
+          _id: d.id,
+          _path: `companies/${compDoc.id}/notices/${d.id}`,
+          _companyId: compDoc.id,
+          _company: compMap[compDoc.id],
+          ...d.data(),
+        });
+      });
     }
 
   } else if (tabId === "logs") {
     for (const compDoc of compSnap.docs) {
       const lSnap = await getDocs(collection(db, "companies", compDoc.id, "activityLogs"));
-      lSnap.forEach(d => rows.push({
-        _id: d.id,
-        _path: `companies/${compDoc.id}/activityLogs/${d.id}`,
-        _companyId: compDoc.id,
-        _company: compMap[compDoc.id],
-        ...d.data(),
-      }));
+      lSnap.forEach(d => {
+        if (d.data().status === "deleted") return;
+        rows.push({
+          _id: d.id,
+          _path: `companies/${compDoc.id}/activityLogs/${d.id}`,
+          _companyId: compDoc.id,
+          _company: compMap[compDoc.id],
+          ...d.data(),
+        });
+      });
     }
   }
   return { rows, compList };
@@ -262,10 +284,11 @@ export default function SuperAdmin() {
   const [sortCol, setSortCol]           = useState(null);
   const [sortDir, setSortDir]           = useState("asc");
   const [checkedIds, setCheckedIds]     = useState(new Set());
+  const [deletedTypeFilter, setDeletedTypeFilter] = useState("ALL");
 
   // 탭 데이터 로드
   const loadTab = useCallback(async (tabId) => {
-    setLoading(true); setRows([]); setSearchTerm(""); setSelectedCompanyId("ALL"); setCheckedIds(new Set());
+    setLoading(true); setRows([]); setSearchTerm(""); setSelectedCompanyId("ALL"); setCheckedIds(new Set()); setDeletedTypeFilter("ALL");
     try { 
       const res = await loadData(tabId);
       setRows(res.rows); 
@@ -295,10 +318,10 @@ export default function SuperAdmin() {
     alert("✅ 비밀번호가 성공적으로 변경되었습니다!");
   }
 
-  // ── 삭제 (삭제목록/캘린더 탭은 영구 삭제, 그 외 일반 탭은 소프트 삭제) ──
+  // ── 삭제 (삭제목록 탭만 영구 삭제, 그 외 일반 탭은 소프트 삭제) ──
   async function handleDelete(row) {
     try {
-      const isHardDelete = activeTab === "deleted" || activeTab === "cals";
+      const isHardDelete = activeTab === "deleted";
       const parts = row._path.split("/");
 
       if (isHardDelete) {
@@ -405,7 +428,7 @@ export default function SuperAdmin() {
   // ── 다중 삭제 ──
   async function handleBulkDelete() {
     if (!checkedIds.size) return;
-    const isHardDelete = activeTab === "deleted" || activeTab === "cals";
+    const isHardDelete = activeTab === "deleted";
     if (!window.confirm(`선택한 ${checkedIds.size}개를 ${isHardDelete ? "영구 삭제" : "삭제"}하시겠습니까?${isHardDelete ? "\n⚠️ 복구할 수 없습니다!" : ""}`)) return;
     const deletedAt = new Date().toISOString();
     const targets = filtered.filter(r => checkedIds.has(r._id));
@@ -415,9 +438,9 @@ export default function SuperAdmin() {
         if (parts.length === 2) return deleteDoc(doc(db, parts[0], parts[1]));
         if (parts.length === 4) return deleteDoc(doc(db, parts[0], parts[1], parts[2], parts[3]));
       } else {
-        if (parts.length === 2) return updateDoc(doc(db, parts[0], parts[1]), { status: "deleted", deletedAt });
-        if (parts.length === 4) return updateDoc(doc(db, parts[0], parts[1], parts[2], parts[3]), { status: "deleted", deletedAt });
-        if (parts.length === 6) return updateDoc(doc(db, parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]), { status: "deleted", deletedAt });
+        if (parts.length === 2) return updateDoc(doc(db, parts[0], parts[1]), { status: "deleted", deletedAt, deletedBy: "superadmin" });
+        if (parts.length === 4) return updateDoc(doc(db, parts[0], parts[1], parts[2], parts[3]), { status: "deleted", deletedAt, deletedBy: "superadmin" });
+        if (parts.length === 6) return updateDoc(doc(db, parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]), { status: "deleted", deletedAt, deletedBy: "superadmin" });
       }
     }));
     setRows(prev => prev.filter(r => !checkedIds.has(r._id)));
@@ -472,8 +495,9 @@ export default function SuperAdmin() {
   const filtered = rows
     .filter(row => {
       const matchCompany = selectedCompanyId === "ALL" || row._companyId === selectedCompanyId;
+      const matchType = activeTab !== "deleted" || deletedTypeFilter === "ALL" || row._type === deletedTypeFilter;
       const matchSearch = !searchTerm || Object.values(row).some(v => String(v).toLowerCase().includes(searchTerm.toLowerCase()));
-      return matchCompany && matchSearch;
+      return matchCompany && matchType && matchSearch;
     })
     .sort((a, b) => {
       if (!sortCol) return 0;
@@ -668,6 +692,22 @@ export default function SuperAdmin() {
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
+          {activeTab === "deleted" && (
+            <select
+              value={deletedTypeFilter}
+              onChange={e => setDeletedTypeFilter(e.target.value)}
+              className="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-blue-500 shrink-0"
+            >
+              <option value="ALL">🗂️ 전체 종류</option>
+              <option value="일정">📅 일정</option>
+              <option value="공지사항">📢 공지사항</option>
+              <option value="변경로그">📋 변경로그</option>
+              <option value="회사">🏢 회사</option>
+              <option value="직원">👤 직원</option>
+              <option value="관리자">🔑 관리자</option>
+              <option value="팀 캘린더">🎨 팀 캘린더</option>
+            </select>
+          )}
           <input
             type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
             placeholder="🔍 전체 검색..."
