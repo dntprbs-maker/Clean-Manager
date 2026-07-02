@@ -2396,7 +2396,7 @@ function DateTimePicker({ form, set, errs, lockRepeat }) {
   const WD     = ["일","월","화","수","목","금","토"];
 
   const dispDate = s => {
-    if (!s) return "--";
+    if (!s) return <span className="text-red-500 font-semibold">날짜 선택 필요</span>;
     const d = pd(s); if (!d) return "--";
     const yy = String(d.getFullYear()).slice(2);
     return `${yy}. ${d.getMonth()+1}. ${d.getDate()}.(${WD[d.getDay()]})`;
@@ -2455,6 +2455,7 @@ function DateTimePicker({ form, set, errs, lockRepeat }) {
         </button>
       </div>
 
+      {errs.start && <p className="text-red-500 text-xs px-4 pb-2">{errs.start}</p>}
       {errs.end  && <p className="text-red-500 text-xs px-4 pb-2">{errs.end}</p>}
       {errs.time && <p className="text-red-500 text-xs px-4 pb-2">{errs.time}</p>}
 
@@ -2756,6 +2757,7 @@ function EventModal() {
   const validate=()=>{
     const e={};
     if(!form.title.trim()) e.title="제목을 입력해주세요.";
+    if(!form.start) e.start="시작 날짜를 선택해주세요.";
     if(form.end<form.start) e.end="종료일은 시작일 이후여야 합니다.";
     if(!form.allDay&&form.startTime>=form.endTime) e.time="종료 시간은 시작 시간 이후여야 합니다.";
     setErrs(e); return !Object.keys(e).length;
