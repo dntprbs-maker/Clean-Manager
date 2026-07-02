@@ -188,15 +188,24 @@ function parseEventText(text, titleRule = DEFAULT_TITLE_RULE, typeKeywords = DEF
   };
   const yr = new Date().getFullYear();
 
-  // 날짜: "6월 15일" / "6/15"
+  // 날짜: "26.07.10" / "2026.07.10" / "26-07-10" / "6월 15일" / "6/15"
+  const d0 = text.match(/(\d{2,4})[.\-]\s*(\d{1,2})[.\-]\s*(\d{1,2})(?!\d)/);
   const d1 = text.match(/(\d{1,2})월\s*(\d{1,2})일/);
   const d2 = text.match(/(\d{1,2})\/(\d{1,2})/);
-  const dm = d1 || d2;
-  if (dm) {
-    const mo = String(dm[1]).padStart(2,"0");
-    const dy = String(dm[2]).padStart(2,"0");
-    result.start = yr + "-" + mo + "-" + dy;
-    result.end   = yr + "-" + mo + "-" + dy;
+  if (d0) {
+    const fullYear = d0[1].length <= 2 ? "20" + d0[1] : d0[1];
+    const mo = String(d0[2]).padStart(2,"0");
+    const dy = String(d0[3]).padStart(2,"0");
+    result.start = fullYear + "-" + mo + "-" + dy;
+    result.end   = fullYear + "-" + mo + "-" + dy;
+  } else {
+    const dm = d1 || d2;
+    if (dm) {
+      const mo = String(dm[1]).padStart(2,"0");
+      const dy = String(dm[2]).padStart(2,"0");
+      result.start = yr + "-" + mo + "-" + dy;
+      result.end   = yr + "-" + mo + "-" + dy;
+    }
   }
 
   // 시간: "오전 9시" / "오후 2시30분" / "오전" / "오후" / "종일" / "14시"
