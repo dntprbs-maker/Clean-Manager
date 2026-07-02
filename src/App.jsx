@@ -110,7 +110,15 @@ function expandRecurring(events) {
     const untilD   = pd(until);
     const startD   = pd(ev.start);
     const interval = Math.max(1, Number(ev.repeatInterval) || 1);
-    const push = (dStr) => { out.push({ ...ev, start: dStr, end: add(dStr, dur), _recurring: true }); };
+    const push = (dStr) => {
+      const ex = ev.exceptions?.[dStr];
+      if (ex && ex._deleted) return; // 이 회차만 삭제된 경우 건너뜀
+      const merged = ex ? { ...ev, ...ex } : ev;
+      // 예외에 start(단건 일정 변경)가 있으면 그 날짜/기간을 그대로 사용, 없으면 반복 규칙대로 계산
+      const outStart = ex?.start || dStr;
+      const outEnd   = ex?.end   || add(outStart, dur);
+      out.push({ ...merged, _origDate: dStr, start: outStart, end: outEnd, _recurring: true, _hasException: !!ex });
+    };
     let count = 0;
 
     if (ev.repeat === "daily") {
@@ -352,6 +360,51 @@ function PhotoLightbox() {
     </div>
   );
 }
+
+// ── 반복일정 수정/삭제 범위 선택 시트 ────────────────────────────
+// askRecurringScope(ev, "edit"|"delete") → Promise<"instance"|"following"|"all"|null(취소)>
+let _setScopeAskState = null;
+const askRecurringScope = (ev, action) => new Promise(resolve => {
+  if (!ev?._recurring) { resolve("all"); return; }
+  if (_setScopeAskState) _setScopeAskState({ ev, action, resolve });
+  else resolve("all");
+});
+function RecurringScopeSheet() {
+  const [state, setState] = useState(null);
+  useEffect(() => { _setScopeAskState = setState; return () => { _setScopeAskState = null; }; }, []);
+  if (!state) return null;
+  const { ev, action, resolve } = state;
+  const finish = (v) => { setState(null); resolve(v); };
+  const verb = action === "delete" ? "삭제" : "수정";
+  const OPTS = [
+    { v: "instance",  l: `이 일정만 ${verb}`,        d: `${ev.start} 회차만` },
+    { v: "following", l: `이후 모든 일정 ${verb}`,    d: `${ev.start}부터 이후 전체` },
+    { v: "all",       l: `전체 반복일정 ${verb}`,      d: "시리즈 전체" },
+  ];
+  return (
+    <div className="fixed inset-0 z-[9999] bg-black/40 flex items-end" onClick={()=>finish(null)}>
+      <div className="w-full max-w-sm mx-auto bg-white rounded-t-3xl overflow-hidden" onClick={e=>e.stopPropagation()}
+        style={{ animation: "modalSlideUp 0.3s cubic-bezier(0.32,0.72,0,1) both" }}>
+        <div className="px-5 pt-5 pb-2">
+          <p className="text-sm font-bold text-gray-800">반복일정 {verb}</p>
+          <p className="text-xs text-gray-400 mt-0.5 truncate">'{ev.title}'</p>
+        </div>
+        <div className="flex flex-col">
+          {OPTS.map(o=>(
+            <button key={o.v} onClick={()=>finish(o.v)}
+              className="flex flex-col items-start px-5 py-3.5 border-t border-gray-100 active:bg-gray-50 text-left">
+              <span className={`text-sm font-semibold ${action==="delete"&&o.v!=="instance"?"text-red-500":"text-gray-800"}`}>{o.l}</span>
+              <span className="text-xs text-gray-400 mt-0.5">{o.d}</span>
+            </button>
+          ))}
+        </div>
+        <button onClick={()=>finish(null)}
+          className="w-full py-3.5 border-t border-gray-100 text-sm font-bold text-gray-400">취소</button>
+        <div className="h-2"/>
+      </div>
+    </div>
+  );
+}
 let _i=1; const uid=()=>`e${_i++}`;
 
 // ── 샘플 데이터 (사진 실제 내용 기반) ────────────────────────
@@ -515,7 +568,60 @@ function Provider({ children, loginUser, onLogout }) {
     deleteDoc(doc(companyRef, "events", id));
     if (target) addLog("삭제", `'${target.title}' 일정을 삭제했습니다.`);
   }, [events, addLog, companyRef]);
-  
+
+  // 반복일정 수정 — scope: "instance"(이 일정만) | "following"(이후 전체) | "all"(전체)
+  // clickedEv 는 캘린더에 실제로 표시된(펼쳐진) 인스턴스 — .id=원본 시리즈 id, .start=이 회차 날짜
+  const updateEventScoped = useCallback((clickedEv, scope, patch) => {
+    const seriesId = clickedEv.id;
+    if (!clickedEv._recurring || scope === "all") {
+      updateEvent({ ...patch, id: seriesId });
+      return;
+    }
+    const dateStr = clickedEv._origDate || clickedEv.start;
+    const original = events.find(e => e.id === seriesId);
+    if (!original) return;
+
+    if (scope === "instance") {
+      const { id, exceptions, _recurring, _hasException, _origDate,
+        repeat, repeatInterval, repeatUntil, repeatWeekdays,
+        repeatMonthlyType, repeatMonthlyDay, repeatMonthlyOrdinal, repeatMonthlyWeekday,
+        repeatYearlyType, repeatYearlyMonth, repeatYearlyDay, repeatYearlyOrdinal, repeatYearlyWeekday,
+        ...rest } = patch;
+      updateDoc(doc(companyRef, "events", seriesId), { [`exceptions.${dateStr}`]: rest });
+      addLog("수정", `'${patch.title}' 반복일정 중 ${dateStr} 1회만 수정했습니다.`);
+      return;
+    }
+
+    if (scope === "following") {
+      if (dateStr <= original.start) { updateEvent({ ...patch, id: seriesId }); return; }
+      updateDoc(doc(companyRef, "events", seriesId), { repeatUntil: add(dateStr, -1) });
+      const { id, _recurring, _hasException, _origDate, ...rest } = patch;
+      addEvent({ ...rest, start: dateStr, repeatUntil: original.repeatUntil || "" });
+      addLog("수정", `'${patch.title}' 반복일정을 ${dateStr}부터 분리해 수정했습니다.`);
+    }
+  }, [events, addLog, companyRef, updateEvent, addEvent]);
+
+  // 반복일정 삭제 — scope: "instance" | "following" | "all"
+  const deleteEventScoped = useCallback((clickedEv, scope) => {
+    const seriesId = clickedEv.id;
+    if (!clickedEv._recurring || scope === "all") { deleteEvent(seriesId); return; }
+    const dateStr = clickedEv._origDate || clickedEv.start;
+    const original = events.find(e => e.id === seriesId);
+    if (!original) return;
+
+    if (scope === "instance") {
+      updateDoc(doc(companyRef, "events", seriesId), { [`exceptions.${dateStr}`]: { _deleted: true } });
+      addLog("삭제", `'${clickedEv.title}' 반복일정 중 ${dateStr} 1회만 삭제했습니다.`);
+      return;
+    }
+
+    if (scope === "following") {
+      if (dateStr <= original.start) { deleteEvent(seriesId); return; }
+      updateDoc(doc(companyRef, "events", seriesId), { repeatUntil: add(dateStr, -1) });
+      addLog("삭제", `'${clickedEv.title}' 반복일정을 ${dateStr} 이후 모두 삭제했습니다.`);
+    }
+  }, [events, addLog, companyRef, deleteEvent]);
+
   const toggleCal = useCallback(id => {
     const target = cals.find(c => c.id === id);
     if(target) {
@@ -542,7 +648,7 @@ function Provider({ children, loginUser, onLogout }) {
   }, [companyRef]);
 
   // UI 상태
-  const [modal,setModal]       = useState({open:false,date:null,editId:null});
+  const [modal,setModal]       = useState({open:false,date:null,editId:null,scope:"all",instanceEv:null});
   const [current,setCurrent]   = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -562,8 +668,8 @@ function Provider({ children, loginUser, onLogout }) {
   const [currentUser, setCurrentUser] = useState(loginUser);
   useEffect(() => { setCurrentUser(loginUser); }, [loginUser]);
 
-  const openModal   = useCallback((date=null,editId=null)=>setModal({open:true,date,editId}),[]);
-  const closeModal  = useCallback(()=>setModal({open:false,date:null,editId:null}),[]);
+  const openModal   = useCallback((date=null,editId=null,scope="all",instanceEv=null)=>setModal({open:true,date,editId,scope,instanceEv}),[]);
+  const closeModal  = useCallback(()=>setModal({open:false,date:null,editId:null,scope:"all",instanceEv:null}),[]);
 
   const checkedIds     = useMemo(()=>new Set(cals.filter(c=>c.checked).map(c=>c.id)),[cals]);
   const visibleEvents  = useMemo(()=>{
@@ -582,7 +688,7 @@ function Provider({ children, loginUser, onLogout }) {
 
   return (
     <Ctx.Provider value={{
-      events,visibleEvents,addEvent,updateEvent,deleteEvent,
+      events,visibleEvents,addEvent,updateEvent,deleteEvent,updateEventScoped,deleteEventScoped,
       fieldReportEv,setFieldReportEv,
       cals,toggleCal,updateCal,deleteCal,
       modal,openModal,closeModal,
@@ -697,6 +803,7 @@ function DemoProvider({ children }) {
       loginUser: DEMO_USER, onLogout: noop,
       titleRule, typeKeywords, saveTitleRule: noop,
       addEvent: demoAlert, updateEvent: demoAlert, deleteEvent: demoAlert,
+      updateEventScoped: demoAlert, deleteEventScoped: demoAlert,
       addNotice: demoAlert, updateNotice: demoAlert, deleteNotice: demoAlert,
       addLog: noop, addReport: demoAlert,
       modal, openModal, closeModal,
@@ -882,6 +989,16 @@ function ScheduleList({ selDate, compact=false }) {
   const { visibleEvents, setDetEv, setSelDate, setCurrent, setSheetMode, openModal, currentUser, cals } = useC();
   const calByIdLocal = id => cals.find(c=>c.id===id) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af", checked:true };
   const canAdd = currentUser.role !== "팀원";
+  const handleCardClick = async (ev) => {
+    if (currentUser.role === "팀원") { setDetEv(ev); return; }
+    if (ev._recurring) {
+      const scope = await askRecurringScope(ev, "edit");
+      if (!scope) return;
+      openModal(null, ev.id, scope, ev);
+    } else {
+      openModal(null, ev.id);
+    }
+  };
   const d=pd(selDate), dow=d.getDay();
   const DAYS=["일","월","화","수","목","금","토"];
   const isHol=!!HOLIDAYS[selDate];
@@ -943,7 +1060,7 @@ function ScheduleList({ selDate, compact=false }) {
           const isMulti=diff(ev.start,ev.end||ev.start)>0;
           return(
             <div key={ev.id}
-              onClick={()=>currentUser.role==="팀원"?setDetEv(ev):openModal(null,ev.id)}
+              onClick={()=>handleCardClick(ev)}
               className="flex items-center px-4 py-1.5 border-b border-gray-50 cursor-pointer">
               {isMulti
                 ? <span className="text-sm px-2 py-0.5 rounded text-white font-medium mr-2 truncate max-w-[80%]"
@@ -967,7 +1084,7 @@ function ScheduleList({ selDate, compact=false }) {
             {grouped[tk].map((ev)=>{
               const c=calByIdLocal(ev.calId);
               return(
-                <div key={ev.id} onClick={()=>currentUser.role==="팀원"?setDetEv(ev):openModal(null,ev.id)}
+                <div key={ev.id} onClick={()=>handleCardClick(ev)}
                   className="flex items-stretch px-4 py-3 border-b border-gray-50 cursor-pointer active:bg-gray-50">
                   {/* 시간 컬럼 — 시작위 / 종료아래 */}
                   <div className="w-[60px] shrink-0 flex flex-col justify-between mr-4">
@@ -1441,12 +1558,31 @@ function CalendarView() {
 
 // ── 이벤트 상세 Bottom Sheet ──────────────────────────────────────
 function DetailSheet() {
-  const { detEv, setDetEv, deleteEvent, openModal, setFieldReportEv, currentUser, cals } = useC();
+  const { detEv, setDetEv, deleteEvent, deleteEventScoped, openModal, setFieldReportEv, currentUser, cals } = useC();
   const [vis,setVis]=useState(false);
   useEffect(()=>{ if(detEv)setTimeout(()=>setVis(true),10); else setVis(false); },[detEv]);
   if(!detEv) return null;
   const cal = cals.find(c=>c.id===detEv.calId) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af" };
   const close=()=>{ setVis(false); setTimeout(()=>setDetEv(null),280); };
+  const handleEdit = async () => {
+    if (detEv._recurring) {
+      const scope = await askRecurringScope(detEv, "edit");
+      if (!scope) return;
+      close(); setTimeout(()=>openModal(null, detEv.id, scope, detEv), 300);
+    } else {
+      close(); setTimeout(()=>openModal(null, detEv.id), 300);
+    }
+  };
+  const handleDelete = async () => {
+    if (detEv._recurring) {
+      const scope = await askRecurringScope(detEv, "delete");
+      if (!scope) return;
+      deleteEventScoped(detEv, scope);
+      close();
+    } else {
+      if (window.confirm("이 일정을 삭제하시겠습니까?")) { deleteEvent(detEv.id); close(); }
+    }
+  };
 
   return (
     <div
@@ -1467,9 +1603,9 @@ function DetailSheet() {
           <span className="text-base font-bold text-gray-800">일정</span>
           <div className="flex gap-1">
             {currentUser.role !== "팀원" && <>
-              <button onClick={()=>{close();setTimeout(()=>openModal(null,detEv.id),300);}}
+              <button onClick={handleEdit}
                 className="p-2 rounded-full hover:bg-gray-100"><Edit3 size={19} className="text-gray-600"/></button>
-              <button onClick={()=>{ if(window.confirm("이 일정을 삭제하시겠습니까?")){ deleteEvent(detEv.id); close(); } }}
+              <button onClick={handleDelete}
                 className="p-2 rounded-full hover:bg-gray-100"><Trash2 size={19} className="text-gray-600"/></button>
             </>}
           </div>
@@ -2137,7 +2273,7 @@ function WheelPicker({ items, value, onChange, renderItem, loop=false }) {
 }
 
 // ── 날짜/시간 피커 (네이버 앱 스타일 — 인라인 드럼롤) ──────────────
-function DateTimePicker({ form, set, errs }) {
+function DateTimePicker({ form, set, errs, lockRepeat }) {
   const [activePicker, setActivePicker] = useState(null); // null | "start" | "end"
   const [repeatOpen, setRepeatOpen] = useState(false);
 
@@ -2271,12 +2407,19 @@ function DateTimePicker({ form, set, errs }) {
         </div>
         <div className="w-px bg-gray-100 my-2"/>
         <div className="flex-1 px-4 py-3">
-          <RepeatToggleButton form={form} open={repeatOpen} setOpen={setRepeatOpen}/>
+          {lockRepeat ? (
+            <div className="flex items-center gap-2 text-gray-400">
+              <RotateCcw size={18} className="shrink-0"/>
+              <span className="text-sm">이 일정만 수정 중</span>
+            </div>
+          ) : (
+            <RepeatToggleButton form={form} open={repeatOpen} setOpen={setRepeatOpen}/>
+          )}
         </div>
       </div>
 
-      {/* 반복 설정 패널 — 전체 너비로 펼쳐짐 */}
-      {repeatOpen && <RepeatPanel form={form} set={set}/>}
+      {/* 반복 설정 패널 — 전체 너비로 펼쳐짐 (단건 수정 중엔 숨김) */}
+      {!lockRepeat && repeatOpen && <RepeatPanel form={form} set={set}/>}
 
       {/* 시작/종료 날짜시간 버튼 */}
       <div className="flex items-center px-4 py-3 gap-2">
@@ -2556,9 +2699,10 @@ function RepeatUntilPicker({ form, set }) {
 }
 
 function EventModal() {
-  const { modal, closeModal, addEvent, updateEvent, deleteEvent, events, cals, titleRule, typeKeywords, companyId } = useC();
-  const { open, date, editId } = modal;
-  const editEv=editId?events.find(e=>e.id===editId):null;
+  const { modal, closeModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals, titleRule, typeKeywords, companyId } = useC();
+  const { open, date, editId, scope, instanceEv } = modal;
+  // 반복일정의 "이 일정만/이후 전체" 수정은 클릭한 회차(instanceEv)의 값으로 폼을 채운다.
+  const editEv = editId ? ((scope && scope!=="all" && instanceEv) ? instanceEv : events.find(e=>e.id===editId)) : null;
   const [form,setForm]=useState(blank(date));
   const [errs,setErrs]=useState({});
   const [anim,setAnim]=useState(false);
@@ -2625,7 +2769,11 @@ function EventModal() {
       }));
       const finalForm = { ...form, photos: uploadedPhotos };
       if (editId) {
-        updateEvent({ ...finalForm, id: editId });
+        if (scope && scope !== "all" && instanceEv) {
+          updateEventScoped(instanceEv, scope, { ...finalForm, id: editId });
+        } else {
+          updateEvent({ ...finalForm, id: editId });
+        }
       } else {
         addEvent({ ...finalForm, _id: evId });
       }
@@ -2897,7 +3045,7 @@ function EventModal() {
         </div>
 
         {/* 날짜 & 시간 — 네이버 앱 스타일 */}
-        <DateTimePicker form={form} set={set} errs={errs}/>
+        <DateTimePicker form={form} set={set} errs={errs} lockRepeat={scope==="instance"}/>
 
         {/* 주소 */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-100">
@@ -4717,6 +4865,7 @@ function AppInner() {
       {needsSetup && <SetupCompanyModal />}
       <IphoneInstallGuide />
       <PhotoLightbox />
+      <RecurringScopeSheet />
       {currentScreen === "calendar" && (
         <>
           <CalendarView/>
