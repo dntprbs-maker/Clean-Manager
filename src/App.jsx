@@ -85,6 +85,14 @@ const add  = (s,n)=>{ const d=pd(s); d.setDate(d.getDate()+n); return fmt(d); };
 const addMonths = (s,n)=>{ const d=pd(s); d.setMonth(d.getMonth()+n); return fmt(d); };
 const calById = id => CALS.find(c=>c.id===id) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af", checked:true };
 
+// ── 팀 캘린더 구독(iCal) 링크 ────────────────────────────────────
+const genFeedToken = () => {
+  if (window.crypto?.randomUUID) return (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, "");
+  return Array.from({ length: 48 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+};
+const feedUrl = (companyId, calId, token) =>
+  `https://asia-northeast3-${import.meta.env.VITE_FIREBASE_PROJECT_ID}.cloudfunctions.net/calendarFeed?company=${companyId}&cal=${calId}&token=${token}`;
+
 // ── 전화번호 정규화/표시 ───────────────────────────────────────────
 // 저장은 숫자만(canonical), 화면 표시는 하이픈 포맷으로.
 const onlyDigits = s => (s || "").replace(/\D/g, "");
@@ -5261,6 +5269,8 @@ function EmployeeFormModal() {
 // ── 팀 관리 모달 ───────────────────────────────────────────────
 function TeamManagementModal() {
   const { teamModal, setTeamModal, teams, saveTeams, users, companyId, cals, updateCal, deleteCal } = useC();
+  const [subscribeIdx, setSubscribeIdx] = useState(null);
+  const [copiedIdx, setCopiedIdx]       = useState(null);
 
   // 팀 열릴 때: isField 없는 기존 cal에 기본값 세팅 (청소 포함 → true, 그 외 → false)
   useEffect(() => {
@@ -5577,6 +5587,55 @@ function TeamManagementModal() {
                     }`}>
                     {isField ? "현장팀" : "업무팀"}
                   </button>
+                );
+              })()}
+
+              {/* 캘린더 구독(iCal) 링크 — 네이버 캘린더 등에서 URL로 구독 */}
+              {(()=>{
+                const cal = cals.find(c => c.label === t);
+                if (!cal) return null;
+                return (
+                  <div className="relative">
+                    <button
+                      onClick={() => setSubscribeIdx(subscribeIdx === i ? null : i)}
+                      title="캘린더 구독 링크"
+                      className="text-gray-400 hover:text-blue-500 p-1.5 rounded-full hover:bg-blue-50 transition-colors">
+                      <Link2 size={15}/>
+                    </button>
+                    {subscribeIdx === i && (
+                      <div className="absolute right-0 top-8 bg-white rounded-xl shadow-xl border border-gray-100 p-3 z-50 flex flex-col gap-2" style={{width:280}}>
+                        <p className="text-xs font-bold text-gray-700">📡 {t} 캘린더 구독 링크</p>
+                        <p className="text-[11px] text-gray-400 leading-relaxed">
+                          이 URL을 네이버/구글 캘린더의 "다른 캘린더 구독(URL로 추가)"에 등록하면 이 팀 일정이 자동으로 보여요.
+                        </p>
+                        {cal.feedToken ? (
+                          <>
+                            <div className="flex gap-1">
+                              <input readOnly value={feedUrl(companyId, cal.id, cal.feedToken)}
+                                onFocus={e=>e.target.select()}
+                                className="flex-1 min-w-0 text-[10px] bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 outline-none text-gray-600"/>
+                              <button
+                                onClick={() => { navigator.clipboard.writeText(feedUrl(companyId, cal.id, cal.feedToken)); setCopiedIdx(i); setTimeout(()=>setCopiedIdx(null), 1500); }}
+                                className="shrink-0 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1.5 rounded-lg">
+                                {copiedIdx === i ? "복사됨!" : "복사"}
+                              </button>
+                            </div>
+                            <button
+                              onClick={() => { if (window.confirm("재발급하면 기존 링크를 구독 중인 사람은 다시 구독해야 해요. 계속할까요?")) updateCal({...cal, feedToken: genFeedToken()}); }}
+                              className="text-[11px] text-red-500 font-bold self-start hover:underline">
+                              🔄 링크 재발급 (기존 링크 무효화)
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => updateCal({...cal, feedToken: genFeedToken()})}
+                            className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg">
+                            구독 링크 만들기
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 );
               })()}
 

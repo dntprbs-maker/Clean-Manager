@@ -1,6 +1,6 @@
 // Clean-Manager Cloud Functions — 일정 등록/수정/삭제 시 담당 팀원에게 푸시 알림
 import { onDocumentCreated, onDocumentUpdated, onDocumentDeleted } from "firebase-functions/v2/firestore";
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onCall, HttpsError, onRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
@@ -195,3 +195,167 @@ export const extractFromImage = onCall(
     }
   }
 );
+
+// ── 팀 캘린더 구독 피드 (.ics) — 네이버/구글 캘린더 "URL로 구독"용 ──────────
+// 네이버는 자동 동기화용 구독 링크를 만들 수 있는 공개 쓰기 API가 없어서
+// 반대 방향(클린메니져 → 네이버)으로 표준 iCalendar 피드를 발행해 구독하게 함.
+const fmtDate = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const parseDate = s => { if (!s) return null; const [y,m,dd] = s.split("-").map(Number); return new Date(y,m-1,dd); };
+const diffDays = (s,e) => !s||!e?0:Math.round((parseDate(e)-parseDate(s))/864e5);
+const addDays = (s,n) => { const d=parseDate(s); d.setDate(d.getDate()+n); return fmtDate(d); };
+const nthWeekdayOfMonthF = (year, monthIndex, weekday, ordinal) => {
+  if (ordinal === -1) {
+    const last = new Date(year, monthIndex+1, 0);
+    const back = (last.getDay() - weekday + 7) % 7;
+    last.setDate(last.getDate() - back);
+    return last;
+  }
+  const first = new Date(year, monthIndex, 1);
+  const fwd = (weekday - first.getDay() + 7) % 7;
+  return new Date(year, monthIndex, 1 + fwd + (ordinal-1)*7);
+};
+
+// 앱 캘린더 화면의 expandRecurring 과 동일한 규칙으로 반복 일정을 개별 회차로 전개
+function expandRecurringForFeed(events) {
+  const HARD_CAP = 400;
+  const now = new Date();
+  const defaultUntil = fmtDate(new Date(now.getFullYear(), now.getMonth() + 6, now.getDate()));
+  const out = [];
+  for (const ev of events) {
+    if (!ev.repeat || ev.repeat === "none") { out.push(ev); continue; }
+    const dur      = diffDays(ev.start, ev.end || ev.start);
+    const until    = ev.repeatUntil || defaultUntil;
+    const untilD   = parseDate(until);
+    const startD   = parseDate(ev.start);
+    const interval = Math.max(1, Number(ev.repeatInterval) || 1);
+    const push = (dStr) => {
+      const ex = ev.exceptions?.[dStr];
+      if (ex && ex._deleted) return;
+      const merged = ex ? { ...ev, ...ex } : ev;
+      const outStart = ex?.start || dStr;
+      const outEnd   = ex?.end   || addDays(outStart, dur);
+      out.push({ ...merged, _origDate: dStr, start: outStart, end: outEnd });
+    };
+    let count = 0;
+    if (ev.repeat === "daily") {
+      let cur = ev.start;
+      while (cur <= until && count < HARD_CAP) { push(cur); count++; cur = addDays(cur, interval); }
+    } else if (ev.repeat === "weekly") {
+      const weekdays  = (ev.repeatWeekdays && ev.repeatWeekdays.length) ? ev.repeatWeekdays : [startD.getDay()];
+      const weekStart = new Date(startD); weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      let cur = new Date(startD);
+      while (cur <= untilD && count < HARD_CAP) {
+        const weekIdx = Math.floor((cur - weekStart) / (7*864e5));
+        if (weekIdx % interval === 0 && weekdays.includes(cur.getDay())) { push(fmtDate(cur)); count++; }
+        cur.setDate(cur.getDate() + 1);
+      }
+    } else if (ev.repeat === "monthly") {
+      let idx = 0;
+      while (count < HARD_CAP && idx < 400) {
+        const monTotal = startD.getMonth() + idx*interval;
+        const y  = startD.getFullYear() + Math.floor(monTotal/12);
+        const mo = ((monTotal%12)+12)%12;
+        const d  = ev.repeatMonthlyType === "weekday"
+          ? nthWeekdayOfMonthF(y, mo, ev.repeatMonthlyWeekday ?? startD.getDay(), ev.repeatMonthlyOrdinal || 1)
+          : new Date(y, mo, Math.min(ev.repeatMonthlyDay || startD.getDate(), new Date(y, mo+1, 0).getDate()));
+        if (d > untilD) break;
+        if (d >= startD) { push(fmtDate(d)); count++; }
+        idx++;
+      }
+    } else if (ev.repeat === "yearly") {
+      let idx = 0;
+      while (count < HARD_CAP && idx < 200) {
+        const year = startD.getFullYear() + idx*interval;
+        const mo   = (ev.repeatYearlyMonth || startD.getMonth()+1) - 1;
+        const d    = ev.repeatYearlyType === "weekday"
+          ? nthWeekdayOfMonthF(year, mo, ev.repeatYearlyWeekday ?? startD.getDay(), ev.repeatYearlyOrdinal || 1)
+          : new Date(year, mo, Math.min(ev.repeatYearlyDay || startD.getDate(), new Date(year, mo+1, 0).getDate()));
+        if (d > untilD) break;
+        if (d >= startD) { push(fmtDate(d)); count++; }
+        idx++;
+      }
+    } else {
+      out.push(ev);
+    }
+  }
+  return out;
+}
+
+function icsEscape(str) {
+  return String(str || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\n/g, "\\n");
+}
+
+// KST(Asia/Seoul, UTC+9) 날짜+시간 → UTC ICS 포맷(YYYYMMDDTHHMMSSZ)
+function toIcsUtc(dateStr, timeStr) {
+  const [y,m,d] = dateStr.split("-").map(Number);
+  const [h,mi]  = (timeStr || "00:00").split(":").map(Number);
+  const dt = new Date(Date.UTC(y, m-1, d, h - 9, mi));
+  return `${dt.getUTCFullYear()}${String(dt.getUTCMonth()+1).padStart(2,"0")}${String(dt.getUTCDate()).padStart(2,"0")}T${String(dt.getUTCHours()).padStart(2,"0")}${String(dt.getUTCMinutes()).padStart(2,"0")}00Z`;
+}
+const toIcsDate = dateStr => dateStr.replace(/-/g, "");
+
+export const calendarFeed = onRequest({ region: REGION, cors: true }, async (req, res) => {
+  const { company, cal, token } = req.query;
+  if (!company || !cal || !token) {
+    res.status(400).send("잘못된 요청입니다.");
+    return;
+  }
+  try {
+    const calSnap = await db.doc(`companies/${company}/cals/${cal}`).get();
+    const calData = calSnap.data();
+    if (!calSnap.exists || !calData?.feedToken || calData.feedToken !== token) {
+      res.status(403).send("접근 권한이 없습니다.");
+      return;
+    }
+    const evSnap = await db.collection(`companies/${company}/events`).where("calId", "==", cal).get();
+    const events = evSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(e => e.status !== "deleted");
+    const expanded = expandRecurringForFeed(events);
+
+    // 지난 7일 이전 회차는 굳이 개인 캘린더에 안 보여줘도 됨 (앞으로의 일정 위주)
+    const cutoff = fmtDate(new Date(Date.now() - 7*864e5));
+    const visible = expanded.filter(ev => ev.start >= cutoff);
+
+    const now = new Date();
+    const dtstamp = `${now.getUTCFullYear()}${String(now.getUTCMonth()+1).padStart(2,"0")}${String(now.getUTCDate()).padStart(2,"0")}T${String(now.getUTCHours()).padStart(2,"0")}${String(now.getUTCMinutes()).padStart(2,"0")}${String(now.getUTCSeconds()).padStart(2,"0")}Z`;
+
+    const lines = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Clean-Manager//Calendar Feed//KO",
+      "CALSCALE:GREGORIAN",
+      "METHOD:PUBLISH",
+      `X-WR-CALNAME:${icsEscape((calData.label || calData.name || "팀") + " - 클린메니져")}`,
+    ];
+    visible.forEach(ev => {
+      const uid = `${ev.id}-${ev._origDate || ev.start}@cleanmanager.app`;
+      lines.push("BEGIN:VEVENT");
+      lines.push(`UID:${uid}`);
+      lines.push(`DTSTAMP:${dtstamp}`);
+      if (ev.allDay) {
+        lines.push(`DTSTART;VALUE=DATE:${toIcsDate(ev.start)}`);
+        lines.push(`DTEND;VALUE=DATE:${toIcsDate(addDays(ev.end || ev.start, 1))}`);
+      } else {
+        lines.push(`DTSTART:${toIcsUtc(ev.start, ev.startTime || "09:00")}`);
+        lines.push(`DTEND:${toIcsUtc(ev.end || ev.start, ev.endTime || "10:00")}`);
+      }
+      lines.push(`SUMMARY:${icsEscape(ev.title || "제목 없음")}`);
+      if (ev.place) lines.push(`LOCATION:${icsEscape(ev.place)}`);
+      if (ev.description) lines.push(`DESCRIPTION:${icsEscape(ev.description)}`);
+      lines.push("END:VEVENT");
+    });
+    lines.push("END:VCALENDAR");
+
+    res.set("Content-Type", "text/calendar; charset=utf-8");
+    res.set("Cache-Control", "no-store");
+    res.status(200).send(lines.join("\r\n"));
+  } catch (e) {
+    console.error("[calendarFeed] 오류:", e);
+    res.status(500).send("서버 오류가 발생했습니다.");
+  }
+});
