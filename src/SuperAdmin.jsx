@@ -653,7 +653,7 @@ export default function SuperAdmin() {
 
       {/* ── 탭 바 ── */}
       <div className="bg-gray-900 border-b border-gray-800 shrink-0 z-30">
-        <div className="mx-auto px-4 flex gap-1 flex-wrap w-full" style={{ maxWidth: "66%" }}>
+        <div className="mx-auto px-4 flex gap-1 flex-nowrap w-full" style={{ maxWidth: "80%" }}>
           <div className="flex items-center mr-2 shrink-0">
             <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold border-r border-gray-700 pr-2 py-3">테스트</span>
           </div>
