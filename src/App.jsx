@@ -5317,14 +5317,13 @@ function TeamManagementModal() {
     if (!name) return;
     if (teams.includes(name)) { alert("이미 존재하는 팀입니다."); return; }
     saveTeams([teams[0], name, ...teams.slice(1)]);
-    // 현장팀이면 캘린더(담당팀)도 생성 — 같은 이름 캘린더가 이미 있으면 새로 만들지 않음
-    if (newTeamIsField) {
-      const existing = cals.find(c => c.label === name || c.name === name);
-      if (existing) {
-        updateCal({ ...existing, color: newTeamColor, isField: true });
-      } else {
-        updateCal({ id: `cal_${Date.now()}`, label: name, name, color: newTeamColor, checked: true, isField: true });
-      }
+    // 캘린더(담당팀)는 현장팀 여부와 무관하게 항상 생성 — 그래야 나중에
+    // 현장팀/업무팀 토글로 서로 전환할 수 있음. 같은 이름 캘린더가 있으면 재사용.
+    const existing = cals.find(c => c.label === name || c.name === name);
+    if (existing) {
+      updateCal({ ...existing, color: newTeamColor, isField: newTeamIsField });
+    } else {
+      updateCal({ id: `cal_${Date.now()}`, label: name, name, color: newTeamColor, checked: true, isField: newTeamIsField });
     }
     setNewTeam("");
     setNewTeamIsField(true);
@@ -5574,10 +5573,19 @@ function TeamManagementModal() {
                 <span className="flex-1 font-bold text-gray-800 text-sm">{t}</span>
               )}
 
-              {/* 현장팀 토글 */}
+              {/* 현장팀 토글 — 예전 버그로 캘린더 없이 만들어진 팀은 눌러서 바로 생성 */}
               {(()=>{
                 const cal = cals.find(c => c.label === t);
-                if (!cal) return null;
+                if (!cal) {
+                  return (
+                    <button
+                      onClick={() => updateCal({ id: `cal_${Date.now()}`, label: t, name: t, color: "#9ca3af", checked: true, isField: true })}
+                      title="캘린더가 없는 팀입니다. 눌러서 현장팀으로 만들기"
+                      className="text-[10px] font-bold px-2 py-1 rounded-full border border-dashed border-red-300 text-red-500 bg-red-50">
+                      캘린더 없음
+                    </button>
+                  );
+                }
                 const isField = cal.isField !== false;
                 return (
                   <button onClick={()=>updateCal({...cal, isField: !isField})}
