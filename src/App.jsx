@@ -2115,7 +2115,7 @@ function SideDrawer() {
               onClick={() => { setCurrentScreen("import_calendar"); setDrawer(false); }}
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
               <Download size={20} className="text-teal-500" />
-              <span className="text-sm font-medium text-gray-700 flex-1 text-left">📥 캘린더 가져오기</span>
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">🔄 캘린더 동기화</span>
             </button>
           )}
 
@@ -4044,6 +4044,7 @@ function ImportCalendarScreen() {
   const [fileName, setFileName]         = useState("");
   const [error, setError]               = useState("");
   const [importing, setImporting]       = useState(false);
+  const [removedCount, setRemovedCount] = useState(0);
 
   const parseICS = (text) => {
     const events = [];
@@ -4124,8 +4125,19 @@ function ImportCalendarScreen() {
   const handleImport = async () => {
     setImporting(true);
     const toImport = parsedEvents.filter((_, i) => selectedIds.includes(i));
+
+    // 이 파일(전체 파싱 결과)에 더 이상 없는, 이전에 같은 방식으로 가져온 일정은
+    // 네이버 쪽에서 삭제/이동된 것으로 보고 정리(소프트 삭제)
+    const newUidSet = new Set(parsedEvents.map(ev => ev.icsUid).filter(Boolean));
+    const prevImported = await getDocs(query(collection(db, "companies", companyId, "events"), where("source", "==", "ics_import")));
+    const staleDocs = prevImported.docs.filter(d => d.data().status !== "deleted" && !newUidSet.has(d.id));
+    const deletedAt = new Date().toISOString();
+    await Promise.all(staleDocs.map(d =>
+      updateDoc(doc(db, "companies", companyId, "events", d.id), { status: "deleted", deletedAt, deletedBy: "ics_sync" })
+    ));
+
     await Promise.all(toImport.map(ev => {
-      // icsUid가 있으면 그걸 문서 ID로 써서 중복 가져오기 시 덮어쓰기
+      // icsUid가 있으면 그걸 문서 ID로 써서 재동기화 시 같은 일정을 덮어쓰기
       const docId = ev.icsUid || uid();
       const evData = {
         ...ev,
@@ -4138,9 +4150,11 @@ function ImportCalendarScreen() {
         place: ev.place || "",
         description: ev.description || "",
       };
+      if (ev.icsUid) evData.source = "ics_import";
       delete evData.icsUid;
-      return setDoc(doc(db, "companies", companyId, "events", docId), evData);
+      return setDoc(doc(db, "companies", companyId, "events", docId), evData, { merge: true });
     }));
+    setRemovedCount(staleDocs.length);
     setImporting(false);
     setStep("done");
   };
@@ -4153,8 +4167,11 @@ function ImportCalendarScreen() {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-white px-8 text-center">
         <div className="text-6xl mb-4">🎉</div>
-        <h2 className="text-xl font-bold text-gray-900 mb-2">가져오기 완료!</h2>
-        <p className="text-sm text-gray-500 mb-8">{selectedIds.length}개 일정이 캘린더에 추가됐어요.</p>
+        <h2 className="text-xl font-bold text-gray-900 mb-2">동기화 완료!</h2>
+        <p className="text-sm text-gray-500 mb-8">
+          {selectedIds.length}개 일정을 반영했어요.
+          {removedCount > 0 && <><br/>네이버에서 사라진 {removedCount}개는 삭제목록으로 정리했어요.</>}
+        </p>
         <button onClick={() => setCurrentScreen("calendar")}
           className="w-full py-4 rounded-2xl text-white font-bold text-sm"
           style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
@@ -4254,13 +4271,17 @@ function ImportCalendarScreen() {
     <div className="flex-1 flex flex-col bg-gray-50 min-h-screen">
       <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-gray-900">캘린더 가져오기</h2>
+          <h2 className="text-xl font-bold text-gray-900">캘린더 동기화</h2>
           <button onClick={() => setCurrentScreen("calendar")} className="p-2 rounded-full hover:bg-gray-100">
             <X size={22} className="text-gray-500"/>
           </button>
         </div>
       </div>
       <div className="px-5 py-6 flex flex-col gap-5">
+        <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 text-xs text-blue-700 leading-relaxed">
+          💡 네이버는 실시간 자동 동기화용 구독 링크를 제공하지 않아서, .ics 파일을 다시 받아 업로드하는 방식으로 동기화해요.
+          같은 파일을 다시 올리면 바뀐 내용은 갱신되고, 네이버에서 삭제된 일정은 자동으로 삭제목록으로 정리돼요.
+        </div>
         <div className="bg-white rounded-2xl border border-gray-100 p-5 flex flex-col gap-4">
           <h3 className="text-sm font-bold text-gray-700">📥 어떤 파일을 가져올 수 있나요?</h3>
           {[
