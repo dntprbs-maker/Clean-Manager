@@ -2988,7 +2988,7 @@ function SearchModal() {
 
 // ── 현장 완료 보고 화면 (2단계: 시작 → 완료) ─────────────────────
 function FieldReportScreen({ ev, onClose }) {
-  const { currentUser, addReport } = useC();
+  const { currentUser, addReport, companyId, isDemo } = useC();
   const [step, setStep] = useState("start");
   const [startMemo, setStartMemo] = useState("");
   const [endMemo, setEndMemo] = useState("");
@@ -2996,8 +2996,31 @@ function FieldReportScreen({ ev, onClose }) {
   const [showLog, setShowLog] = useState(false);
   const [logs, setLogs] = useState([]);
   const [logDone, setLogDone] = useState(false);
+  const [beforePhotos, setBeforePhotos] = useState([]);
+  const [afterPhotos, setAfterPhotos] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const beforeInputRef = useRef(null);
+  const afterInputRef = useRef(null);
   const logBodyRef = useRef(null);
   const cal = calById(ev?.calId);
+
+  const pickPhotos = (files, setPhotos) => {
+    Promise.all(Array.from(files).map(file => new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve({ name: file.name, data: reader.result });
+      reader.readAsDataURL(file);
+    }))).then(newPhotos => setPhotos(prev => [...prev, ...newPhotos]));
+  };
+
+  const uploadPhotos = async (photos, tag) => Promise.all(photos.map(async (p) => {
+    if (p.url) return p;
+    const blob = await (await fetch(p.data)).blob();
+    const path = `companies/${companyId}/reports/${ev?.id || "misc"}/${tag}/${Date.now()}_${p.name}`;
+    const sRef = storageRef(storage, path);
+    await uploadBytes(sRef, blob);
+    const url = await getDownloadURL(sRef);
+    return { name: p.name, url };
+  }));
 
   const handleStart = () => {
     const now = new Date();
@@ -3019,8 +3042,24 @@ function FieldReportScreen({ ev, onClose }) {
       text: () => `대표님 대시보드에 한 줄 리포트 작성 완료.\n대표님은 퇴근 전 확인만 하시면 됩니다. 😊` },
   ];
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
     // 완료 보고를 Firestore(reports)에 저장 → 완료 보고 내역 화면에 실제 반영됨
+    let uploadedBefore = beforePhotos, uploadedAfter = afterPhotos;
+    if (!isDemo) {
+      setUploading(true);
+      try {
+        [uploadedBefore, uploadedAfter] = await Promise.all([
+          uploadPhotos(beforePhotos, "before"),
+          uploadPhotos(afterPhotos, "after"),
+        ]);
+      } catch (e) {
+        alert("사진 업로드 중 오류: " + e.message);
+        setUploading(false);
+        return;
+      }
+      setUploading(false);
+    }
+
     const now = new Date();
     const endTimeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
     addReport({
@@ -3034,6 +3073,8 @@ function FieldReportScreen({ ev, onClose }) {
       reporter:  currentUser?.name || "",
       startMemo,
       memo:      endMemo,        // 완료 메모 (내역 화면에서 memo 로 표시)
+      beforePhotos: uploadedBefore,
+      afterPhotos:  uploadedAfter,
       place:     ev?.place || "",
       workStart: startTime,
       workEnd:   endTimeStr,
@@ -3103,8 +3144,23 @@ function FieldReportScreen({ ev, onClose }) {
           </div>
           <div>
             <p className="text-xs font-bold text-gray-500 mb-2">📸 청소 전 사진 (Before)</p>
+            <input ref={beforeInputRef} type="file" accept="image/*" multiple className="hidden"
+              onChange={e => { if (e.target.files?.length) pickPhotos(e.target.files, setBeforePhotos); e.target.value = ""; }}/>
+            {beforePhotos.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {beforePhotos.map((p, i) => (
+                  <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200">
+                    <img src={p.url || p.data} alt={p.name} onClick={() => openLightbox(p.url || p.data)} className="w-full h-full object-cover cursor-pointer"/>
+                    <button onClick={() => setBeforePhotos(prev => prev.filter((_, j) => j !== i))}
+                      className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
+                      <X size={10} className="text-white"/>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="border-2 border-dashed border-blue-200 rounded-2xl p-6 text-center bg-blue-50/50 cursor-pointer"
-              onClick={() => alert("실제 앱에서는 카메라/갤러리와 연동됩니다.")}>
+              onClick={() => beforeInputRef.current?.click()}>
               <div className="text-3xl mb-2">📷</div>
               <p className="text-sm text-gray-400 font-medium">청소 전 사진 첨부</p>
               <p className="text-xs text-blue-300 mt-1">최대 10장 · JPG / PNG</p>
@@ -3139,8 +3195,23 @@ function FieldReportScreen({ ev, onClose }) {
           </div>
           <div>
             <p className="text-xs font-bold text-gray-500 mb-2">📸 청소 후 사진 (After)</p>
+            <input ref={afterInputRef} type="file" accept="image/*" multiple className="hidden"
+              onChange={e => { if (e.target.files?.length) pickPhotos(e.target.files, setAfterPhotos); e.target.value = ""; }}/>
+            {afterPhotos.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {afterPhotos.map((p, i) => (
+                  <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200">
+                    <img src={p.url || p.data} alt={p.name} onClick={() => openLightbox(p.url || p.data)} className="w-full h-full object-cover cursor-pointer"/>
+                    <button onClick={() => setAfterPhotos(prev => prev.filter((_, j) => j !== i))}
+                      className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
+                      <X size={10} className="text-white"/>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="border-2 border-dashed border-green-200 rounded-2xl p-6 text-center bg-green-50/50 cursor-pointer"
-              onClick={() => alert("실제 앱에서는 카메라/갤러리와 연동됩니다.")}>
+              onClick={() => afterInputRef.current?.click()}>
               <div className="text-3xl mb-2">📷</div>
               <p className="text-sm text-gray-400 font-medium">청소 후 사진 첨부</p>
               <p className="text-xs text-green-300 mt-1">최대 10장 · JPG / PNG</p>
@@ -3153,10 +3224,10 @@ function FieldReportScreen({ ev, onClose }) {
               className="w-full border border-gray-200 rounded-xl p-3 text-sm text-gray-800 outline-none resize-none bg-gray-50 placeholder-gray-300"
               rows={3}/>
           </div>
-          <button onClick={handleComplete}
-            className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2"
+          <button onClick={handleComplete} disabled={uploading}
+            className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2 disabled:opacity-60"
             style={{ background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)" }}>
-            ✔ 청소 완료 전송
+            {uploading ? "사진 업로드 중..." : "✔ 청소 완료 전송"}
           </button>
           <div className="h-4"/>
         </div>
@@ -3416,15 +3487,41 @@ function ReportHistoryScreen() {
             </div>
           )}
           <div className="flex gap-3">
-            <div className="flex-1 bg-gray-100 rounded-2xl p-4 text-center">
+            <div className="flex-1">
               <p className="text-xs text-gray-400 mb-1">Before</p>
-              <p className="text-2xl">📷</p>
-              <p className="text-xs text-gray-300 mt-1">사진 없음</p>
+              {(selected.beforePhotos||[]).length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {selected.beforePhotos.map((p,i)=>(
+                    <button key={i} onClick={()=>openLightbox(p.url)}
+                      className="w-[calc(50%-4px)] aspect-square rounded-xl overflow-hidden bg-gray-100">
+                      <img src={p.url} alt="" className="w-full h-full object-cover"/>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-gray-100 rounded-2xl p-4 text-center">
+                  <p className="text-2xl">📷</p>
+                  <p className="text-xs text-gray-300 mt-1">사진 없음</p>
+                </div>
+              )}
             </div>
-            <div className="flex-1 bg-gray-100 rounded-2xl p-4 text-center">
+            <div className="flex-1">
               <p className="text-xs text-gray-400 mb-1">After</p>
-              <p className="text-2xl">📷</p>
-              <p className="text-xs text-gray-300 mt-1">사진 없음</p>
+              {(selected.afterPhotos||[]).length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {selected.afterPhotos.map((p,i)=>(
+                    <button key={i} onClick={()=>openLightbox(p.url)}
+                      className="w-[calc(50%-4px)] aspect-square rounded-xl overflow-hidden bg-gray-100">
+                      <img src={p.url} alt="" className="w-full h-full object-cover"/>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-gray-100 rounded-2xl p-4 text-center">
+                  <p className="text-2xl">📷</p>
+                  <p className="text-xs text-gray-300 mt-1">사진 없음</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
