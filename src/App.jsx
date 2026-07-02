@@ -244,22 +244,55 @@ function parseEventText(text, titleRule = DEFAULT_TITLE_RULE, typeKeywords = DEF
 const Ctx = createContext(null);
 const useC = () => useContext(Ctx);
 
-// ── 사진 확대 보기(라이트박스) — 핀치 줌 지원, 전역 오버레이 ──────────
-let _setLightboxUrl = null;
-const openLightbox = (url) => { if (url && _setLightboxUrl) _setLightboxUrl(url); };
+// ── 사진 확대 보기(라이트박스) — 핀치 줌 + 좌우 스와이프로 연속 보기 ──────
+let _setLightboxState = null;
+// urls: 문자열 배열(url/data), startIndex: 처음 열 사진 인덱스
+const openLightbox = (urls, startIndex = 0) => {
+  const list = (Array.isArray(urls) ? urls : [urls]).filter(Boolean);
+  if (list.length && _setLightboxState) _setLightboxState({ list, index: startIndex });
+};
 function PhotoLightbox() {
-  const [url, setUrl] = useState(null);
-  useEffect(() => { _setLightboxUrl = setUrl; return () => { _setLightboxUrl = null; }; }, []);
-  if (!url) return null;
+  const [state, setState] = useState(null);
+  const touchX = useRef(null);
+  useEffect(() => { _setLightboxState = setState; return () => { _setLightboxState = null; }; }, []);
+  if (!state) return null;
+  const { list, index } = state;
+  const close = () => setState(null);
+  const go = (delta) => setState(s => ({ ...s, index: (s.index + delta + s.list.length) % s.list.length }));
+  const onTouchStart = e => { touchX.current = e.touches[0].clientX; };
+  const onTouchEnd = e => {
+    if (touchX.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchX.current;
+    touchX.current = null;
+    if (Math.abs(dx) > 50 && list.length > 1) go(dx < 0 ? 1 : -1);
+  };
   return (
-    <div className="fixed inset-0 z-[9999] bg-black/90 flex" onClick={() => setUrl(null)}>
-      <button onClick={() => setUrl(null)}
+    <div className="fixed inset-0 z-[9999] bg-black/90 flex" onClick={close}>
+      <button onClick={close}
         className="absolute top-4 right-4 z-10 w-9 h-9 rounded-full bg-white/20 text-white flex items-center justify-center text-xl">
         <X size={20}/>
       </button>
-      <div className="w-full h-full overflow-auto" style={{ touchAction: "pinch-zoom" }} onClick={e => e.stopPropagation()}>
+      {list.length > 1 && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 px-3 py-1 rounded-full bg-white/20 text-white text-xs font-bold">
+          {index + 1} / {list.length}
+        </div>
+      )}
+      {list.length > 1 && (
+        <>
+          <button onClick={e => { e.stopPropagation(); go(-1); }}
+            className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-white/20 text-white flex items-center justify-center">
+            <ChevronLeft size={22}/>
+          </button>
+          <button onClick={e => { e.stopPropagation(); go(1); }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-white/20 text-white flex items-center justify-center">
+            <ChevronLeft size={22} style={{ transform: "rotate(180deg)" }}/>
+          </button>
+        </>
+      )}
+      <div className="w-full h-full overflow-auto" style={{ touchAction: "pinch-zoom" }}
+        onClick={e => e.stopPropagation()} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         <div className="min-w-full min-h-full flex items-center justify-center p-4">
-          <img src={url} alt="" style={{ touchAction: "pinch-zoom", maxWidth: "100%", maxHeight: "100dvh" }} className="object-contain"/>
+          <img src={list[index]} alt="" style={{ touchAction: "pinch-zoom", maxWidth: "100%", maxHeight: "100dvh" }} className="object-contain"/>
         </div>
       </div>
     </div>
@@ -1461,10 +1494,10 @@ function DetailSheet() {
               <div className="flex items-center justify-between mb-3">
                 <span className="text-[15px] font-semibold text-gray-800">📎 첨부 파일 {(detEv.photos||[]).length}</span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex gap-2 overflow-x-auto pb-1">
                 {(detEv.photos||[]).map((p,i)=>(
-                  <button key={i} onClick={()=>openLightbox(p.url)}
-                    className="w-[calc(25%-6px)] aspect-square rounded-xl overflow-hidden bg-gray-100 block">
+                  <button key={i} onClick={()=>openLightbox(detEv.photos.map(x=>x.url), i)}
+                    className="w-20 h-20 shrink-0 rounded-xl overflow-hidden bg-gray-100 block">
                     <img src={p.url} alt="" className="w-full h-full object-cover"/>
                   </button>
                 ))}
@@ -2741,10 +2774,12 @@ function EventModal() {
             </label>
           </div>
           {(form.photos||[]).length > 0 && (
-            <div className="flex flex-wrap gap-2 pl-7">
+            <div className="flex gap-2 overflow-x-auto pl-7 pb-1">
               {(form.photos||[]).map((p, i) => (
-                <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200">
-                  <img src={p.url || p.data} alt={p.name} onClick={() => openLightbox(p.url || p.data)} className="w-full h-full object-cover cursor-pointer"/>
+                <div key={i} className="relative w-20 h-20 shrink-0 rounded-xl overflow-hidden border border-gray-200">
+                  <img src={p.url || p.data} alt={p.name}
+                    onClick={() => openLightbox(form.photos.map(x=>x.url||x.data), i)}
+                    className="w-full h-full object-cover cursor-pointer"/>
                   <button onClick={() => set("photos", form.photos.filter((_,j)=>j!==i))}
                     className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
                     <X size={10} className="text-white"/>
@@ -3147,10 +3182,12 @@ function FieldReportScreen({ ev, onClose }) {
             <input ref={beforeInputRef} type="file" accept="image/*" multiple className="hidden"
               onChange={e => { if (e.target.files?.length) pickPhotos(e.target.files, setBeforePhotos); e.target.value = ""; }}/>
             {beforePhotos.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
+              <div className="flex gap-2 overflow-x-auto mb-2 pb-1">
                 {beforePhotos.map((p, i) => (
-                  <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200">
-                    <img src={p.url || p.data} alt={p.name} onClick={() => openLightbox(p.url || p.data)} className="w-full h-full object-cover cursor-pointer"/>
+                  <div key={i} className="relative w-20 h-20 shrink-0 rounded-xl overflow-hidden border border-gray-200">
+                    <img src={p.url || p.data} alt={p.name}
+                      onClick={() => openLightbox(beforePhotos.map(x=>x.url||x.data), i)}
+                      className="w-full h-full object-cover cursor-pointer"/>
                     <button onClick={() => setBeforePhotos(prev => prev.filter((_, j) => j !== i))}
                       className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
                       <X size={10} className="text-white"/>
@@ -3198,10 +3235,12 @@ function FieldReportScreen({ ev, onClose }) {
             <input ref={afterInputRef} type="file" accept="image/*" multiple className="hidden"
               onChange={e => { if (e.target.files?.length) pickPhotos(e.target.files, setAfterPhotos); e.target.value = ""; }}/>
             {afterPhotos.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
+              <div className="flex gap-2 overflow-x-auto mb-2 pb-1">
                 {afterPhotos.map((p, i) => (
-                  <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200">
-                    <img src={p.url || p.data} alt={p.name} onClick={() => openLightbox(p.url || p.data)} className="w-full h-full object-cover cursor-pointer"/>
+                  <div key={i} className="relative w-20 h-20 shrink-0 rounded-xl overflow-hidden border border-gray-200">
+                    <img src={p.url || p.data} alt={p.name}
+                      onClick={() => openLightbox(afterPhotos.map(x=>x.url||x.data), i)}
+                      className="w-full h-full object-cover cursor-pointer"/>
                     <button onClick={() => setAfterPhotos(prev => prev.filter((_, j) => j !== i))}
                       className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
                       <X size={10} className="text-white"/>
@@ -3486,14 +3525,14 @@ function ReportHistoryScreen() {
               <span className="text-base font-extrabold text-blue-600">{selected.price}원</span>
             </div>
           )}
-          <div className="flex gap-3">
-            <div className="flex-1">
+          <div className="flex flex-col gap-4">
+            <div>
               <p className="text-xs text-gray-400 mb-1">Before</p>
               {(selected.beforePhotos||[]).length > 0 ? (
-                <div className="flex flex-wrap gap-2">
+                <div className="flex gap-2 overflow-x-auto pb-1">
                   {selected.beforePhotos.map((p,i)=>(
-                    <button key={i} onClick={()=>openLightbox(p.url)}
-                      className="w-[calc(50%-4px)] aspect-square rounded-xl overflow-hidden bg-gray-100">
+                    <button key={i} onClick={()=>openLightbox(selected.beforePhotos.map(x=>x.url), i)}
+                      className="w-24 h-24 shrink-0 rounded-xl overflow-hidden bg-gray-100">
                       <img src={p.url} alt="" className="w-full h-full object-cover"/>
                     </button>
                   ))}
@@ -3505,13 +3544,13 @@ function ReportHistoryScreen() {
                 </div>
               )}
             </div>
-            <div className="flex-1">
+            <div>
               <p className="text-xs text-gray-400 mb-1">After</p>
               {(selected.afterPhotos||[]).length > 0 ? (
-                <div className="flex flex-wrap gap-2">
+                <div className="flex gap-2 overflow-x-auto pb-1">
                   {selected.afterPhotos.map((p,i)=>(
-                    <button key={i} onClick={()=>openLightbox(p.url)}
-                      className="w-[calc(50%-4px)] aspect-square rounded-xl overflow-hidden bg-gray-100">
+                    <button key={i} onClick={()=>openLightbox(selected.afterPhotos.map(x=>x.url), i)}
+                      className="w-24 h-24 shrink-0 rounded-xl overflow-hidden bg-gray-100">
                       <img src={p.url} alt="" className="w-full h-full object-cover"/>
                     </button>
                   ))}
