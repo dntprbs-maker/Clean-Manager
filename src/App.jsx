@@ -2722,7 +2722,7 @@ function EventModal() {
             <div className="flex flex-wrap gap-2 pl-7">
               {(form.photos||[]).map((p, i) => (
                 <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200">
-                  <img src={p.url || p.data} alt={p.name} className="w-full h-full object-cover"/>
+                  <img src={p.url || p.data} alt={p.name} onClick={() => window.open(p.url || p.data, "_blank")} className="w-full h-full object-cover cursor-pointer"/>
                   <button onClick={() => set("photos", form.photos.filter((_,j)=>j!==i))}
                     className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
                     <X size={10} className="text-white"/>
