@@ -1,14 +1,18 @@
 // Clean-Manager Cloud Functions — 일정 등록/수정/삭제 시 담당 팀원에게 푸시 알림
 import { onDocumentCreated, onDocumentUpdated, onDocumentDeleted } from "firebase-functions/v2/firestore";
+import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { defineSecret } from "firebase-functions/params";
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 initializeApp();
 const db = getFirestore();
 
 const REGION = "asia-northeast3";
 const DOC = "companies/{companyId}/events/{eventId}";
+const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 
 // 시간 표시 도우미 (HH:MM → 오전/오후 h:mm)
 function fmtTime(t) {
@@ -119,5 +123,75 @@ export const sendEventDeleteNotification = onDocumentDeleted(
   async (event) => {
     if (!event.data) return;
     await notifyTeam(event.params.companyId, event.params.eventId, event.data.data(), "deleted");
+  }
+);
+
+// ── AI 일정 추출 (Gemini) ────────────────────────────────────────
+// 카카오톡 상담 대화 / 메모지 사진에서 일정 정보(제목·날짜·시간·장소·연락처)를 추출
+const TODAY_HINT = () => new Date().toISOString().slice(0, 10);
+
+const EXTRACT_PROMPT = (context) => `너는 청소업체 일정 관리 앱의 비서야. 아래 ${context}에서 청소/방문 일정 정보를 뽑아 JSON으로만 답해.
+오늘 날짜는 ${TODAY_HINT()}이야. 연도가 명시되지 않은 날짜는 오늘 기준 가까운 미래로 추정해.
+반드시 아래 스키마의 JSON 객체 하나만 출력하고, 정보가 없는 필드는 빈 문자열("")로 남겨.
+{
+  "title": "일정 제목 (예: 역촌동 입주청소 25평)",
+  "start": "YYYY-MM-DD",
+  "end": "YYYY-MM-DD (모르면 start와 동일)",
+  "startTime": "HH:MM (24시간제, 모르면 빈 문자열)",
+  "endTime": "HH:MM (24시간제, startTime+1시간 기본)",
+  "place": "주소 또는 장소",
+  "contact": "전화번호 (숫자와 하이픈만)",
+  "description": "비밀번호, 특이사항 등 나머지 메모"
+}`;
+
+function parseJsonFromModel(text) {
+  const cleaned = text.replace(/```json|```/g, "").trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("모델 응답에서 JSON을 찾지 못했습니다.");
+  return JSON.parse(match[0]);
+}
+
+// 대화(카카오톡 상담) 텍스트 → 일정 정보 추출
+export const analyzeConsultation = onCall(
+  { region: REGION, secrets: [GEMINI_API_KEY] },
+  async (request) => {
+    const text = (request.data?.text || "").trim();
+    if (!text) throw new HttpsError("invalid-argument", "분석할 텍스트가 없습니다.");
+    try {
+      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY.value());
+      const model = genAI.getGenerativeModel({
+        model: "gemini-2.5-flash",
+        generationConfig: { responseMimeType: "application/json" },
+      });
+      const result = await model.generateContent(EXTRACT_PROMPT("고객 상담 대화") + `\n\n---\n${text}\n---`);
+      return parseJsonFromModel(result.response.text());
+    } catch (e) {
+      console.error("[analyzeConsultation] 오류:", e);
+      throw new HttpsError("internal", e?.message || "분석 중 오류가 발생했습니다.");
+    }
+  }
+);
+
+// 사진(메모지 촬영본 등) → 일정 정보 추출 (base64 이미지)
+export const extractFromImage = onCall(
+  { region: REGION, secrets: [GEMINI_API_KEY] },
+  async (request) => {
+    const image = request.data?.image;
+    if (!image) throw new HttpsError("invalid-argument", "이미지가 없습니다.");
+    try {
+      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY.value());
+      const model = genAI.getGenerativeModel({
+        model: "gemini-2.5-flash",
+        generationConfig: { responseMimeType: "application/json" },
+      });
+      const result = await model.generateContent([
+        EXTRACT_PROMPT("사진 속 텍스트(메모/캡처 이미지)"),
+        { inlineData: { mimeType: "image/jpeg", data: image } },
+      ]);
+      return parseJsonFromModel(result.response.text());
+    } catch (e) {
+      console.error("[extractFromImage] 오류:", e);
+      throw new HttpsError("internal", e?.message || "분석 중 오류가 발생했습니다.");
+    }
   }
 );
