@@ -556,6 +556,11 @@ function Provider({ children, loginUser, onLogout }) {
   const addReport = useCallback(r => {
     const ref = doc(collection(companyRef, "reports"));
     setDoc(ref, { ...r, id: ref.id });
+    return ref.id;
+  }, [companyRef]);
+
+  const updateReport = useCallback((id, patch) => {
+    updateDoc(doc(companyRef, "reports", id), patch);
   }, [companyRef]);
 
   const addLog = useCallback((action, detail) => {
@@ -763,7 +768,7 @@ function Provider({ children, loginUser, onLogout }) {
       links,setLinks,addLink,deleteLink,updateLink,persistLinkOrder,
       linkCategories,saveLinkCategories,
       titleRule,typeKeywords,saveTitleRule,
-      reports,addReport,
+      reports,addReport,updateReport,
       companyId: loginUser.companyId
     }}>
       {children}
@@ -858,7 +863,7 @@ function DemoProvider({ children }) {
       addEvent: demoAlert, updateEvent: demoAlert, deleteEvent: demoAlert, updateLeaderComment: demoAlert,
       updateEventScoped: demoAlert, deleteEventScoped: demoAlert,
       addNotice: demoAlert, updateNotice: demoAlert, deleteNotice: demoAlert,
-      addLog: noop, addReport: demoAlert,
+      addLog: noop, addReport: demoAlert, updateReport: noop,
       modal, openModal, closeModal,
       current, setCurrent,
       selDate, setSelDate,
@@ -3479,15 +3484,18 @@ function SearchModal() {
 
 // ── 현장 완료 보고 화면 (2단계: 시작 → 완료) ─────────────────────
 function FieldReportScreen({ ev, onClose }) {
-  const { currentUser, addReport, companyId, isDemo } = useC();
-  const [step, setStep] = useState("start");
-  const [startMemo, setStartMemo] = useState("");
+  const { currentUser, addReport, updateReport, reports, companyId, isDemo } = useC();
+  // 이전에 "청소 시작"까지만 하고 나갔던 진행중 보고가 있으면 이어서 재개
+  const existingReport = ev ? reports.find(r => r.eventId === ev.id && r.status === "진행중") : null;
+  const [step, setStep] = useState(existingReport ? "working" : "start");
+  const [startMemo, setStartMemo] = useState(existingReport?.startMemo || "");
   const [endMemo, setEndMemo] = useState("");
-  const [startTime, setStartTime] = useState("");
+  const [startTime, setStartTime] = useState(existingReport?.workStart || "");
+  const [reportId, setReportId] = useState(existingReport?.id || null);
   const [showLog, setShowLog] = useState(false);
   const [logs, setLogs] = useState([]);
   const [logDone, setLogDone] = useState(false);
-  const [beforePhotos, setBeforePhotos] = useState([]);
+  const [beforePhotos, setBeforePhotos] = useState(existingReport?.beforePhotos || []);
   const [afterPhotos, setAfterPhotos] = useState([]);
   const [uploading, setUploading] = useState(false);
   const beforeInputRef = useRef(null);
@@ -3513,10 +3521,43 @@ function FieldReportScreen({ ev, onClose }) {
     return { name: p.name, url };
   }));
 
-  const handleStart = () => {
+  const handleStart = async () => {
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
     setStartTime(timeStr);
+    // 시작 단계 내용을 바로 저장해둬서, 중간에 나가도 다시 들어오면 이어서 진행 가능
+    if (!isDemo) {
+      setUploading(true);
+      try {
+        const uploadedBefore = await uploadPhotos(beforePhotos, "before");
+        setBeforePhotos(uploadedBefore);
+        const id = addReport({
+          eventId:   ev?.id || null,
+          title:     ev?.title || "",
+          date:      ev?.start || fmt(new Date()),
+          startTime: ev?.startTime || "",
+          calId:     ev?.calId || "",
+          teamName:  cal?.label || cal?.name || "",
+          teamColor: cal?.color || "#1a56db",
+          reporter:  currentUser?.name || "",
+          startMemo,
+          memo: "",
+          beforePhotos: uploadedBefore,
+          afterPhotos: [],
+          place: ev?.place || "",
+          workStart: timeStr,
+          workEnd: "",
+          status: "진행중",
+          createdAt: now.toISOString(),
+        });
+        setReportId(id);
+      } catch (e) {
+        alert("청소 시작 정보를 저장하는 중 오류: " + e.message);
+        setUploading(false);
+        return;
+      }
+      setUploading(false);
+    }
     setStep("working");
   };
 
@@ -3553,25 +3594,35 @@ function FieldReportScreen({ ev, onClose }) {
 
     const now = new Date();
     const endTimeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
-    addReport({
-      eventId:   ev?.id || null,
-      title:     ev?.title || "",
-      date:      ev?.start || fmt(new Date()),
-      startTime: ev?.startTime || "",
-      calId:     ev?.calId || "",
-      teamName:  cal?.label || cal?.name || "",
-      teamColor: cal?.color || "#1a56db",
-      reporter:  currentUser?.name || "",
-      startMemo,
-      memo:      endMemo,        // 완료 메모 (내역 화면에서 memo 로 표시)
-      beforePhotos: uploadedBefore,
-      afterPhotos:  uploadedAfter,
-      place:     ev?.place || "",
-      workStart: startTime,
-      workEnd:   endTimeStr,
-      status:    "완료",
-      createdAt: now.toISOString(),
-    });
+    if (!isDemo && reportId) {
+      // 이미 "청소 시작" 단계에서 만들어둔 진행중 문서를 완료 처리로 이어서 갱신
+      updateReport(reportId, {
+        memo: endMemo,
+        afterPhotos: uploadedAfter,
+        workEnd: endTimeStr,
+        status: "완료",
+      });
+    } else {
+      addReport({
+        eventId:   ev?.id || null,
+        title:     ev?.title || "",
+        date:      ev?.start || fmt(new Date()),
+        startTime: ev?.startTime || "",
+        calId:     ev?.calId || "",
+        teamName:  cal?.label || cal?.name || "",
+        teamColor: cal?.color || "#1a56db",
+        reporter:  currentUser?.name || "",
+        startMemo,
+        memo:      endMemo,        // 완료 메모 (내역 화면에서 memo 로 표시)
+        beforePhotos: uploadedBefore,
+        afterPhotos:  uploadedAfter,
+        place:     ev?.place || "",
+        workStart: startTime,
+        workEnd:   endTimeStr,
+        status:    "완료",
+        createdAt: now.toISOString(),
+      });
+    }
 
     setShowLog(true);
     setLogs([]);
@@ -3599,7 +3650,7 @@ function FieldReportScreen({ ev, onClose }) {
         <button onClick={onClose} className="p-1"><X size={22} className="text-white"/></button>
         <div className="flex items-center gap-2">
           <span className="text-lg">🧹</span>
-          <span className="font-bold text-white text-base">현장 완료 보고</span>
+          <span className="font-bold text-white text-base">{step === "start" ? "청소 시작 보고" : "청소 완료 보고"}</span>
         </div>
         <div style={{width:30}}/>
       </div>
