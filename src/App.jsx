@@ -1779,11 +1779,11 @@ function DetailSheet() {
             </div>
           )}
 
-          {/* 특이사항입력 — 팀장은 일정 본문은 못 고치고 이 칸만 쓰고 지울 수 있음 */}
+          {/* 일정 추가사항 입력 — 팀장은 일정 본문은 못 고치고 이 칸만 쓰고 지울 수 있음 */}
           {(detEv.leaderComment || canWriteComment) && (
             <div className="mx-5 my-5 p-4 rounded-2xl border-2 border-amber-300 bg-amber-50">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[13px] font-bold text-amber-700">📝 특이사항입력</span>
+                <span className="text-[13px] font-bold text-amber-700">📝 일정 추가사항 입력</span>
                 {detEv.leaderCommentBy && <span className="text-xs text-amber-500">{detEv.leaderCommentBy}</span>}
               </div>
               {canWriteComment ? (
@@ -1792,7 +1792,7 @@ function DetailSheet() {
                     ref={commentRef}
                     value={commentDraft}
                     onChange={e=>setCommentDraft(e.target.value)}
-                    placeholder="현장 특이사항을 입력하세요"
+                    placeholder="일정 추가사항을 입력하세요"
                     className="w-full min-h-[80px] rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500"
                   />
                   <div className="flex justify-end">
