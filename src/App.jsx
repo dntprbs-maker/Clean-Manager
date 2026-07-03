@@ -3503,6 +3503,20 @@ function FieldReportScreen({ ev, onClose }) {
   const logBodyRef = useRef(null);
   const cal = calById(ev?.calId);
 
+  // 마운트 시점엔 진행중 기록이 아직 Firestore에서 안 내려왔을 수 있어 —
+  // reports가 나중에 갱신되면 그때라도 다시 확인해서 이어서 재개
+  useEffect(() => {
+    if (!ev || reportId) return;
+    const found = reports.find(r => r.eventId === ev.id && r.status === "진행중");
+    if (found) {
+      setReportId(found.id);
+      setStartMemo(found.startMemo || "");
+      setStartTime(found.workStart || "");
+      setBeforePhotos(found.beforePhotos || []);
+      setStep("working");
+    }
+  }, [reports, ev?.id, reportId]);
+
   const pickPhotos = (files, setPhotos) => {
     Promise.all(Array.from(files).map(file => new Promise(resolve => {
       const reader = new FileReader();
