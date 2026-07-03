@@ -1032,7 +1032,7 @@ function ScheduleList({ selDate, compact=false }) {
   const calByIdLocal = id => cals.find(c=>c.id===id) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af", checked:true };
   const canAdd = currentUser.role !== "팀원";
   const handleCardClick = async (ev) => {
-    if (currentUser.role === "팀원") { setDetEv(ev); return; }
+    if (currentUser.role === "팀원" || currentUser.role === "팀장") { setDetEv(ev); return; }
     if (ev._recurring) {
       const scope = await askRecurringScope(ev, "edit");
       if (!scope) return;
