@@ -15,7 +15,7 @@ import {
   Calendar, AlignLeft, ChevronDown, ChevronLeft,
   ChevronRight, Menu, Settings, User, Edit3, Trash2,
   PieChart, Bell, History, ExternalLink, Activity,
-  CheckSquare, FileText, Camera, Download, Lock
+  CheckSquare, FileText, Camera, Download
 } from "lucide-react";
 
 import { db, functions, storage } from "./firebase";
@@ -454,6 +454,7 @@ function Provider({ children, loginUser, onLogout }) {
   // Firestore 데이터
   const [events, setEvents] = useState([]);
   const [cals, setCals] = useState(DEFAULT_CALS); // 기본 캘린더 목록 (Firestore 로드 전 fallback)
+  const [calsLoaded, setCalsLoaded] = useState(false); // 실제 Firestore cals 스냅샷을 한 번이라도 받았는지
   const [teams, setTeams] = useState(INIT_TEAMS);
   const [users, setUsers] = useState(INIT_USERS);
   const [activityLogs, setActivityLogs] = useState([]);
@@ -496,6 +497,7 @@ function Provider({ children, loginUser, onLogout }) {
     });
     const unsubCals = onSnapshot(collection(companyRef, "cals"), snap => {
       if (!snap.empty) setCals(snap.docs.filter(d => d.data().status !== "deleted").map(d => ({ ...d.data(), id: d.id })));
+      setCalsLoaded(true);
     });
     const unsubReports = onSnapshot(collection(companyRef, "reports"), snap => {
       setReports(snap.docs.map(d => ({ ...d.data(), id: d.id }))
@@ -678,7 +680,6 @@ function Provider({ children, loginUser, onLogout }) {
   const [searchQuery,setSearchQuery] = useState("");
   const [sheetMode,setSheetMode] = useState(1);
   const [teamModal, setTeamModal] = useState(false);
-  const [myCalModal, setMyCalModal] = useState(false);
   const [currentScreen, setCurrentScreen] = useState("calendar");
   const [empModal, setEmpModal] = useState({ open: false, editId: null });
   const [companySettingsModal, setCompanySettingsModal] = useState(false);
@@ -695,6 +696,20 @@ function Provider({ children, loginUser, onLogout }) {
   const isMine = useCallback(c => !c.personal || c.ownerId === currentUser.id || currentUser.role === "최고관리자",
     [currentUser.id, currentUser.role]);
   const visibleCals = useMemo(() => cals.filter(isMine), [cals, isMine]);
+
+  // 나만의 캘린더는 사용자가 직접 만들 필요 없이 로그인 시 자동으로 하나씩 생성
+  useEffect(() => {
+    if (!calsLoaded) return;
+    const exists = cals.some(c => c.personal && c.ownerId === currentUser.id);
+    if (!exists) {
+      updateCal({
+        id: `personal_${currentUser.id}`,
+        label: `${currentUser.name}의 캘린더`, name: `${currentUser.name}의 캘린더`,
+        color: "#6366f1", checked: true, isField: true,
+        personal: true, ownerId: currentUser.id,
+      });
+    }
+  }, [calsLoaded, cals, currentUser.id, currentUser.name, updateCal]);
 
   const visibleEvents  = useMemo(()=>{
     // calId가 없거나 "unassigned"인 미배정 일정도 항상 표시
@@ -726,7 +741,7 @@ function Provider({ children, loginUser, onLogout }) {
       searchOpen,setSearchOpen,
       searchQuery,setSearchQuery,
       sheetMode,setSheetMode,
-      teams,setTeams,saveTeams,teamModal,setTeamModal,myCalModal,setMyCalModal,
+      teams,setTeams,saveTeams,teamModal,setTeamModal,
       users,setUsers,
       currentUser,setCurrentUser,loginUser,onLogout,
       currentScreen,setCurrentScreen,
@@ -806,7 +821,6 @@ function DemoProvider({ children }) {
   const [detailSheet, setDetailSheet] = useState(null);
   const [empModal, setEmpModal] = useState({open:false,editId:null});
   const [teamModal, setTeamModal] = useState(false);
-  const [myCalModal, setMyCalModal] = useState(false);
   const [companySettingsModal, setCompanySettingsModal] = useState(false);
   const [fieldReportEv, setFieldReportEv] = useState(null);
   const [titleRule] = useState(["time","district","area"]);
@@ -844,7 +858,6 @@ function DemoProvider({ children }) {
       detailSheet, setDetailSheet,
       empModal, setEmpModal,
       teamModal, setTeamModal,
-      myCalModal, setMyCalModal,
       companySettingsModal, setCompanySettingsModal,
       fieldReportEv, setFieldReportEv,
       companyId: "demo",
@@ -1872,7 +1885,7 @@ function BottomTabBar() {
 
 // ── 사이드 드로어 (스와이프 열기/닫기 지원) ───────────────────────
 function SideDrawer() {
-  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, onLogout, companyId, setMyCalModal } = useC();
+  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, onLogout, companyId } = useC();
   const [pwModal, setPwModal] = useState(false);
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -2128,13 +2141,6 @@ function SideDrawer() {
             className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
             <ExternalLink size={20} className="text-purple-500" />
             <span className="text-sm font-medium text-gray-700 flex-1 text-left">자주 쓰는 외부 링크</span>
-          </button>
-          {/* 나만의 캘린더 - 전체(누구나 자기 것 하나) */}
-          <button
-            onClick={() => { setMyCalModal(true); setDrawer(false); }}
-            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
-            <Lock size={20} className="text-gray-500" />
-            <span className="text-sm font-medium text-gray-700 flex-1 text-left">🔒 나만의 캘린더</span>
           </button>
           {/* 캘린더 가져오기 - 팀원 제외 */}
           {currentUser.role !== "팀원" && (
@@ -4946,7 +4952,6 @@ function AppInner() {
       <SearchModal/>
       <EmployeeFormModal/>
       <TeamManagementModal/>
-      <MyCalendarModal/>
       <CompanySettingsModal/>
       <FieldReportGate/>
     </div>
@@ -5686,96 +5691,6 @@ function TeamManagementModal() {
             <div className="py-10 text-center text-gray-400 text-sm">등록된 팀이 없습니다.</div>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ── 나만의 캘린더 모달 (개인 전용, 본인/최고관리자만 조회 가능) ────────────
-const MY_CAL_COLORS = ["#6366f1","#ec4899","#06b6d4","#84cc16","#f59e0b","#8b5cf6","#f97316","#ef4444","#16a34a","#0891b2"];
-function MyCalendarModal() {
-  const { myCalModal, setMyCalModal, cals, updateCal, deleteCal, currentUser } = useC();
-  const [name, setName]   = useState("");
-  const [color, setColor] = useState(MY_CAL_COLORS[0]);
-
-  const myCal = cals.find(c => c.personal && c.ownerId === currentUser.id);
-
-  useEffect(() => {
-    if (myCalModal) { setName(myCal?.label || `${currentUser.name}의 캘린더`); setColor(myCal?.color || MY_CAL_COLORS[0]); }
-  }, [myCalModal]);
-
-  if (!myCalModal) return null;
-  const close = () => setMyCalModal(false);
-
-  const handleCreate = () => {
-    const label = name.trim() || `${currentUser.name}의 캘린더`;
-    updateCal({
-      id: `personal_${currentUser.id}`,
-      label, name: label, color,
-      checked: true, isField: true,
-      personal: true, ownerId: currentUser.id,
-    });
-  };
-  const handleSave = () => {
-    if (!myCal) return;
-    const label = name.trim() || myCal.label;
-    updateCal({ ...myCal, label, name: label, color });
-  };
-  const handleDelete = () => {
-    if (!myCal) return;
-    if (window.confirm("나만의 캘린더를 삭제하시겠습니까? 여기 등록된 개인 일정도 함께 사라집니다.")) {
-      deleteCal(myCal.id);
-      close();
-    }
-  };
-
-  return (
-    <div className="absolute inset-0 z-[70] flex flex-col justify-end">
-      <div className="absolute inset-0 bg-black/40" onClick={close} />
-      <div className="relative bg-white rounded-t-3xl p-5 shadow-2xl flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2"><Lock size={18}/> 나만의 캘린더</h2>
-          <button onClick={close} className="p-2 -mr-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100">
-            <X size={22}/>
-          </button>
-        </div>
-        <p className="text-xs text-gray-400 leading-relaxed">
-          여기 등록한 일정은 나 자신과 최고관리자만 볼 수 있어요. 같은 팀원, 팀장에게도 보이지 않습니다.
-        </p>
-        <div className="flex flex-col gap-2">
-          <label className="text-xs font-bold text-gray-500">캘린더 이름</label>
-          <input
-            value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder={`${currentUser.name}의 캘린더`}
-            className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500"
-          />
-        </div>
-        <div className="flex flex-col gap-2">
-          <label className="text-xs font-bold text-gray-500">색상</label>
-          <div className="flex gap-2 flex-wrap">
-            {MY_CAL_COLORS.map(c => (
-              <button key={c} onClick={() => setColor(c)}
-                className="w-8 h-8 rounded-full border-2 transition-transform"
-                style={{ background: c, borderColor: color === c ? "#1a1a1a" : "transparent", transform: color === c ? "scale(1.15)" : "scale(1)" }}/>
-            ))}
-          </div>
-        </div>
-        {myCal ? (
-          <div className="flex gap-2 mt-1">
-            <button onClick={handleDelete}
-              className="py-3 px-4 rounded-xl text-sm text-red-500 bg-red-50 font-bold">삭제</button>
-            <button onClick={handleSave}
-              className="flex-1 py-3 rounded-xl text-sm text-white font-bold"
-              style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>저장</button>
-          </div>
-        ) : (
-          <button onClick={handleCreate}
-            className="w-full py-3 rounded-xl text-sm text-white font-bold mt-1"
-            style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
-            나만의 캘린더 만들기
-          </button>
-        )}
       </div>
     </div>
   );
