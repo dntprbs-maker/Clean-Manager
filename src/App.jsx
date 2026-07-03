@@ -1044,10 +1044,16 @@ function useDates(current) {
 
 // ── 시간표 시트 내용 ──────────────────────────────────────────────
 function ScheduleList({ selDate, compact=false }) {
-  const { visibleEvents, setDetEv, setSelDate, setCurrent, setSheetMode, openModal, currentUser, cals } = useC();
+  const { visibleEvents, setDetEv, setSelDate, setCurrent, setSheetMode, openModal, currentUser, cals, reports, setFieldReportEv } = useC();
   const calByIdLocal = id => cals.find(c=>c.id===id) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af", checked:true };
   const canAdd = currentUser.role !== "팀원";
   const handleCardClick = async (ev) => {
+    // 청소 시작까지 진행된 일정이면 상세보기를 건너뛰고 바로 이어서(청소 완료 보고) 열기
+    const canContinue = currentUser.role === "팀장" || currentUser.role === "최고관리자";
+    if (canContinue && reports.some(r => r.eventId === ev.id && r.status === "진행중")) {
+      setFieldReportEv(ev);
+      return;
+    }
     if (currentUser.role === "팀원" || currentUser.role === "팀장") { setDetEv(ev); return; }
     if (ev._recurring) {
       const scope = await askRecurringScope(ev, "edit");
@@ -1417,7 +1423,17 @@ function CalendarView() {
     selDate, setSelDate,
     sheetMode, setSheetMode,
     setDetEv, drawer,
+    currentUser, reports, setFieldReportEv,
   } = useC();
+  // 청소 시작까지 진행된 일정이면 상세보기를 건너뛰고 바로 이어서(청소 완료 보고) 열기
+  const handleEventClick = (ev) => {
+    const canContinue = currentUser.role === "팀장" || currentUser.role === "최고관리자";
+    if (canContinue && reports.some(r => r.eventId === ev.id && r.status === "진행중")) {
+      setFieldReportEv(ev);
+      return;
+    }
+    setDetEv(ev);
+  };
   const weeks  = useDates(current);
   const layouts = useMemo(
     () => weeks.map(w => buildLayout(visibleEvents, w.map(x=>x.s))),
@@ -1520,7 +1536,7 @@ function CalendarView() {
                     <FullMonthCell key={s} ds={s} isCm={cm}
                       items={layouts[wi][s]||[]}
                       onDate={handleDate}
-                      onEvt={ev => setDetEv(ev)}/>
+                      onEvt={handleEventClick}/>
                   ))}
                 </div>
               ))}
