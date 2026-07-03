@@ -588,6 +588,17 @@ function Provider({ children, loginUser, onLogout }) {
     if (target) addLog("삭제", `'${target.title}' 일정을 삭제했습니다.`);
   }, [events, addLog, companyRef]);
 
+  // 팀장 코멘트 — 일정 본문은 못 건드리고 이 코멘트만 남기고 지울 수 있음
+  const updateLeaderComment = useCallback((eventId, comment, authorName) => {
+    const target = events.find(e => e.id === eventId);
+    updateDoc(doc(companyRef, "events", eventId), {
+      leaderComment: comment,
+      leaderCommentBy: comment ? authorName : null,
+      leaderCommentAt: comment ? new Date().toISOString() : null,
+    });
+    if (target) addLog(comment ? "코멘트" : "삭제", `'${target.title}' 일정에 팀장 코멘트를 ${comment ? "남겼습니다" : "삭제했습니다"}.`);
+  }, [events, addLog, companyRef]);
+
   // 반복일정 수정 — scope: "instance"(이 일정만) | "following"(이후 전체) | "all"(전체)
   // clickedEv 는 캘린더에 실제로 표시된(펼쳐진) 인스턴스 — .id=원본 시리즈 id, .start=이 회차 날짜
   const updateEventScoped = useCallback((clickedEv, scope, patch) => {
@@ -730,7 +741,7 @@ function Provider({ children, loginUser, onLogout }) {
 
   return (
     <Ctx.Provider value={{
-      events,visibleEvents,addEvent,updateEvent,deleteEvent,updateEventScoped,deleteEventScoped,
+      events,visibleEvents,addEvent,updateEvent,deleteEvent,updateEventScoped,deleteEventScoped,updateLeaderComment,
       fieldReportEv,setFieldReportEv,
       cals,visibleCals,toggleCal,updateCal,deleteCal,
       modal,openModal,closeModal,
@@ -844,7 +855,7 @@ function DemoProvider({ children }) {
       currentUser: DEMO_USER, setCurrentUser: noop,
       loginUser: DEMO_USER, onLogout: noop,
       titleRule, typeKeywords, saveTitleRule: noop,
-      addEvent: demoAlert, updateEvent: demoAlert, deleteEvent: demoAlert,
+      addEvent: demoAlert, updateEvent: demoAlert, deleteEvent: demoAlert, updateLeaderComment: demoAlert,
       updateEventScoped: demoAlert, deleteEventScoped: demoAlert,
       addNotice: demoAlert, updateNotice: demoAlert, deleteNotice: demoAlert,
       addLog: noop, addReport: demoAlert,
@@ -1600,12 +1611,17 @@ function CalendarView() {
 
 // ── 이벤트 상세 Bottom Sheet ──────────────────────────────────────
 function DetailSheet() {
-  const { detEv, setDetEv, deleteEvent, deleteEventScoped, openModal, setFieldReportEv, currentUser, cals } = useC();
+  const { detEv, setDetEv, deleteEvent, deleteEventScoped, openModal, setFieldReportEv, currentUser, cals, updateLeaderComment } = useC();
   const [vis,setVis]=useState(false);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [editingComment, setEditingComment] = useState(false);
   useEffect(()=>{ if(detEv)setTimeout(()=>setVis(true),10); else setVis(false); },[detEv]);
+  useEffect(()=>{ setCommentDraft(detEv?.leaderComment || ""); setEditingComment(false); },[detEv?.id]);
   if(!detEv) return null;
   const cal = cals.find(c=>c.id===detEv.calId) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af" };
   const close=()=>{ setVis(false); setTimeout(()=>setDetEv(null),280); };
+  const canEditEvent = currentUser.role === "최고관리자" || ["관리팀","영업팀"].includes(currentUser.team);
+  const canWriteComment = currentUser.role === "팀장";
   const handleEdit = async () => {
     if (detEv._recurring) {
       const scope = await askRecurringScope(detEv, "edit");
@@ -1644,7 +1660,7 @@ function DetailSheet() {
           </div>
           <span className="text-base font-bold text-gray-800">일정</span>
           <div className="flex gap-1">
-            {currentUser.role !== "팀원" && <>
+            {canEditEvent && <>
               <button onClick={handleEdit}
                 className="p-2 rounded-full hover:bg-gray-100"><Edit3 size={19} className="text-gray-600"/></button>
               <button onClick={handleDelete}
@@ -1734,6 +1750,55 @@ function DetailSheet() {
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* 팀장 코멘트 — 팀장은 일정 본문은 못 고치고 이 코멘트만 남기고 지울 수 있음 */}
+          {(detEv.leaderComment || canWriteComment) && (
+            <div className="px-5 py-5 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[13px] font-bold text-gray-500">💬 팀장 코멘트</span>
+                {detEv.leaderCommentBy && !editingComment && (
+                  <span className="text-xs text-gray-400">{detEv.leaderCommentBy}</span>
+                )}
+              </div>
+              {canWriteComment ? (
+                editingComment ? (
+                  <div className="flex flex-col gap-2">
+                    <textarea
+                      autoFocus
+                      value={commentDraft}
+                      onChange={e=>setCommentDraft(e.target.value)}
+                      placeholder="현장 관련 코멘트를 남겨주세요"
+                      className="w-full min-h-[80px] rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm outline-none focus:border-blue-500"
+                    />
+                    <div className="flex gap-2 justify-end">
+                      <button onClick={()=>{ setCommentDraft(detEv.leaderComment||""); setEditingComment(false); }}
+                        className="text-xs text-gray-500 font-bold px-3 py-1.5 rounded-lg hover:bg-gray-100">취소</button>
+                      <button onClick={()=>{ updateLeaderComment(detEv.id, commentDraft.trim(), currentUser.name); setEditingComment(false); }}
+                        className="text-xs text-white font-bold px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700">저장</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    {detEv.leaderComment
+                      ? <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed mb-2">{detEv.leaderComment}</p>
+                      : <p className="text-sm text-gray-400 mb-2">아직 코멘트가 없습니다.</p>}
+                    <div className="flex gap-2">
+                      <button onClick={()=>setEditingComment(true)}
+                        className="text-xs font-bold px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200">
+                        {detEv.leaderComment ? "수정" : "코멘트 남기기"}
+                      </button>
+                      {detEv.leaderComment && (
+                        <button onClick={()=>{ if(window.confirm("코멘트를 삭제하시겠습니까?")) updateLeaderComment(detEv.id, "", ""); }}
+                          className="text-xs font-bold px-3 py-1.5 rounded-lg bg-red-50 text-red-500 hover:bg-red-100">삭제</button>
+                      )}
+                    </div>
+                  </div>
+                )
+              ) : (
+                <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{detEv.leaderComment}</p>
+              )}
             </div>
           )}
 
