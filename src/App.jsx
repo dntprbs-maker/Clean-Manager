@@ -3848,6 +3848,7 @@ function ReportHistoryScreen() {
   const [dateFilter, setDateFilter]   = useState("전체");
   const [teamFilter, setTeamFilter]   = useState("전체");
   const [showSearch, setShowSearch]   = useState(false);
+  const [viewMode, setViewMode]       = useState("list"); // "list" | "gallery"
 
   // 날짜 필터 옵션
   const today = fmt(new Date());
@@ -3967,6 +3968,21 @@ function ReportHistoryScreen() {
             <p className="text-xs text-gray-400 mt-0.5">총 {filtered.length}건</p>
           </div>
           <div className="flex items-center gap-1">
+          {/* 목록/갤러리 전환 */}
+          <div className="flex items-center bg-gray-100 rounded-xl p-0.5 mr-1">
+            <button onClick={()=>setViewMode("list")}
+              className="px-2.5 h-8 rounded-lg text-xs font-bold transition-all"
+              style={{background:viewMode==="list"?"white":"transparent", color:viewMode==="list"?"#111827":"#9ca3af",
+                boxShadow:viewMode==="list"?"0 1px 2px rgba(0,0,0,.08)":"none"}}>
+              목록
+            </button>
+            <button onClick={()=>setViewMode("gallery")}
+              className="px-2.5 h-8 rounded-lg text-xs font-bold transition-all flex items-center gap-1"
+              style={{background:viewMode==="gallery"?"white":"transparent", color:viewMode==="gallery"?"#111827":"#9ca3af",
+                boxShadow:viewMode==="gallery"?"0 1px 2px rgba(0,0,0,.08)":"none"}}>
+              <Camera size={12}/> 갤러리
+            </button>
+          </div>
           {/* 검색 버튼 */}
           <button onClick={()=>setShowSearch(p=>!p)}
             className="w-9 h-9 rounded-xl flex items-center justify-center transition-all"
@@ -4026,7 +4042,7 @@ function ReportHistoryScreen() {
         </div>
       </div>
 
-      {/* 목록 */}
+      {/* 목록 / 갤러리 */}
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-5">
         {filtered.length === 0 ? (
           <div className="text-center py-16 text-gray-400">
@@ -4034,6 +4050,46 @@ function ReportHistoryScreen() {
             <p className="text-sm font-bold">해당 내역이 없습니다</p>
             {searchQuery && <p className="text-xs mt-2">"{searchQuery}" 검색 결과 없음</p>}
           </div>
+        ) : viewMode === "gallery" ? (
+          (() => {
+            const totalPhotos = dates.reduce((sum, d) =>
+              sum + grouped[d].reduce((s, r) => s + (r.beforePhotos||[]).length + (r.afterPhotos||[]).length, 0), 0);
+            if (totalPhotos === 0) {
+              return (
+                <div className="text-center py-16 text-gray-400">
+                  <div className="text-4xl mb-3">📷</div>
+                  <p className="text-sm font-bold">첨부된 사진이 없습니다</p>
+                </div>
+              );
+            }
+            return dates.map(date => {
+              const dayPhotos = grouped[date].flatMap(r => [
+                ...(r.beforePhotos||[]).map(p => ({ ...p, tag: "전", report: r })),
+                ...(r.afterPhotos||[]).map(p => ({ ...p, tag: "후", report: r })),
+              ]);
+              if (!dayPhotos.length) return null;
+              return (
+                <div key={date}>
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className="text-xs font-bold text-gray-700">{dateLabel(date)}</span>
+                    <div className="flex-1 h-px bg-gray-200"/>
+                    <span className="text-xs text-gray-400">{dayPhotos.length}장</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {dayPhotos.map((p, i) => (
+                      <button key={i} onClick={()=>openLightbox(dayPhotos.map(x=>x.url), i)}
+                        className="relative aspect-square rounded-lg overflow-hidden bg-gray-100">
+                        <img src={p.url} alt="" className="w-full h-full object-cover"/>
+                        <span className="absolute bottom-1 left-1 text-[9px] font-bold text-white bg-black/50 px-1.5 py-0.5 rounded-full">
+                          {p.tag} · {p.report.teamName}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            });
+          })()
         ) : dates.map(date=>(
           <div key={date}>
             <div className="flex items-center gap-3 mb-2">
