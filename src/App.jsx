@@ -4217,8 +4217,11 @@ function ImportCalendarScreen() {
 
     // 이 파일(전체 파싱 결과)에 더 이상 없는, 이전에 같은 방식으로 가져온 일정은
     // 네이버 쪽에서 삭제/이동된 것으로 보고 정리(소프트 삭제)
+    // 단, 파일에 UID가 하나도 없으면(손상/형식이 다른 파일) 전체 삭제로 오인할 수 있어 건너뜀
     const newUidSet = new Set(parsedEvents.map(ev => ev.icsUid).filter(Boolean));
-    const prevImported = await getDocs(query(collection(db, "companies", companyId, "events"), where("source", "==", "ics_import")));
+    const prevImported = newUidSet.size > 0
+      ? await getDocs(query(collection(db, "companies", companyId, "events"), where("source", "==", "ics_import")))
+      : { docs: [] };
     const staleDocs = prevImported.docs.filter(d => d.data().status !== "deleted" && !newUidSet.has(d.id));
     const deletedAt = new Date().toISOString();
     await Promise.all(staleDocs.map(d =>
