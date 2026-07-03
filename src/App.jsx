@@ -1804,14 +1804,14 @@ function DetailSheet() {
             </div>
           )}
 
-          {/* 팀장 이상만 보이는 현장 완료 보고 버튼 */}
+          {/* 팀장 이상만 보이는 현장 업무 보고 버튼 — 처음 누르는 시점엔 아직 시작 전이라 "청소 시작 보고"로 표시 */}
           {(currentUser.role === "팀장" || currentUser.role === "최고관리자") && (
             <div className="px-4 py-4 border-t border-gray-100 mt-2">
               <button
                 onClick={() => { setFieldReportEv(detEv); setDetEv(null); }}
                 className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2"
                 style={{ background: "linear-gradient(135deg, #1a56db 0%, #2563eb 100%)" }}>
-                🧹 현장 완료 보고
+                🧹 청소 시작 보고
               </button>
             </div>
           )}
