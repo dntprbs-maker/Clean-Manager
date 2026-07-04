@@ -3763,10 +3763,10 @@ function FieldReportScreen({ ev, onClose }) {
               className="w-full border border-gray-200 rounded-xl p-3 text-sm text-gray-800 outline-none resize-none bg-gray-50 placeholder-gray-300"
               rows={3}/>
           </div>
-          <button onClick={handleStart}
+          <button onClick={() => { if (window.confirm("청소를 시작하시겠습니까?")) handleStart(); }}
             className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2"
             style={{ background: "linear-gradient(135deg, #1a56db 0%, #2563eb 100%)" }}>
-            🚀 청소 시작
+            🚀 청소 시작 보고
           </button>
           <div className="h-4"/>
         </div>
