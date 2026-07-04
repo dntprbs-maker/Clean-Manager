@@ -3165,7 +3165,7 @@ function EventModal() {
           </div>
         </div>
         {/* 담당팀 드롭다운 트리거 */}
-        <div className="relative pb-2">
+        <div className="relative pb-2 flex items-center gap-1">
           <button onClick={()=>setCalDropOpen(o=>!o)}
             className="flex items-center gap-1.5 text-xs font-semibold py-1 px-2 rounded-lg hover:bg-gray-50"
             style={{color: cals.find(c=>c.id===form.calId)?.color || "#9ca3af"}}>
