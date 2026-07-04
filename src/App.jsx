@@ -3278,6 +3278,14 @@ function EventModal() {
           )}
         </div>
 
+        {/* 일정 추가사항 입력 — 현장팀장이 남긴 기록, 읽기 전용 (여기선 수정 불가) */}
+        {form.leaderComment && (
+          <div className="mx-4 mt-4 p-4 rounded-2xl border-2 border-amber-300 bg-amber-50">
+            <span className="text-[13px] font-bold text-amber-700 block mb-2">📝 일정 추가사항 입력</span>
+            <p className="text-sm text-amber-900 whitespace-pre-wrap leading-relaxed">{form.leaderComment}</p>
+          </div>
+        )}
+
         <div className="h-8"/>
       </div>
       </>
