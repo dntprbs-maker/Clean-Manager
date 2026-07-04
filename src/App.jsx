@@ -85,6 +85,28 @@ const add  = (s,n)=>{ const d=pd(s); d.setDate(d.getDate()+n); return fmt(d); };
 const addMonths = (s,n)=>{ const d=pd(s); d.setMonth(d.getMonth()+n); return fmt(d); };
 const calById = id => CALS.find(c=>c.id===id) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af", checked:true };
 
+// ── 청소 진행 상태 (전/중/완료) — reports 컬렉션 기준 ─────────────
+const getReportStatus = (eventId, reports) => {
+  if (reports.some(r => r.eventId === eventId && r.status === "진행중")) return "중";
+  if (reports.some(r => r.eventId === eventId && r.status === "완료")) return "완료";
+  return "전";
+};
+const REPORT_STATUS_STYLE = {
+  "전":   { bg: "#f3f4f6", color: "#6b7280", label: "청소 전"  },
+  "중":   { bg: "#fef3c7", color: "#b45309", label: "청소 중"  },
+  "완료": { bg: "#dcfce7", color: "#15803d", label: "청소 완료" },
+};
+function ReportStatusBadge({ eventId, reports }) {
+  const status = getReportStatus(eventId, reports);
+  const s = REPORT_STATUS_STYLE[status];
+  return (
+    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0"
+      style={{ background: s.bg, color: s.color }}>
+      {s.label}
+    </span>
+  );
+}
+
 // ── 팀 캘린더 구독(iCal) 링크 ────────────────────────────────────
 const genFeedToken = () => {
   if (window.crypto?.randomUUID) return (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, "");
@@ -1632,7 +1654,7 @@ function CalendarView() {
 
 // ── 이벤트 상세 Bottom Sheet ──────────────────────────────────────
 function DetailSheet() {
-  const { detEv, setDetEv, deleteEvent, deleteEventScoped, openModal, setFieldReportEv, currentUser, cals, updateLeaderComment } = useC();
+  const { detEv, setDetEv, deleteEvent, deleteEventScoped, openModal, setFieldReportEv, currentUser, cals, updateLeaderComment, reports } = useC();
   const [vis,setVis]=useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [savedComment, setSavedComment] = useState("");
@@ -1721,7 +1743,8 @@ function DetailSheet() {
           {/* 담당팀 */}
           <div className="flex items-center px-5 py-4 border-b border-gray-50 gap-1">
             <span style={{color:cal.color}} className="font-semibold text-[15px]">{cal.label}</span>
-            <User size={14} className="text-gray-400 ml-0.5"/>
+            <User size={14} className="text-gray-400 ml-0.5 mr-1"/>
+            <ReportStatusBadge eventId={detEv.id} reports={reports}/>
           </div>
 
           {/* 제목 */}
@@ -2838,7 +2861,7 @@ function RepeatUntilPicker({ form, set }) {
 }
 
 function EventModal() {
-  const { modal, closeModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, titleRule, typeKeywords, companyId } = useC();
+  const { modal, closeModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, titleRule, typeKeywords, companyId, reports } = useC();
   const { open, date, editId, scope, instanceEv } = modal;
   // 반복일정의 "이 일정만/이후 전체" 수정은 클릭한 회차(instanceEv)의 값으로 폼을 채운다.
   const editEv = editId ? ((scope && scope!=="all" && instanceEv) ? instanceEv : events.find(e=>e.id===editId)) : null;
@@ -3152,6 +3175,7 @@ function EventModal() {
             <User size={12} className="opacity-60"/>
             <ChevronDown size={12} className={`opacity-60 transition-transform ${calDropOpen?"rotate-180":""}`}/>
           </button>
+          {editId && <ReportStatusBadge eventId={editId} reports={reports}/>}
           {calDropOpen && (
             <div className="absolute left-0 top-full mt-1 bg-white rounded-xl shadow-xl border border-gray-100 z-[100] min-w-[140px] py-1 overflow-hidden">
               {cals.filter(c => c.isField !== false).map(cal=>{
