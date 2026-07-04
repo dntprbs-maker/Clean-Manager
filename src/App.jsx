@@ -1840,7 +1840,7 @@ function DetailSheet() {
                 onClick={() => { setFieldReportEv(detEv); setDetEv(null); }}
                 className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2"
                 style={{ background: "linear-gradient(135deg, #1a56db 0%, #2563eb 100%)" }}>
-                🧹 청소 시작 보고
+                🧹 청소 시작 하기
               </button>
             </div>
           )}
