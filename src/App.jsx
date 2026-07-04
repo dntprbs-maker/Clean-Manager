@@ -1639,8 +1639,8 @@ function DetailSheet() {
   const commentRef = useRef(null);
   useEffect(()=>{ if(detEv)setTimeout(()=>setVis(true),10); else setVis(false); },[detEv]);
   useEffect(()=>{
-    const v = detEv?.leaderComment || "";
-    setCommentDraft(v); setSavedComment(v);
+    // 새 항목 입력칸은 항상 비운 채로 시작 — 기존 기록은 savedComment(누적본)로 따로 보관
+    setCommentDraft(""); setSavedComment(detEv?.leaderComment || "");
   },[detEv?.id]);
   // 팀장이면 열리자마자 특이사항 입력칸에 커서가 깜빡이도록 자동 포커스
   useEffect(()=>{
@@ -1653,16 +1653,22 @@ function DetailSheet() {
   const cal = cals.find(c=>c.id===detEv.calId) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af" };
   const canEditEvent = currentUser.role === "최고관리자" || ["관리팀","영업팀"].includes(currentUser.team);
   const canWriteComment = currentUser.role === "팀장";
-  const commentDirty = canWriteComment && commentDraft.trim() !== savedComment;
+  const commentDirty = canWriteComment && commentDraft.trim() !== "";
   const close=()=>{ setVis(false); setTimeout(()=>setDetEv(null),280); };
   const requestClose = () => {
-    if (commentDirty && !window.confirm("특이사항을 저장하지 않고 나가시겠습니까?")) return;
+    if (commentDirty && !window.confirm("입력한 추가사항을 저장하지 않고 나가시겠습니까?")) return;
     close();
   };
-  const saveComment = () => {
+  const appendComment = () => {
     const text = commentDraft.trim();
-    updateLeaderComment(detEv.id, text, currentUser.name);
-    setSavedComment(text);
+    if (!text) return;
+    const now = new Date();
+    const stamp = `${String(now.getMonth()+1).padStart(2,"0")}/${String(now.getDate()).padStart(2,"0")} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+    const entry = `👷 현장팀장입력사항 · ${currentUser.name} · ${stamp}\n${text}`;
+    const merged = savedComment ? `${savedComment}\n\n─────────────────\n${entry}` : entry;
+    updateLeaderComment(detEv.id, merged, currentUser.name);
+    setSavedComment(merged);
+    setCommentDraft("");
   };
   const handleEdit = async () => {
     if (detEv._recurring) {
@@ -1795,32 +1801,34 @@ function DetailSheet() {
             </div>
           )}
 
-          {/* 일정 추가사항 입력 — 팀장은 일정 본문은 못 고치고 이 칸만 쓰고 지울 수 있음 */}
-          {(detEv.leaderComment || canWriteComment) && (
+          {/* 일정 추가사항 입력 — 팀장은 일정 본문은 못 고치고 이 칸에만 기록을 쌓을 수 있음 */}
+          {(savedComment || canWriteComment) && (
             <div className="mx-5 my-5 p-4 rounded-2xl border-2 border-amber-300 bg-amber-50">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[13px] font-bold text-amber-700">📝 일정 추가사항 입력</span>
-                {detEv.leaderCommentBy && <span className="text-xs text-amber-500">{detEv.leaderCommentBy}</span>}
               </div>
-              {canWriteComment ? (
+              {savedComment && (
+                <p className={`text-sm text-amber-900 whitespace-pre-wrap leading-relaxed ${canWriteComment ? "mb-3" : ""}`}>{savedComment}</p>
+              )}
+              {canWriteComment && (
                 <div className="flex flex-col gap-2">
                   <textarea
                     ref={commentRef}
                     value={commentDraft}
                     onChange={e=>setCommentDraft(e.target.value)}
-                    placeholder="일정 추가사항을 입력하세요"
-                    className="w-full min-h-[80px] rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500"
+                    placeholder="새로 남길 추가사항을 입력하세요"
+                    className="w-full min-h-[70px] rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500"
                   />
-                  <div className="flex justify-end">
-                    <button onClick={saveComment} disabled={!commentDirty}
-                      className="text-xs font-bold px-4 py-2 rounded-lg text-white disabled:opacity-40 disabled:cursor-not-allowed"
-                      style={{background:"#d97706"}}>
-                      저장
-                    </button>
-                  </div>
+                  {commentDirty && (
+                    <div className="flex justify-end">
+                      <button onClick={appendComment}
+                        className="text-xs font-bold px-4 py-2 rounded-lg text-white"
+                        style={{background:"#d97706"}}>
+                        저장
+                      </button>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <p className="text-sm text-amber-900 whitespace-pre-wrap leading-relaxed">{detEv.leaderComment}</p>
               )}
             </div>
           )}
