@@ -3641,12 +3641,10 @@ function FieldReportScreen({ ev, onClose }) {
     { delay: 600, avatar: "📱", avatarBg: "#1e40af", sender: "시스템", senderColor: "#93c5fd",
       text: () => `팀장 ${currentUser.name}님이 완료 전송 버튼을 눌렀습니다.\n현장 데이터를 AI 관리실로 전달합니다.` },
     { delay: 1800, avatar: "🤖", avatarBg: "#92400e", sender: "관리실장 AI", senderColor: "#fcd34d",
-      text: () => `현장 피드백 분석 중...\n"${endMemo || "특이사항 없음, 깔끔하게 완료"}"\n✔ 내용 확인 완료. 정밀 보고서를 총괄 김 부장에게 상신합니다.` },
-    { delay: 3200, avatar: "💼", avatarBg: "#1e3a5f", sender: "총괄 김 부장", senderColor: "#60a5fa",
-      text: () => `관리실장 보고 확인.\n현장 특이사항 승인 완료.\n→ [재무실장] ${ev?.title} 건 정산 절차 진행하세요.` },
-    { delay: 4600, avatar: "💰", avatarBg: "#064e3b", sender: "재무실장 AI", senderColor: "#6ee7b7",
+      text: () => `현장 피드백 분석 중...\n"${endMemo || "특이사항 없음, 깔끔하게 완료"}"\n✔ 내용 확인 완료. 정밀 보고서를 사장님께 상신합니다.` },
+    { delay: 3200, avatar: "💰", avatarBg: "#064e3b", sender: "재무실장 AI", senderColor: "#6ee7b7",
       text: () => `자동 정산 시작.\n→ ${ev?.title} 확정 매출 반영 완료.\n→ 누적 수익률 대시보드 업데이트 성공.` },
-    { delay: 6000, avatar: "👑", avatarBg: "#4c1d95", sender: "최종 보고", senderColor: "#a78bfa",
+    { delay: 4600, avatar: "👑", avatarBg: "#4c1d95", sender: "최종 보고", senderColor: "#a78bfa",
       text: () => `대표님 대시보드에 한 줄 리포트 작성 완료.\n대표님은 퇴근 전 확인만 하시면 됩니다. 😊` },
   ];
 
@@ -3846,7 +3844,7 @@ function FieldReportScreen({ ev, onClose }) {
               className="w-full border border-gray-200 rounded-xl p-3 text-sm text-gray-800 outline-none resize-none bg-gray-50 placeholder-gray-300"
               rows={3}/>
           </div>
-          <button onClick={handleComplete} disabled={uploading}
+          <button onClick={() => { if (window.confirm("청소 완료로 전송하시겠습니까?")) handleComplete(); }} disabled={uploading}
             className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2 disabled:opacity-60"
             style={{ background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)" }}>
             {uploading ? "사진 업로드 중..." : "✔ 청소 완료 전송"}
