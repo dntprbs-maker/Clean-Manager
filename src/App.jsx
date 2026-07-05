@@ -4744,7 +4744,11 @@ function LoginScreen({ onLogin }) {
       const companyId = "c_" + Math.random().toString(36).slice(2,9);
       const adminId   = "a_" + Math.random().toString(36).slice(2,9);
       // 회사명은 기본값으로 설정 (나중에 회사 설정에서 변경)
-      await setDoc(doc(db,"companies",companyId), { name:"내 회사", companyId, createdAt:new Date().toISOString() });
+      // AI 추출 등 부가 기능은 전부 기본 OFF — 요금제에 따라 슈퍼어드민에서 개별로 켜줌
+      await setDoc(doc(db,"companies",companyId), {
+        name:"내 회사", companyId, createdAt:new Date().toISOString(),
+        aiTextExtraction: false, aiImageExtraction: false,
+      });
       await setDoc(doc(db,"admins",adminId), { id:id.trim(), pw, name:id.trim(), companyId, role:"최고관리자", team:"사장", createdAt:new Date().toISOString() });
       // 기본 캘린더(담당팀 색상) 시드 — 이게 없으면 일정이 달력에 안 보임
       await Promise.all(DEFAULT_CALS.map(c => setDoc(doc(db,"companies",companyId,"cals",c.id), c)));
