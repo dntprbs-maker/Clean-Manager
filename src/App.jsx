@@ -486,6 +486,7 @@ function Provider({ children, loginUser, onLogout }) {
   const [titleRule, setTitleRule]       = useState(DEFAULT_TITLE_RULE);
   const [typeKeywords, setTypeKeywords] = useState(DEFAULT_TYPE_KEYWORDS);
   const [reports, setReports] = useState([]);
+  const [companyDoc, setCompanyDoc] = useState({}); // 회사 문서 자체 (요금제/기능 플래그 등)
 
   // 모듈 전역 CALS 미러를 항상 최신 cals로 유지 (calById/CALS.find 호출부가 전부 이걸 본다)
   useEffect(() => { CALS.splice(0, CALS.length, ...cals); }, [cals]);
@@ -493,6 +494,9 @@ function Provider({ children, loginUser, onLogout }) {
   useEffect(() => {
     const unsubEvents = onSnapshot(collection(companyRef, "events"), snap => {
       setEvents(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    const unsubCompanyDoc = onSnapshot(companyRef, snap => {
+      if (snap.exists()) setCompanyDoc(snap.data());
     });
     const unsubUsers = onSnapshot(collection(companyRef, "users"), snap => {
       if(!snap.empty) setUsers(snap.docs.filter(d => d.data().status !== "deleted").map(d => ({ ...d.data(), id: d.id })));
@@ -527,7 +531,7 @@ function Provider({ children, loginUser, onLogout }) {
     });
 
     return () => {
-      unsubEvents(); unsubUsers(); unsubConfig(); unsubLogs(); unsubNotices(); unsubLinks(); unsubCals(); unsubReports();
+      unsubEvents(); unsubUsers(); unsubConfig(); unsubLogs(); unsubNotices(); unsubLinks(); unsubCals(); unsubReports(); unsubCompanyDoc();
     };
   }, [loginUser.companyId]);
 
@@ -791,6 +795,7 @@ function Provider({ children, loginUser, onLogout }) {
       linkCategories,saveLinkCategories,
       titleRule,typeKeywords,saveTitleRule,
       reports,addReport,updateReport,
+      companyDoc,
       companyId: loginUser.companyId
     }}>
       {children}
@@ -879,6 +884,7 @@ function DemoProvider({ children }) {
       links: DEMO_LINKS, addLink: noop, deleteLink: noop, updateLink: noop, persistLinkOrder: noop,
       linkCategories, saveLinkCategories: noop,
       reports: [],
+      companyDoc: { aiImageExtraction: true }, // 데모에선 기능 시연을 위해 전부 켜둠
       currentUser: DEMO_USER, setCurrentUser: noop,
       loginUser: DEMO_USER, onLogout: noop,
       titleRule, typeKeywords, saveTitleRule: noop,
@@ -2861,7 +2867,7 @@ function RepeatUntilPicker({ form, set }) {
 }
 
 function EventModal() {
-  const { modal, closeModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, titleRule, typeKeywords, companyId, reports } = useC();
+  const { modal, closeModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, titleRule, typeKeywords, companyId, reports, companyDoc } = useC();
   const { open, date, editId, scope, instanceEv } = modal;
   // 반복일정의 "이 일정만/이후 전체" 수정은 클릭한 회차(instanceEv)의 값으로 폼을 채운다.
   const editEv = editId ? ((scope && scope!=="all" && instanceEv) ? instanceEv : events.find(e=>e.id===editId)) : null;
@@ -2989,12 +2995,12 @@ function EventModal() {
             <div className="w-6"/>
           </div>
 
-          {/* 4탭 */}
+          {/* 탭 — 사진(이미지 AI 추출)은 요금제에 이 기능이 켜진 회사만 노출 */}
           <div className="flex border-b border-gray-100">
             {[
               { key:"memo",  icon:"📋", label:"메모"  },
               { key:"chat",  icon:"💬", label:"대화"  },
-              { key:"image", icon:"📷", label:"사진"  },
+              ...(companyDoc?.aiImageExtraction ? [{ key:"image", icon:"📷", label:"사진"  }] : []),
               { key:"direct",icon:"✏️", label:"직접"  },
             ].map(tab=>{
               const active = inputMode === tab.key;
@@ -3115,7 +3121,7 @@ function EventModal() {
                     const toBase64 = f => new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(f); });
                     const base64 = await toBase64(imgFile);
                     const extract = httpsCallable(functions, "extractFromImage");
-                    const result = await extract({ image: base64 });
+                    const result = await extract({ image: base64, companyId });
                     const parsed = result.data || {};
                     setForm(p=>({
                       ...p,

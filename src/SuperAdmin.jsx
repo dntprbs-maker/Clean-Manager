@@ -14,6 +14,26 @@ const PW_KEY = "superadmin_pw";
 const getSavedPw = () => localStorage.getItem(PW_KEY) || null;
 const savePw    = pw => localStorage.setItem(PW_KEY, pw);
 
+// ── 컬럼명 한글 라벨 ─────────────────────────────────────────
+const COL_LABELS = {
+  _company: "회사", _companyId: "회사ID", companyId: "회사ID", id: "ID",
+  name: "이름", title: "제목", label: "라벨", role: "권한", team: "팀",
+  pw: "비밀번호", email: "이메일", phone: "전화번호", createdAt: "생성일",
+  status: "상태", deletedAt: "삭제일", deletedBy: "삭제자", _type: "종류",
+  start: "시작일", end: "종료일", allDay: "종일", startTime: "시작시간", endTime: "종료시간",
+  place: "장소", description: "메모", calId: "캘린더ID", repeat: "반복",
+  repeatInterval: "반복간격", repeatUntil: "반복종료일", repeatWeekdays: "반복요일",
+  repeatMonthlyType: "월반복유형", repeatMonthlyDay: "월반복일", repeatMonthlyOrdinal: "월반복순번", repeatMonthlyWeekday: "월반복요일",
+  repeatYearlyType: "연반복유형", repeatYearlyMonth: "연반복월", repeatYearlyDay: "연반복일", repeatYearlyOrdinal: "연반복순번", repeatYearlyWeekday: "연반복요일",
+  photos: "사진", url: "링크", contact: "연락처",
+  leaderComment: "특이사항", leaderCommentBy: "특이사항작성자", leaderCommentAt: "특이사항작성일",
+  body: "내용", author: "작성자", date: "날짜", important: "중요",
+  action: "작업", user: "사용자", detail: "상세내용", at: "일시",
+  logoUrl: "로고", color: "색상", isField: "현장팀여부", checked: "선택됨",
+  aiImageExtraction: "이미지추출허용",
+};
+const colLabel = col => COL_LABELS[col] || col;
+
 function displayVal(v) {
   if (v === null || v === undefined) return "-";
   if (v && typeof v === "object" && typeof v.seconds === "number" && typeof v.nanoseconds === "number") {
@@ -776,7 +796,7 @@ export default function SuperAdmin() {
                       <th key={col} onClick={() => handleSort(col)}
                         className="px-4 py-3 text-left font-semibold border-b border-gray-700 whitespace-nowrap text-xs uppercase tracking-wide cursor-pointer select-none hover:bg-gray-700 transition-colors">
                         <span className="flex items-center gap-1">
-                          {col}
+                          {colLabel(col)}
                           <span className="text-[10px]">
                             {isActive ? (sortDir === "asc" ? "▲" : "▼") : <span className="text-gray-600">⇅</span>}
                           </span>
