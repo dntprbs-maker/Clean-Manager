@@ -862,7 +862,7 @@ export default function SuperAdmin() {
               <p className="text-xs text-gray-500 font-mono bg-gray-800 rounded-lg px-3 py-2 break-all">{editRow._path}</p>
               {Object.entries(editData).map(([key, val]) => (
                 <div key={key} className="flex flex-col gap-1">
-                  <label className="text-xs text-gray-400 font-medium">{key}</label>
+                  <label className="text-xs text-gray-400 font-medium">{colLabel(key)}</label>
                   <input
                     value={typeof val === "object" ? JSON.stringify(val) : (val ?? "")}
                     onChange={e => setEditData(prev => ({ ...prev, [key]: e.target.value }))}
@@ -919,7 +919,7 @@ export default function SuperAdmin() {
                 .filter(k => !["_company", "_companyId", "companyId", "createdAt"].includes(k))
                 .map(key => (
                 <div key={key} className="flex flex-col gap-1">
-                  <label className="text-xs text-gray-400 font-medium">{key}</label>
+                  <label className="text-xs text-gray-400 font-medium">{colLabel(key)}</label>
                   <input
                     value={addData[key] || ""}
                     onChange={e => setAddData(prev => ({ ...prev, [key]: e.target.value }))}
