@@ -4030,7 +4030,7 @@ function FaqScreen() {
 }
 
 function ReportHistoryScreen() {
-  const { setCurrentScreen, reports } = useC();
+  const { setCurrentScreen, reports, currentUser, updateReport, companyId, isDemo } = useC();
 
   // 현장 완료 보고에서 저장된 실제 데이터 (Firestore reports)
   const sampleReports = reports;
@@ -4041,6 +4041,67 @@ function ReportHistoryScreen() {
   const [teamFilter, setTeamFilter]   = useState("전체");
   const [showSearch, setShowSearch]   = useState(false);
   const [viewMode, setViewMode]       = useState("list"); // "list" | "gallery"
+
+  // 사장(최고관리자)만 완료 보고 내용을 수정 가능
+  const canEdit = currentUser.role === "최고관리자";
+  const [editing, setEditing]         = useState(false);
+  const [editStartMemo, setEditStartMemo] = useState("");
+  const [editMemo, setEditMemo]       = useState("");
+  const [editPrice, setEditPrice]     = useState("");
+  const [editBefore, setEditBefore]   = useState([]);
+  const [editAfter, setEditAfter]     = useState([]);
+  const [saving, setSaving]           = useState(false);
+  const beforeInputRef = useRef(null);
+  const afterInputRef  = useRef(null);
+
+  const startEdit = () => {
+    setEditStartMemo(selected.startMemo || "");
+    setEditMemo(selected.memo || "");
+    setEditPrice(selected.price || "");
+    setEditBefore(selected.beforePhotos || []);
+    setEditAfter(selected.afterPhotos || []);
+    setEditing(true);
+  };
+
+  const pickPhotos = (files, setPhotos) => {
+    Promise.all(Array.from(files).map(file => new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve({ name: file.name, data: reader.result });
+      reader.readAsDataURL(file);
+    }))).then(newPhotos => setPhotos(prev => [...prev, ...newPhotos]));
+  };
+
+  const uploadEditPhotos = async (photos, tag) => Promise.all(photos.map(async (p) => {
+    if (p.url) return p;
+    const blob = await (await fetch(p.data)).blob();
+    const path = `companies/${companyId}/reports/${selected.eventId || "misc"}/${tag}/${Date.now()}_${p.name}`;
+    const sRef = storageRef(storage, path);
+    await uploadBytes(sRef, blob);
+    const url = await getDownloadURL(sRef);
+    return { name: p.name, url };
+  }));
+
+  const saveEdit = async () => {
+    setSaving(true);
+    try {
+      const [uploadedBefore, uploadedAfter] = isDemo
+        ? [editBefore, editAfter]
+        : await Promise.all([uploadEditPhotos(editBefore, "before"), uploadEditPhotos(editAfter, "after")]);
+      const patch = {
+        startMemo: editStartMemo,
+        memo: editMemo,
+        price: editPrice,
+        beforePhotos: uploadedBefore,
+        afterPhotos: uploadedAfter,
+      };
+      if (!isDemo) updateReport(selected.id, patch);
+      setSelected(prev => ({ ...prev, ...patch }));
+      setEditing(false);
+    } catch (e) {
+      alert("저장 중 오류: " + e.message);
+    }
+    setSaving(false);
+  };
 
   // 날짜 필터 옵션
   const today = fmt(new Date());
@@ -4081,13 +4142,24 @@ function ReportHistoryScreen() {
 
   // 상세 화면
   if(selected) {
+    const viewBefore = editing ? editBefore : (selected.beforePhotos||[]);
+    const viewAfter  = editing ? editAfter  : (selected.afterPhotos||[]);
     return (
       <div className="flex-1 overflow-y-auto bg-white flex flex-col">
         <div className="flex items-center gap-3 px-5 pt-5 pb-3 border-b border-gray-100">
-          <button onClick={()=>setSelected(null)} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+          <button onClick={()=>{ if(editing){ setEditing(false); } else { setSelected(null); } }} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
             <ChevronLeft size={24} className="text-gray-700"/>
           </button>
           <h2 className="text-base font-bold text-gray-900 flex-1 line-clamp-1">{selected.title}</h2>
+          {canEdit && !editing && (
+            <button onClick={startEdit} className="text-xs font-bold text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-50">수정</button>
+          )}
+          {editing && (
+            <button onClick={saveEdit} disabled={saving}
+              className="text-xs font-bold text-white bg-blue-600 px-3 py-1.5 rounded-lg disabled:opacity-50">
+              {saving ? "저장 중..." : "저장"}
+            </button>
+          )}
         </div>
         <div className="px-5 py-4 flex flex-col gap-4">
           <div className="flex items-center gap-3">
@@ -4097,26 +4169,63 @@ function ReportHistoryScreen() {
             <span className="text-sm text-gray-400">{selected.date} {selected.startTime}</span>
           </div>
           <div className="h-px bg-gray-100"/>
-          <div>
-            <p className="text-xs font-bold text-gray-400 mb-2">완료 메모</p>
-            <p className="text-sm text-gray-700 leading-relaxed">{selected.memo}</p>
-          </div>
-          {selected.price && (
-            <div className="bg-gray-50 rounded-2xl p-4 flex items-center justify-between">
-              <span className="text-sm font-bold text-gray-500">청소 금액</span>
-              <span className="text-base font-extrabold text-blue-600">{selected.price}원</span>
+
+          {(editing || selected.startMemo) && (
+            <div>
+              <p className="text-xs font-bold text-gray-400 mb-2">도착시 특이사항</p>
+              {editing ? (
+                <textarea value={editStartMemo} onChange={e=>setEditStartMemo(e.target.value)} rows={2}
+                  className="w-full text-sm p-3 rounded-xl border border-gray-200 outline-none focus:border-blue-400"/>
+              ) : (
+                <p className="text-sm text-gray-700 leading-relaxed">{selected.startMemo}</p>
+              )}
             </div>
           )}
+
+          <div>
+            <p className="text-xs font-bold text-gray-400 mb-2">완료 메모</p>
+            {editing ? (
+              <textarea value={editMemo} onChange={e=>setEditMemo(e.target.value)} rows={3}
+                className="w-full text-sm p-3 rounded-xl border border-gray-200 outline-none focus:border-blue-400"/>
+            ) : (
+              <p className="text-sm text-gray-700 leading-relaxed">{selected.memo}</p>
+            )}
+          </div>
+
+          {(selected.price || editing) && (
+            <div className="bg-gray-50 rounded-2xl p-4 flex items-center justify-between">
+              <span className="text-sm font-bold text-gray-500">청소 금액</span>
+              {editing ? (
+                <input value={editPrice} onChange={e=>setEditPrice(e.target.value)} placeholder="금액 입력"
+                  className="text-base font-extrabold text-blue-600 text-right w-32 bg-transparent outline-none border-b border-gray-300"/>
+              ) : (
+                <span className="text-base font-extrabold text-blue-600">{selected.price}원</span>
+              )}
+            </div>
+          )}
+
           <div className="flex flex-col gap-4">
             <div>
-              <p className="text-xs text-gray-400 mb-1">Before</p>
-              {(selected.beforePhotos||[]).length > 0 ? (
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs text-gray-400">Before</p>
+                {editing && (
+                  <button onClick={()=>beforeInputRef.current?.click()} className="text-xs font-bold text-blue-600">+ 추가</button>
+                )}
+              </div>
+              <input ref={beforeInputRef} type="file" accept="image/*" multiple className="hidden"
+                onChange={e=>{ pickPhotos(e.target.files, setEditBefore); e.target.value=""; }}/>
+              {viewBefore.length > 0 ? (
                 <div className="flex gap-2 overflow-x-auto pb-1">
-                  {selected.beforePhotos.map((p,i)=>(
-                    <button key={i} onClick={()=>openLightbox(selected.beforePhotos.map(x=>x.url), i)}
-                      className="w-24 h-24 shrink-0 rounded-xl overflow-hidden bg-gray-100">
-                      <img src={p.url} alt="" className="w-full h-full object-cover"/>
-                    </button>
+                  {viewBefore.map((p,i)=>(
+                    <div key={i} className="relative w-24 h-24 shrink-0 rounded-xl overflow-hidden bg-gray-100">
+                      <button onClick={()=>{ if(!editing) openLightbox(viewBefore.map(x=>x.url), i); }} className="w-full h-full block">
+                        <img src={p.url||p.data} alt="" className="w-full h-full object-cover"/>
+                      </button>
+                      {editing && (
+                        <button onClick={()=>setEditBefore(prev=>prev.filter((_,idx)=>idx!==i))}
+                          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white text-xs flex items-center justify-center">✕</button>
+                      )}
+                    </div>
                   ))}
                 </div>
               ) : (
@@ -4127,14 +4236,26 @@ function ReportHistoryScreen() {
               )}
             </div>
             <div>
-              <p className="text-xs text-gray-400 mb-1">After</p>
-              {(selected.afterPhotos||[]).length > 0 ? (
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs text-gray-400">After</p>
+                {editing && (
+                  <button onClick={()=>afterInputRef.current?.click()} className="text-xs font-bold text-blue-600">+ 추가</button>
+                )}
+              </div>
+              <input ref={afterInputRef} type="file" accept="image/*" multiple className="hidden"
+                onChange={e=>{ pickPhotos(e.target.files, setEditAfter); e.target.value=""; }}/>
+              {viewAfter.length > 0 ? (
                 <div className="flex gap-2 overflow-x-auto pb-1">
-                  {selected.afterPhotos.map((p,i)=>(
-                    <button key={i} onClick={()=>openLightbox(selected.afterPhotos.map(x=>x.url), i)}
-                      className="w-24 h-24 shrink-0 rounded-xl overflow-hidden bg-gray-100">
-                      <img src={p.url} alt="" className="w-full h-full object-cover"/>
-                    </button>
+                  {viewAfter.map((p,i)=>(
+                    <div key={i} className="relative w-24 h-24 shrink-0 rounded-xl overflow-hidden bg-gray-100">
+                      <button onClick={()=>{ if(!editing) openLightbox(viewAfter.map(x=>x.url), i); }} className="w-full h-full block">
+                        <img src={p.url||p.data} alt="" className="w-full h-full object-cover"/>
+                      </button>
+                      {editing && (
+                        <button onClick={()=>setEditAfter(prev=>prev.filter((_,idx)=>idx!==i))}
+                          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white text-xs flex items-center justify-center">✕</button>
+                      )}
+                    </div>
                   ))}
                 </div>
               ) : (
@@ -4291,7 +4412,7 @@ function ReportHistoryScreen() {
             </div>
             <div className="flex flex-col gap-2">
               {grouped[date].map(r=>(
-                <button key={r.id} onClick={()=>setSelected(r)}
+                <button key={r.id} onClick={()=>{ setSelected(r); setEditing(false); }}
                   className="w-full text-left bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 shadow-sm">
                   <div className="w-1 self-stretch rounded-full shrink-0" style={{background:r.teamColor}}/>
                   <div className="flex-1 min-w-0">
