@@ -132,12 +132,13 @@ const TODAY_HINT = () => new Date().toISOString().slice(0, 10);
 
 const EXTRACT_PROMPT = (context) => `너는 청소업체 일정 관리 앱의 비서야. 아래 ${context}에서 청소/방문 일정 정보를 뽑아 JSON으로만 답해.
 오늘 날짜는 ${TODAY_HINT()}이야. 연도가 명시되지 않은 날짜는 오늘 기준 가까운 미래로 추정해.
+시간이 "오전"/"오후"처럼 대략적으로만 언급되고 정확한 시각이 없으면: "오전"은 09:00, "오후"는 14:00을 시작 시각으로 기본 사용해.
 반드시 아래 스키마의 JSON 객체 하나만 출력하고, 정보가 없는 필드는 빈 문자열("")로 남겨.
 {
   "title": "일정 제목 (예: 역촌동 입주청소 25평)",
   "start": "YYYY-MM-DD",
   "end": "YYYY-MM-DD (모르면 start와 동일)",
-  "startTime": "HH:MM (24시간제, 모르면 빈 문자열)",
+  "startTime": "HH:MM (24시간제, 정확한 시각이 없고 오전/오후만 언급되면 위 기본값 규칙 적용, 그마저 없으면 빈 문자열)",
   "endTime": "HH:MM (24시간제, startTime+1시간 기본)",
   "place": "주소 또는 장소",
   "contact": "전화번호 (숫자와 하이픈만)",
