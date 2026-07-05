@@ -30,7 +30,7 @@ const COL_LABELS = {
   body: "내용", author: "작성자", date: "날짜", important: "중요",
   action: "작업", user: "사용자", detail: "상세내용", at: "일시",
   logoUrl: "로고", color: "색상", isField: "현장팀여부", checked: "선택됨",
-  aiImageExtraction: "이미지추출허용",
+  aiImageExtraction: "이미지추출허용", aiTextExtraction: "대화추출허용",
 };
 const colLabel = col => COL_LABELS[col] || col;
 
@@ -842,7 +842,20 @@ export default function SuperAdmin() {
                         </td>
                       )}
                       {activeTab === "companies" && (
-                        <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+                        <td className="px-3 py-2.5 flex gap-1.5" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => {
+                              const next = row.aiTextExtraction === false ? true : false;
+                              updateDoc(doc(db, "companies", row._id), { aiTextExtraction: next });
+                              setRows(prev => prev.map(r => r._id === row._id ? { ...r, aiTextExtraction: next } : r));
+                            }}
+                            className={`text-xs font-bold px-3 py-1 rounded-lg border transition-colors whitespace-nowrap ${
+                              row.aiTextExtraction !== false
+                                ? "text-green-400 border-green-800 hover:border-green-500"
+                                : "text-gray-500 border-gray-700 hover:border-gray-500"
+                            }`}>
+                            💬 대화추출 {row.aiTextExtraction !== false ? "ON" : "OFF"}
+                          </button>
                           <button
                             onClick={() => {
                               const next = !row.aiImageExtraction;

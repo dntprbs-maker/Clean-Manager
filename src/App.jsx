@@ -2995,11 +2995,11 @@ function EventModal() {
             <div className="w-6"/>
           </div>
 
-          {/* 탭 — 사진(이미지 AI 추출)은 요금제에 이 기능이 켜진 회사만 노출 */}
+          {/* 탭 — 대화(텍스트 AI 추출)/사진(이미지 AI 추출)은 요금제 플래그에 따라 노출 여부가 갈림 */}
           <div className="flex border-b border-gray-100">
             {[
               { key:"memo",  icon:"📋", label:"메모"  },
-              { key:"chat",  icon:"💬", label:"대화"  },
+              ...(companyDoc?.aiTextExtraction !== false ? [{ key:"chat", icon:"💬", label:"대화"  }] : []),
               ...(companyDoc?.aiImageExtraction ? [{ key:"image", icon:"📷", label:"사진"  }] : []),
               { key:"direct",icon:"✏️", label:"직접"  },
             ].map(tab=>{
@@ -3097,7 +3097,7 @@ function EventModal() {
                   setAiLoading(true);
                   try {
                     const analyze = httpsCallable(functions, "analyzeConsultation");
-                    const result = await analyze({ text: pasteText });
+                    const result = await analyze({ text: pasteText, companyId });
                     const parsed = result.data || {};
                     setForm(p=>({
                       ...p,

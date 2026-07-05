@@ -173,12 +173,22 @@ async function callOpenRouter(apiKey, content) {
   return json.choices?.[0]?.message?.content || "";
 }
 
-// 대화(카카오톡 상담) 텍스트 → 일정 정보 추출 — 전 회사 공통으로 사용 가능
+// 대화(카카오톡 상담) 텍스트 → 일정 정보 추출
+// aiTextExtraction 플래그가 명시적으로 false인 회사만 차단 (기본값은 허용 — 기존 사용자 영향 없도록)
 export const analyzeConsultation = onCall(
   { region: REGION, secrets: [OPENROUTER_API_KEY] },
   async (request) => {
     const text = (request.data?.text || "").trim();
+    const companyId = request.data?.companyId;
     if (!text) throw new HttpsError("invalid-argument", "분석할 텍스트가 없습니다.");
+
+    if (companyId) {
+      const companySnap = await db.doc(`companies/${companyId}`).get();
+      if (companySnap.exists && companySnap.data()?.aiTextExtraction === false) {
+        throw new HttpsError("permission-denied", "이 기능은 현재 요금제에서 사용할 수 없습니다.");
+      }
+    }
+
     try {
       const raw = await callOpenRouter(
         OPENROUTER_API_KEY.value(),
