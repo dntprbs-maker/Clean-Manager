@@ -21,7 +21,7 @@ export const db            = getFirestore(app);
 export const auth          = getAuth(app);
 export const provider      = new GoogleAuthProvider();
 export const secondaryAuth = getAuth(secondaryApp);
-export const functions     = getFunctions(app);
+export const functions     = getFunctions(app, "asia-northeast3"); // Cloud Functions 배포 리전과 일치시켜야 함 (기본값 us-central1이라 안 맞으면 CORS/404로 실패)
 export const storage       = getStorage(app); // AI 상담 분석 등 Cloud Functions 호출용
 
 // FCM 푸시 알림 — 브라우저 지원 시에만 messaging 인스턴스 생성
