@@ -841,6 +841,23 @@ export default function SuperAdmin() {
                           </button>
                         </td>
                       )}
+                      {activeTab === "companies" && (
+                        <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => {
+                              const next = !row.aiImageExtraction;
+                              updateDoc(doc(db, "companies", row._id), { aiImageExtraction: next });
+                              setRows(prev => prev.map(r => r._id === row._id ? { ...r, aiImageExtraction: next } : r));
+                            }}
+                            className={`text-xs font-bold px-3 py-1 rounded-lg border transition-colors whitespace-nowrap ${
+                              row.aiImageExtraction
+                                ? "text-green-400 border-green-800 hover:border-green-500"
+                                : "text-gray-500 border-gray-700 hover:border-gray-500"
+                            }`}>
+                            📷 이미지추출 {row.aiImageExtraction ? "ON" : "OFF"}
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
