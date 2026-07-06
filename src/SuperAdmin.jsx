@@ -280,7 +280,8 @@ function downloadExcel(rows, tabId) {
 // ── 메인 컴포넌트 ─────────────────────────────────────────────
 export default function SuperAdmin() {
   const savedPw = getSavedPw();
-  const [authState, setAuthState]       = useState(savedPw ? "locked" : "setup");
+  // 정식 배포 전까지 임시로 기본 상태를 'unlocked'로 고정 (공식 배포 전 비밀번호 적용 예정)
+  const [authState, setAuthState]       = useState("unlocked");
   const [pwInput, setPwInput]           = useState("");
   const [pwError, setPwError]           = useState("");
   const [showChangePw, setShowChangePw] = useState(false);
