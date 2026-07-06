@@ -579,14 +579,15 @@ function Provider({ children, loginUser, onLogout }) {
   }, [companyRef]);
 
   // ── 완료 보고 저장 (Firestore) ──
-  const addReport = useCallback(r => {
+  // 저장 성공/실패를 호출부에서 확인할 수 있도록 Promise를 그대로 반환(await 가능)
+  const addReport = useCallback(async r => {
     const ref = doc(collection(companyRef, "reports"));
-    setDoc(ref, { ...r, id: ref.id });
+    await setDoc(ref, { ...r, id: ref.id });
     return ref.id;
   }, [companyRef]);
 
   const updateReport = useCallback((id, patch) => {
-    updateDoc(doc(companyRef, "reports", id), patch);
+    return updateDoc(doc(companyRef, "reports", id), patch);
   }, [companyRef]);
 
   const addLog = useCallback((action, detail) => {
@@ -3607,7 +3608,7 @@ function FieldReportScreen({ ev, onClose }) {
       try {
         const uploadedBefore = await uploadPhotos(beforePhotos, "before");
         setBeforePhotos(uploadedBefore);
-        const id = addReport({
+        const id = await addReport({
           eventId:   ev?.id || null,
           title:     ev?.title || "",
           date:      ev?.start || fmt(new Date()),
@@ -3668,34 +3669,41 @@ function FieldReportScreen({ ev, onClose }) {
 
     const now = new Date();
     const endTimeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
-    if (!isDemo && reportId) {
-      // 이미 "청소 시작" 단계에서 만들어둔 진행중 문서를 완료 처리로 이어서 갱신
-      updateReport(reportId, {
-        memo: endMemo,
-        afterPhotos: uploadedAfter,
-        workEnd: endTimeStr,
-        status: "완료",
-      });
-    } else {
-      addReport({
-        eventId:   ev?.id || null,
-        title:     ev?.title || "",
-        date:      ev?.start || fmt(new Date()),
-        startTime: ev?.startTime || "",
-        calId:     ev?.calId || "",
-        teamName:  cal?.label || cal?.name || "",
-        teamColor: cal?.color || "#1a56db",
-        reporter:  currentUser?.name || "",
-        startMemo,
-        memo:      endMemo,        // 완료 메모 (내역 화면에서 memo 로 표시)
-        beforePhotos: uploadedBefore,
-        afterPhotos:  uploadedAfter,
-        place:     ev?.place || "",
-        workStart: startTime,
-        workEnd:   endTimeStr,
-        status:    "완료",
-        createdAt: now.toISOString(),
-      });
+    if (!isDemo) {
+      try {
+        if (reportId) {
+          // 이미 "청소 시작" 단계에서 만들어둔 진행중 문서를 완료 처리로 이어서 갱신
+          await updateReport(reportId, {
+            memo: endMemo,
+            afterPhotos: uploadedAfter,
+            workEnd: endTimeStr,
+            status: "완료",
+          });
+        } else {
+          await addReport({
+            eventId:   ev?.id || null,
+            title:     ev?.title || "",
+            date:      ev?.start || fmt(new Date()),
+            startTime: ev?.startTime || "",
+            calId:     ev?.calId || "",
+            teamName:  cal?.label || cal?.name || "",
+            teamColor: cal?.color || "#1a56db",
+            reporter:  currentUser?.name || "",
+            startMemo,
+            memo:      endMemo,        // 완료 메모 (내역 화면에서 memo 로 표시)
+            beforePhotos: uploadedBefore,
+            afterPhotos:  uploadedAfter,
+            place:     ev?.place || "",
+            workStart: startTime,
+            workEnd:   endTimeStr,
+            status:    "완료",
+            createdAt: now.toISOString(),
+          });
+        }
+      } catch (e) {
+        alert("완료 보고 저장 중 오류가 발생했습니다. 다시 시도해주세요.\n" + e.message);
+        return;
+      }
     }
 
     setShowLog(true);
@@ -4094,7 +4102,7 @@ function ReportHistoryScreen() {
         beforePhotos: uploadedBefore,
         afterPhotos: uploadedAfter,
       };
-      if (!isDemo) updateReport(selected.id, patch);
+      if (!isDemo) await updateReport(selected.id, patch);
       setSelected(prev => ({ ...prev, ...patch }));
       setEditing(false);
     } catch (e) {
