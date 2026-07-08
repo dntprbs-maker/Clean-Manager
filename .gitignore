@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Firebase local cache / agent-skills (firebase-tools 부가기능, 이 프로젝트와 무관)
+.firebase/
+.agents/
+skills-lock.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
