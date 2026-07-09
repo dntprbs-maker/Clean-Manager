@@ -5508,6 +5508,10 @@ function AppInner() {
   const notifyCheckedRef = useRef(false);
   useEffect(() => {
     if (isDemo || !currentUser?.uid) return;
+    // 로컬 개발서버(npm run dev)에서는 알림 유도 팝업이 테스트할 때마다 계속 떠서
+    // 방해가 되므로 꺼둠. import.meta.env.DEV는 Vite가 빌드 시점에 결정하므로
+    // 실제 배포판(Vercel 프로덕션 빌드)에는 전혀 영향 없음.
+    if (import.meta.env.DEV) return;
     // React StrictMode(개발 모드)는 effect를 일부러 두 번 실행해서, 가드 없이는
     // alert/확인창이 두 번 뜸. 한 세션에 한 번만 체크하도록 막음.
     if (notifyCheckedRef.current) return;
