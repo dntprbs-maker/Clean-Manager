@@ -2356,13 +2356,16 @@ function SideDrawer() {
             </button>
           )}
 
-          {/* 설정 가이드 / FAQ */}
-          <button
-            onClick={() => { setCurrentScreen("faq"); setDrawer(false); }}
-            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
-            <span className="text-lg">❓</span>
-            <span className="text-sm font-medium text-gray-700 flex-1 text-left">설정 가이드 · FAQ</span>
-          </button>
+          {/* 사용설명서(구 설정 가이드/FAQ) - 아직 내용 미완성이라 사이드 메뉴에서 임시로 숨김
+              (실배포 시 내용 다 채우고 false만 지우면 복구) */}
+          {false && (
+            <button
+              onClick={() => { setCurrentScreen("faq"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <span className="text-lg">❓</span>
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">사용설명서</span>
+            </button>
+          )}
 
           {/* 알림 켜기 */}
           <button
@@ -4187,7 +4190,7 @@ function FaqScreen() {
     <div className="flex flex-col flex-1 overflow-hidden bg-gray-50">
       {/* 헤더 */}
       <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-100">
-        <h2 className="font-bold text-base">설정 가이드 · FAQ</h2>
+        <h2 className="font-bold text-base">사용설명서</h2>
         <button onClick={()=>setCurrentScreen("calendar")} className="p-1 rounded-full hover:bg-gray-100">
           <X size={22} className="text-gray-500"/>
         </button>
