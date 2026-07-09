@@ -1133,8 +1133,10 @@ function ScheduleList({ selDate, compact=false }) {
   // 일정 등록은 사장/관리팀·영업팀만 — 현장팀(청소팀) 팀장은 등록 불가, 보고만 가능
   const canAdd = currentUser.role === "최고관리자" || ["관리팀","영업팀"].includes(currentUser.team);
   const handleCardClick = async (ev) => {
-    // 청소 시작까지 진행된 일정이면 상세보기를 건너뛰고 바로 이어서(청소 완료 보고) 열기
-    const canContinue = currentUser.role === "팀장" || currentUser.role === "최고관리자";
+    // 청소 시작까지 진행된 일정이면 상세보기를 건너뛰고 바로 이어서(청소 완료 보고) 열기 —
+    // 실제로 현장 보고를 하는 현장팀 팀장에게만 해당. 사장/관리팀·영업팀은 청소 완료 보고를
+    // 하지 않으므로 평소처럼 상세보기/수정 화면으로 감(청소 상태는 배지로만 확인)
+    const canContinue = currentUser.role === "팀장" && !["관리팀","영업팀"].includes(currentUser.team);
     if (canContinue && reports.some(r => r.eventId === ev.id && r.status === "진행중")) {
       setFieldReportEv(ev);
       return;
