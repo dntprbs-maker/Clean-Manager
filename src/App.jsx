@@ -790,24 +790,27 @@ function Provider({ children, loginUser, onLogout }) {
 
   const checkedIds     = useMemo(()=>new Set(cals.filter(c=>c.checked).map(c=>c.id)),[cals]);
 
-  // 나만의 캘린더(개인 전용) — 본인 또는 최고관리자만 볼 수 있음
-  const isMine = useCallback(c => !c.personal || c.ownerId === currentUser.id || currentUser.role === "최고관리자",
-    [currentUser.id, currentUser.role]);
+  // 나만의 캘린더(개인 전용) — 본인 또는 최고관리자만 볼 수 있음.
+  // currentUser.id는 SideDrawer의 "다른 직원으로 보기" 테스트 전환 시에만 있고,
+  // 실제 로그인 사용자(loginUser)는 uid만 있으므로 둘 다 대비해 폴백함.
+  const myUserId = currentUser.id || currentUser.uid;
+  const isMine = useCallback(c => !c.personal || c.ownerId === myUserId || currentUser.role === "최고관리자",
+    [myUserId, currentUser.role]);
   const visibleCals = useMemo(() => cals.filter(isMine), [cals, isMine]);
 
   // 나만의 캘린더는 사용자가 직접 만들 필요 없이 로그인 시 자동으로 하나씩 생성
   useEffect(() => {
-    if (!calsLoaded) return;
-    const exists = cals.some(c => c.personal && c.ownerId === currentUser.id);
+    if (!calsLoaded || !myUserId) return;
+    const exists = cals.some(c => c.personal && c.ownerId === myUserId);
     if (!exists) {
       updateCal({
-        id: `personal_${currentUser.id}`,
+        id: `personal_${myUserId}`,
         label: `${currentUser.name}의 캘린더`, name: `${currentUser.name}의 캘린더`,
         color: "#6366f1", checked: true, isField: true,
-        personal: true, ownerId: currentUser.id,
+        personal: true, ownerId: myUserId,
       });
     }
-  }, [calsLoaded, cals, currentUser.id, currentUser.name, updateCal]);
+  }, [calsLoaded, cals, myUserId, currentUser.name, updateCal]);
 
   const visibleEvents  = useMemo(()=>{
     // calId가 없거나 "unassigned"인 미배정 일정도 항상 표시
