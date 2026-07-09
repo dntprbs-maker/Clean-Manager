@@ -5506,8 +5506,14 @@ function AppInner() {
     if (typeof Notification === "undefined") return;
     if (Notification.permission === "granted") {
       enablePush(currentUser); // 로그인 시 이 기기 토큰을 현재 사용자 소유로 이전
+    } else if (Notification.permission === "denied") {
+      // 브라우저에서 이미 차단된 상태 — 다시 요청해도 브라우저가 자동으로 거부하므로
+      // 매번 물어보는 대신, 직접 브라우저 설정에서 풀어야 한다고 한 번 안내만 함
+      alert("이 브라우저에서 알림이 차단되어 있어요.\n주소창의 🔒 아이콘 → 알림 → 허용으로 바꾼 뒤 새로고침해주세요.");
     } else if (window.confirm("실시간 알림을 켜두면 일정 등록·변경 소식을 바로 받을 수 있어요.\n알림을 받으시겠습니까?")) {
-      enablePush(currentUser);
+      enablePush(currentUser).then(r => {
+        if (!r.ok) alert("알림을 켜는 데 실패했어요: " + r.reason);
+      });
     }
   }, [isDemo, currentUser?.uid]);
 
