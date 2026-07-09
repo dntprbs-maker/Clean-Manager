@@ -5547,17 +5547,11 @@ function AppInner() {
         <div className="absolute inset-0 bg-black/40 z-[110] flex items-center justify-center px-6">
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl">
             <p className="text-base font-bold text-gray-900 mb-5">🔔 알림은 필수예요</p>
-            <div className="flex gap-2">
-              <button onClick={() => setShowNotifyPrompt(false)} disabled={notifyRequesting}
-                className="flex-1 py-3 rounded-xl text-sm font-bold text-gray-600 bg-gray-100 disabled:opacity-50">
-                나중에
-              </button>
-              <button onClick={handleEnableNotify} disabled={notifyRequesting}
-                className="flex-1 py-3 rounded-xl text-sm font-bold text-white disabled:opacity-50"
-                style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
-                {notifyRequesting ? "요청 중..." : "알림 받기"}
-              </button>
-            </div>
+            <button onClick={handleEnableNotify} disabled={notifyRequesting}
+              className="w-full py-3 rounded-xl text-sm font-bold text-white disabled:opacity-50"
+              style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
+              {notifyRequesting ? "요청 중..." : "확인"}
+            </button>
           </div>
         </div>
       )}
