@@ -5483,6 +5483,8 @@ function IphoneInstallGuide() {
 function AppInner() {
   const { currentScreen, setCurrentScreen, currentUser, isDemo } = useC();
   const needsSetup = !isDemo && !currentUser?.companyName;
+  const [showNotifyPrompt, setShowNotifyPrompt] = useState(false);
+  const [notifyRequesting, setNotifyRequesting] = useState(false);
 
   // 안드로이드 뒤로가기 처리
   useEffect(() => {
@@ -5510,12 +5512,22 @@ function AppInner() {
       // 브라우저에서 이미 차단된 상태 — 다시 요청해도 브라우저가 자동으로 거부하므로
       // 매번 물어보는 대신, 직접 브라우저 설정에서 풀어야 한다고 한 번 안내만 함
       alert("이 브라우저에서 알림이 차단되어 있어요.\n주소창의 🔒 아이콘 → 알림 → 허용으로 바꾼 뒤 새로고침해주세요.");
-    } else if (window.confirm("실시간 알림을 켜두면 일정 등록·변경 소식을 바로 받을 수 있어요.\n알림을 받으시겠습니까?")) {
-      enablePush(currentUser).then(r => {
-        if (!r.ok) alert("알림을 켜는 데 실패했어요: " + r.reason);
-      });
+    } else {
+      // window.confirm() 안에서 알림 권한을 요청하면 "사용자가 직접 누른 게 아니다"라고
+      // 브라우저가 판단해 네이티브 권한창을 아예 안 띄우고 조용히 default로 무시해버림
+      // (실제로 확인해봄). 그래서 confirm 대신 화면에 진짜 버튼을 띄우고, 그 버튼의
+      // onClick 안에서 바로 요청해야 브라우저가 정상적으로 권한창을 띄워준다.
+      setShowNotifyPrompt(true);
     }
   }, [isDemo, currentUser?.uid]);
+
+  const handleEnableNotify = async () => {
+    setNotifyRequesting(true);
+    const r = await enablePush(currentUser);
+    setNotifyRequesting(false);
+    setShowNotifyPrompt(false);
+    if (!r.ok) alert("알림을 켜는 데 실패했어요: " + r.reason);
+  };
 
   return (
     <div className={`flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none${isDemo?" pt-9":""}`}
@@ -5523,6 +5535,25 @@ function AppInner() {
       <style>{ANIM_CSS}</style>
       <TopHeader/>
       {needsSetup && <SetupCompanyModal />}
+      {showNotifyPrompt && (
+        <div className="absolute inset-0 bg-black/40 z-[110] flex items-center justify-center px-6">
+          <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl">
+            <p className="text-base font-bold text-gray-900 mb-1">🔔 알림을 받으시겠어요?</p>
+            <p className="text-sm text-gray-500 mb-5 leading-relaxed">실시간 알림을 켜두면 일정 등록·변경 소식을 바로 받을 수 있어요.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setShowNotifyPrompt(false)} disabled={notifyRequesting}
+                className="flex-1 py-3 rounded-xl text-sm font-bold text-gray-600 bg-gray-100 disabled:opacity-50">
+                나중에
+              </button>
+              <button onClick={handleEnableNotify} disabled={notifyRequesting}
+                className="flex-1 py-3 rounded-xl text-sm font-bold text-white disabled:opacity-50"
+                style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
+                {notifyRequesting ? "요청 중..." : "알림 받기"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <IphoneInstallGuide />
       <PhotoLightbox />
       <RecurringScopeSheet />
