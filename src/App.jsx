@@ -5495,12 +5495,15 @@ function AppInner() {
     return () => window.removeEventListener("popstate", onPopState);
   }, [setCurrentScreen]);
 
-  // FCM 푸시 — 포그라운드 수신 핸들러 + 이미 허용된 경우 토큰 갱신 (데모 제외)
+  // FCM 푸시 — 포그라운드 수신 핸들러 + 이미 허용된 경우 토큰 갱신, 꺼져있으면 확인창으로 켜기 유도 (데모 제외)
   useEffect(() => {
     if (isDemo || !currentUser?.uid) return;
     listenForeground();
-    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+    if (typeof Notification === "undefined") return;
+    if (Notification.permission === "granted") {
       enablePush(currentUser); // 로그인 시 이 기기 토큰을 현재 사용자 소유로 이전
+    } else if (window.confirm("실시간 알림을 켜두면 일정 등록·변경 소식을 바로 받을 수 있어요.\n알림을 받으시겠습니까?")) {
+      enablePush(currentUser);
     }
   }, [isDemo, currentUser?.uid]);
 
