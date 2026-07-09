@@ -1925,7 +1925,9 @@ function DetailSheet() {
         {(currentUser.role === "팀장" || currentUser.role === "최고관리자") && (
           <div className="shrink-0 px-4 py-3 border-t border-gray-100 bg-white">
             <button
-              onClick={() => { setFieldReportEv(detEv); setDetEv(null); }}
+              // detEv는 그대로 둬서(닫지 않고) 현장 완료 보고 화면을 닫으면
+              // 캘린더가 아니라 이 일정 상세보기로 돌아오도록 함
+              onClick={() => setFieldReportEv(detEv)}
               className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2"
               style={{ background: "linear-gradient(135deg, #1a56db 0%, #2563eb 100%)" }}>
               🧹 청소 시작 하기
