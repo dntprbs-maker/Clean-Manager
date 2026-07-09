@@ -815,16 +815,24 @@ function Provider({ children, loginUser, onLogout }) {
     // 다른 사람의 개인 캘린더 일정은 제외
     const hiddenPersonalIds = new Set(cals.filter(c => !isMine(c)).map(c => c.id));
     if (hiddenPersonalIds.size) evs = evs.filter(e => !hiddenPersonalIds.has(e.calId));
-    if (!["관리팀", "영업팀"].includes(currentUser.team) && currentUser.role !== "최고관리자") {
-      // cals를 직접 사용해 정확히 매칭 (CALS 전역 배열 stale 문제 방지)
-      const myCal = cals.find(c => c.label === currentUser.team);
-      if (myCal) {
-        evs = evs.filter(e => e.calId === myCal.id || cals.find(c=>c.id===e.calId)?.personal);
+    if (currentUser.role !== "최고관리자") {
+      if (["관리팀", "영업팀"].includes(currentUser.team)) {
+        // 담당 현장팀이 지정된 관리팀·영업팀 직원은 그 팀 일정만 표시 (지정 안 했으면 전체 표시, 기존과 동일)
+        if (currentUser.assignedCals?.length) {
+          const allowed = new Set(currentUser.assignedCals);
+          evs = evs.filter(e => allowed.has(e.calId) || cals.find(c=>c.id===e.calId)?.personal);
+        }
+      } else {
+        // cals를 직접 사용해 정확히 매칭 (CALS 전역 배열 stale 문제 방지)
+        const myCal = cals.find(c => c.label === currentUser.team);
+        if (myCal) {
+          evs = evs.filter(e => e.calId === myCal.id || cals.find(c=>c.id===e.calId)?.personal);
+        }
+        // 매칭 cal이 없으면 전체 표시 (팀에 대응하는 캘린더가 없는 경우)
       }
-      // 매칭 cal이 없으면 전체 표시 (팀에 대응하는 캘린더가 없는 경우)
     }
     return expandRecurring(evs);
-  }, [events, checkedIds, cals, currentUser.team, currentUser.role, isMine]);
+  }, [events, checkedIds, cals, currentUser.team, currentUser.role, currentUser.assignedCals, isMine]);
 
   return (
     <Ctx.Provider value={{
@@ -1738,7 +1746,10 @@ function DetailSheet() {
   },[vis, detEv?.id, currentUser.role]);
   if(!detEv) return null;
   const cal = cals.find(c=>c.id===detEv.calId) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af" };
-  const canEditEvent = currentUser.role === "최고관리자" || ["관리팀","영업팀"].includes(currentUser.team);
+  // 관리팀·영업팀은 담당 현장팀이 지정돼 있으면 그 팀 일정만 수정 가능 (지정 안 했으면 기존처럼 전체 수정 가능)
+  const canEditEvent = currentUser.role === "최고관리자" ||
+    (["관리팀","영업팀"].includes(currentUser.team) &&
+      (!currentUser.assignedCals?.length || currentUser.assignedCals.includes(detEv.calId)));
   const canWriteComment = currentUser.role === "팀장";
   const commentDirty = canWriteComment && commentDraft.trim() !== "";
   const close=()=>{ setVis(false); setTimeout(()=>setDetEv(null),280); };
@@ -5678,20 +5689,32 @@ function EmployeeListScreen() {
 
 // ── 직원 등록/수정 모달 ───────────────────────────────────────────────
 function EmployeeFormModal() {
-  const { empModal, setEmpModal, users, teams, companyId } = useC();
-  const [form, setForm] = useState({ name: "", phone: "", team: "", role: "" });
+  const { empModal, setEmpModal, users, teams, cals, companyId } = useC();
+  const [form, setForm] = useState({ name: "", phone: "", team: "", role: "", assignedCals: [] });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (empModal.open) {
       if (empModal.editId) {
         const u = users.find(x => x.id === empModal.editId);
-        if (u) setForm({ ...u, phone: fmtPhone(u.phone) });
+        if (u) setForm({ assignedCals: [], ...u, phone: fmtPhone(u.phone) });
       } else {
-        setForm({ name: "", phone: "", team: "", role: "" });
+        setForm({ name: "", phone: "", team: "", role: "", assignedCals: [] });
       }
     }
   }, [empModal.open, empModal.editId, users]);
+
+  // 담당 현장팀 지정은 관리팀·영업팀 소속에게만 의미 있음(지정 안 하면 기존처럼 전체 팀 일정 열람/수정)
+  const showAssignedCals = ["관리팀", "영업팀"].includes(form.team);
+  const fieldCals = cals.filter(c => c.isField && !c.personal);
+  const toggleAssignedCal = (calId) => {
+    setForm(f => ({
+      ...f,
+      assignedCals: (f.assignedCals || []).includes(calId)
+        ? f.assignedCals.filter(id => id !== calId)
+        : [...(f.assignedCals || []), calId],
+    }));
+  };
 
   if (!empModal.open) return null;
 
@@ -5719,6 +5742,7 @@ function EmployeeFormModal() {
           phone: onlyDigits(form.phone),
           team: form.team,
           role: form.role,
+          assignedCals: form.assignedCals || [],
           pw: "", // 로그인 시 본인이 직접 설정하도록 비워둠
           createdAt: serverTimestamp()
         };
@@ -5802,6 +5826,28 @@ function EmployeeFormModal() {
               )) : null}
             </select>
           </div>
+          {showAssignedCals && (
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">담당 현장팀</label>
+              <p className="text-[11px] text-gray-400 mb-2">지정한 팀의 일정만 보고 수정할 수 있어요. 하나도 안 고르면 전체 팀 일정을 볼 수 있어요.</p>
+              <div className="flex flex-wrap gap-2">
+                {fieldCals.map(c => {
+                  const on = (form.assignedCals || []).includes(c.id);
+                  return (
+                    <button type="button" key={c.id} onClick={() => toggleAssignedCal(c.id)}
+                      className="px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
+                      style={{
+                        background: on ? c.color : "white",
+                        color: on ? "white" : "#6b7280",
+                        borderColor: on ? c.color : "#e5e7eb",
+                      }}>
+                      {c.label || c.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1">직급</label>
             <select value={form.role} onChange={e=>setForm({...form,role:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800">
