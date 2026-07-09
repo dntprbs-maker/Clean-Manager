@@ -2310,8 +2310,8 @@ function SideDrawer() {
             </button>
           )}
 
-          {/* 완료 보고 내역 - 팀원 제외 */}
-          {currentUser.role !== "팀원" && (
+          {/* 완료 보고 내역 - 사이드 메뉴에서 임시로 숨김 (나중에 다시 쓸 수 있어 기능/화면은 그대로 둠, false만 지우면 복구) */}
+          {false && currentUser.role !== "팀원" && (
             <button
               onClick={() => { setCurrentScreen("report_history"); setDrawer(false); }}
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
