@@ -3317,6 +3317,54 @@ function EventModal() {
           </div>
         )}
 
+        {/* 완료 보고 미리보기 — 팀장이 등록한 청소 전/후 사진을 별도 화면 이동 없이 바로 확인 */}
+        {editId && (() => {
+          const report = reports.filter(r => r.eventId === editId && (r.status === "진행중" || r.status === "완료"))
+            .sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||""))[0];
+          if (!report) return null;
+          const before = report.beforePhotos || [];
+          const after  = report.afterPhotos  || [];
+          if (before.length === 0 && after.length === 0 && !report.memo) return null;
+          return (
+            <div className="mx-4 mt-4 p-4 rounded-2xl border-2 border-blue-200 bg-blue-50">
+              <span className="text-[13px] font-bold text-blue-700 block mb-2">
+                📷 완료 보고 미리보기{report.status === "진행중" ? " (진행중)" : ""}
+              </span>
+              {report.memo && (
+                <p className="text-sm text-blue-900 whitespace-pre-wrap leading-relaxed mb-3">{report.memo}</p>
+              )}
+              <div className="flex flex-col gap-2">
+                {before.length > 0 && (
+                  <div>
+                    <p className="text-xs text-blue-400 mb-1">청소 전</p>
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {before.map((p,i)=>(
+                        <button key={i} onClick={()=>openLightbox(before.map(x=>x.url), i)}
+                          className="w-16 h-16 shrink-0 rounded-lg overflow-hidden bg-white">
+                          <img src={p.url} alt="" className="w-full h-full object-cover"/>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {after.length > 0 && (
+                  <div>
+                    <p className="text-xs text-blue-400 mb-1">청소 후</p>
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {after.map((p,i)=>(
+                        <button key={i} onClick={()=>openLightbox(after.map(x=>x.url), i)}
+                          className="w-16 h-16 shrink-0 rounded-lg overflow-hidden bg-white">
+                          <img src={p.url} alt="" className="w-full h-full object-cover"/>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
         <div className="h-8"/>
       </div>
       </>
