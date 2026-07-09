@@ -1934,8 +1934,10 @@ function DetailSheet() {
 
         </div>
 
-        {/* 팀장 이상만 보이는 현장 업무 보고 버튼 — 스크롤과 무관하게 항상 화면 하단에 고정 */}
-        {(currentUser.role === "팀장" || currentUser.role === "최고관리자") && (
+        {/* 현장 업무 보고 버튼 — 팀장 이상, 그리고 관리팀·영업팀 소속은 팀원이어도 겸직으로 현장에
+            나갈 수 있어 보고 가능(현장팀 소속 팀원은 기존처럼 제외) — 스크롤과 무관하게 하단 고정 */}
+        {(currentUser.role === "팀장" || currentUser.role === "최고관리자" ||
+          (currentUser.role === "팀원" && ["관리팀","영업팀"].includes(currentUser.team))) && (
           <div className="shrink-0 px-4 py-3 border-t border-gray-100 bg-white">
             <button
               // detEv는 그대로 둬서(닫지 않고) 현장 완료 보고 화면을 닫으면
@@ -2940,7 +2942,7 @@ function RepeatUntilPicker({ form, set }) {
 }
 
 function EventModal() {
-  const { modal, closeModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, titleRule, typeKeywords, companyId, reports, companyDoc } = useC();
+  const { modal, closeModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, titleRule, typeKeywords, companyId, reports, companyDoc, currentUser, setFieldReportEv } = useC();
   const { open, date, editId, scope, instanceEv } = modal;
   // 반복일정의 "이 일정만/이후 전체" 수정은 클릭한 회차(instanceEv)의 값으로 폼을 채운다.
   const editEv = editId ? ((scope && scope!=="all" && instanceEv) ? instanceEv : events.find(e=>e.id===editId)) : null;
@@ -3255,6 +3257,15 @@ function EventModal() {
             <ChevronDown size={12} className={`opacity-60 transition-transform ${calDropOpen?"rotate-180":""}`}/>
           </button>
           {editId && <ReportStatusBadge eventId={editId} reports={reports}/>}
+          {/* 사장이 직접 현장 청소를 겸할 때를 위한 진입점 — 평소엔 상세보기를 거치지 않고
+              바로 이 화면으로 오기 때문에, 필요할 때만 쓰는 선택적 버튼으로 여기 둠 */}
+          {editId && editEv && currentUser.role === "최고관리자" && getReportStatus(editId, reports) !== "완료" && (
+            <button onClick={() => setFieldReportEv(editEv)}
+              className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded-full text-white shrink-0"
+              style={{ background: "#1a56db" }}>
+              🧹 내가 직접 청소 보고하기
+            </button>
+          )}
           {calDropOpen && (
             <div className="absolute left-0 top-full mt-1 bg-white rounded-xl shadow-xl border border-gray-100 z-[100] min-w-[140px] py-1 overflow-hidden">
               {cals.filter(c => c.isField !== false).map(cal=>{
