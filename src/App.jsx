@@ -15,12 +15,12 @@ import {
   Calendar, AlignLeft, ChevronDown, ChevronLeft,
   ChevronRight, Menu, Settings, User, Edit3, Trash2,
   PieChart, Bell, History, ExternalLink, Activity,
-  CheckSquare, FileText, Camera, Download
+  CheckSquare, FileText, Camera, Download, Check
 } from "lucide-react";
 
 import { db, functions, storage } from "./firebase";
 import { enablePush, disablePush, listenForeground } from "./fcm";
-import { collection, doc, setDoc, getDoc, getDocs, updateDoc, onSnapshot, query, where, orderBy, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { collection, doc, setDoc, getDoc, getDocs, updateDoc, onSnapshot, query, where, orderBy, deleteDoc, serverTimestamp, arrayUnion } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
 
@@ -3665,16 +3665,33 @@ function FieldReportScreen({ ev, onClose }) {
     return { name: p.name, url };
   }));
 
+  // 한 장씩 순서대로 올려서 성공할 때마다 바로 Firestore에 반영(arrayUnion) —
+  // 컴포넌트 상태가 아니라 인자로 받은 값만 참조하는 순수 함수라, 이 화면이 닫혀
+  // 언마운트돼도(그냥 실행 중인 프라미스일 뿐이므로) 백그라운드에서 계속 진행됨.
+  const uploadPhotosBackground = async (photos, tag, id) => {
+    for (const p of photos) {
+      try {
+        const blob = await (await fetch(p.data)).blob();
+        const path = `companies/${companyId}/reports/${ev?.id || "misc"}/${tag}/${Date.now()}_${p.name}`;
+        const sRef = storageRef(storage, path);
+        await uploadBytes(sRef, blob);
+        const url = await getDownloadURL(sRef);
+        await updateReport(id, { [`${tag}Photos`]: arrayUnion({ name: p.name, url }) });
+      } catch (e) {
+        console.error(`[현장보고] ${tag} 사진 업로드 실패 (${p.name}):`, e);
+        // 개별 사진 실패는 건너뛰고 나머지는 계속 진행
+      }
+    }
+  };
+
   const handleStart = async () => {
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
     setStartTime(timeStr);
-    // 시작 단계 내용을 바로 저장해둬서, 중간에 나가도 다시 들어오면 이어서 진행 가능
     if (!isDemo) {
-      setUploading(true);
+      const photosToUpload = beforePhotos;
       try {
-        const uploadedBefore = await uploadPhotos(beforePhotos, "before");
-        setBeforePhotos(uploadedBefore);
+        // 사진 업로드를 기다리지 않고 먼저 저장 → 버튼을 누르는 즉시 "청소중" 상태로 전환
         const id = await addReport({
           eventId:   ev?.id || null,
           title:     ev?.title || "",
@@ -3686,7 +3703,8 @@ function FieldReportScreen({ ev, onClose }) {
           reporter:  currentUser?.name || "",
           startMemo,
           memo: "",
-          beforePhotos: uploadedBefore,
+          beforePhotos: [],
+          beforeTotal: photosToUpload.length,
           afterPhotos: [],
           place: ev?.place || "",
           workStart: timeStr,
@@ -3695,15 +3713,19 @@ function FieldReportScreen({ ev, onClose }) {
           createdAt: now.toISOString(),
         });
         setReportId(id);
+        if (photosToUpload.length > 0) uploadPhotosBackground(photosToUpload, "before", id);
       } catch (e) {
         alert("청소 시작 정보를 저장하는 중 오류: " + e.message);
-        setUploading(false);
         return;
       }
-      setUploading(false);
     }
     setStep("working");
   };
+
+  // 청소 전 사진 업로드 진행도 — reports는 실시간(onSnapshot)이라 화면을 나갔다 와도 최신 값이 반영됨
+  const liveReport = reportId ? reports.find(r => r.id === reportId) : null;
+  const beforeTotal = existingReport?.beforeTotal ?? beforePhotos.length;
+  const beforeUploadedCount = liveReport ? (liveReport.beforePhotos || []).length : 0;
 
   const LOG_ITEMS = [
     { delay: 600, avatar: "📱", avatarBg: "#1e40af", sender: "시스템", senderColor: "#93c5fd",
@@ -3722,10 +3744,15 @@ function FieldReportScreen({ ev, onClose }) {
     if (!isDemo) {
       setUploading(true);
       try {
-        [uploadedBefore, uploadedAfter] = await Promise.all([
-          uploadPhotos(beforePhotos, "before"),
-          uploadPhotos(afterPhotos, "after"),
-        ]);
+        if (reportId) {
+          // 청소 전 사진은 "청소 시작" 시점부터 이미 백그라운드에서 업로드 중이므로 다시 올리지 않음
+          uploadedAfter = await uploadPhotos(afterPhotos, "after");
+        } else {
+          [uploadedBefore, uploadedAfter] = await Promise.all([
+            uploadPhotos(beforePhotos, "before"),
+            uploadPhotos(afterPhotos, "after"),
+          ]);
+        }
       } catch (e) {
         alert("사진 업로드 중 오류: " + e.message);
         setUploading(false);
@@ -3882,6 +3909,34 @@ function FieldReportScreen({ ev, onClose }) {
             <span className="text-blue-500 text-sm font-bold">✅ 청소 시작됨</span>
             <span className="text-xs text-gray-400 ml-auto">{startTime} 시작</span>
           </div>
+
+          {/* 청소 전 사진 백그라운드 업로드 진행도 — 화면을 나갔다 와도 최신 진행 상황이 그대로 보임 */}
+          {beforeTotal > 0 && beforeUploadedCount < beforeTotal && (
+            <div className="px-3 py-2 bg-gray-50 rounded-xl border border-gray-100">
+              <p className="text-xs font-bold text-gray-500 mb-2">
+                📤 청소 전 사진 업로드 중 ({beforeUploadedCount}/{beforeTotal})
+              </p>
+              {beforePhotos.length > 0 && (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {beforePhotos.map((p, i) => (
+                    <div key={i} className="relative w-14 h-14 shrink-0 rounded-lg overflow-hidden border border-gray-200">
+                      <img src={p.url || p.data} alt="" className="w-full h-full object-cover"/>
+                      {i < beforeUploadedCount ? (
+                        <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                          <Check size={18} className="text-white" strokeWidth={3}/>
+                        </div>
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/10">
+                          <div className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin"/>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-2 py-2">
             <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center text-white text-xs font-bold">2</div>
             <span className="font-bold text-gray-800 text-sm">청소 완료 · 사진 및 보고</span>
