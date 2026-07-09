@@ -2345,13 +2345,14 @@ function SideDrawer() {
               <span className="text-sm font-medium text-gray-700 flex-1 text-left">자주 쓰는 외부 링크</span>
             </button>
           )}
-          {/* 캘린더 가져오기 - 팀원 제외 */}
-          {currentUser.role !== "팀원" && (
+          {/* 캘린더 가져오기 - 사장, 관리팀장·영업팀장만 */}
+          {(currentUser.role === "최고관리자" ||
+            (currentUser.role === "팀장" && ["관리팀","영업팀"].includes(currentUser.team))) && (
             <button
               onClick={() => { setCurrentScreen("import_calendar"); setDrawer(false); }}
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
               <Download size={20} className="text-teal-500" />
-              <span className="text-sm font-medium text-gray-700 flex-1 text-left">🔄 캘린더 동기화</span>
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">캘린더 가져오기</span>
             </button>
           )}
 
@@ -4878,7 +4879,7 @@ function ImportCalendarScreen() {
     <div className="flex-1 flex flex-col bg-gray-50 min-h-screen">
       <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-gray-900">캘린더 동기화</h2>
+          <h2 className="text-xl font-bold text-gray-900">캘린더 가져오기</h2>
           <button onClick={() => setCurrentScreen("calendar")} className="p-2 rounded-full hover:bg-gray-100">
             <X size={22} className="text-gray-500"/>
           </button>
