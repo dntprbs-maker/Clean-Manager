@@ -1091,7 +1091,8 @@ function useDates(current) {
 function ScheduleList({ selDate, compact=false }) {
   const { visibleEvents, setDetEv, setSelDate, setCurrent, setSheetMode, openModal, currentUser, cals, reports, setFieldReportEv } = useC();
   const calByIdLocal = id => cals.find(c=>c.id===id) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af", checked:true };
-  const canAdd = currentUser.role !== "팀원";
+  // 일정 등록은 사장/관리팀·영업팀만 — 현장팀(청소팀) 팀장은 등록 불가, 보고만 가능
+  const canAdd = currentUser.role === "최고관리자" || ["관리팀","영업팀"].includes(currentUser.team);
   const handleCardClick = async (ev) => {
     // 청소 시작까지 진행된 일정이면 상세보기를 건너뛰고 바로 이어서(청소 완료 보고) 열기
     const canContinue = currentUser.role === "팀장" || currentUser.role === "최고관리자";
@@ -3524,7 +3525,8 @@ function TopHeader() {
 // ── 하단 플로팅 버튼 + 오늘 버튼 ─────────────────────────────────
 function FloatingButtons() {
   const { openModal, selDate, setCurrent, setSelDate, currentUser } = useC();
-  const canAdd = currentUser.role !== "팀원";
+  // 일정 등록은 사장/관리팀·영업팀만 — 현장팀(청소팀) 팀장은 등록 불가, 보고만 가능
+  const canAdd = currentUser.role === "최고관리자" || ["관리팀","영업팀"].includes(currentUser.team);
   return (
     <div className="fixed bottom-20 flex flex-col items-end gap-3 pointer-events-none z-40"
       style={{right: "max(1rem, calc((100vw - 430px) / 2 + 1rem))"}}>
