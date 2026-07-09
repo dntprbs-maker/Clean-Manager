@@ -5546,8 +5546,7 @@ function AppInner() {
       {showNotifyPrompt && (
         <div className="absolute inset-0 bg-black/40 z-[110] flex items-center justify-center px-6">
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl">
-            <p className="text-base font-bold text-gray-900 mb-1">🔔 알림을 받으시겠어요?</p>
-            <p className="text-sm text-gray-500 mb-5 leading-relaxed">실시간 알림을 켜두면 일정 등록·변경 소식을 바로 받을 수 있어요.</p>
+            <p className="text-base font-bold text-gray-900 mb-5">🔔 알림은 필수예요</p>
             <div className="flex gap-2">
               <button onClick={() => setShowNotifyPrompt(false)} disabled={notifyRequesting}
                 className="flex-1 py-3 rounded-xl text-sm font-bold text-gray-600 bg-gray-100 disabled:opacity-50">
