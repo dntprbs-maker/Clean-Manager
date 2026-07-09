@@ -3928,7 +3928,9 @@ function FieldReportScreen({ ev, onClose }) {
             <span className="font-bold text-gray-800 text-sm">현장 도착 확인 · 청소 전 사진</span>
           </div>
           <div>
-            <p className="text-xs font-bold text-gray-500 mb-2">📸 청소 전 사진 (Before)</p>
+            <p className="text-xs font-bold text-gray-500 mb-2">
+              📸 청소 전 사진 (Before){beforePhotos.length > 0 && ` · ${beforePhotos.length}장 첨부됨`}
+            </p>
             <input ref={beforeInputRef} type="file" accept="image/*" multiple className="hidden"
               onChange={e => { if (e.target.files?.length) pickPhotos(e.target.files, setBeforePhotos); e.target.value = ""; }}/>
             {beforePhotos.length > 0 && (
@@ -3950,7 +3952,7 @@ function FieldReportScreen({ ev, onClose }) {
               onClick={() => beforeInputRef.current?.click()}>
               <div className="text-3xl mb-2">📷</div>
               <p className="text-sm text-gray-400 font-medium">청소 전 사진 첨부</p>
-              <p className="text-xs text-blue-300 mt-1">최대 10장 · JPG / PNG</p>
+              <p className="text-xs text-blue-300 mt-1">JPG / PNG</p>
             </div>
           </div>
           <div>
@@ -4004,7 +4006,9 @@ function FieldReportScreen({ ev, onClose }) {
             <span className="font-bold text-gray-800 text-sm">청소 완료 · 사진 및 보고</span>
           </div>
           <div>
-            <p className="text-xs font-bold text-gray-500 mb-2">📸 청소 후 사진 (After)</p>
+            <p className="text-xs font-bold text-gray-500 mb-2">
+              📸 청소 후 사진 (After){afterPhotos.length > 0 && ` · ${afterPhotos.length}장 첨부됨`}
+            </p>
             <input ref={afterInputRef} type="file" accept="image/*" multiple className="hidden"
               onChange={e => { if (e.target.files?.length) pickPhotos(e.target.files, setAfterPhotos); e.target.value = ""; }}/>
             {afterPhotos.length > 0 && (
@@ -4026,7 +4030,7 @@ function FieldReportScreen({ ev, onClose }) {
               onClick={() => afterInputRef.current?.click()}>
               <div className="text-3xl mb-2">📷</div>
               <p className="text-sm text-gray-400 font-medium">청소 후 사진 첨부</p>
-              <p className="text-xs text-green-300 mt-1">최대 10장 · JPG / PNG</p>
+              <p className="text-xs text-green-300 mt-1">JPG / PNG</p>
             </div>
           </div>
           <div>
