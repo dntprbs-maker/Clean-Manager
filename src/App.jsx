@@ -5505,8 +5505,13 @@ function AppInner() {
   }, [setCurrentScreen]);
 
   // FCM 푸시 — 포그라운드 수신 핸들러 + 이미 허용된 경우 토큰 갱신, 꺼져있으면 확인창으로 켜기 유도 (데모 제외)
+  const notifyCheckedRef = useRef(false);
   useEffect(() => {
     if (isDemo || !currentUser?.uid) return;
+    // React StrictMode(개발 모드)는 effect를 일부러 두 번 실행해서, 가드 없이는
+    // alert/확인창이 두 번 뜸. 한 세션에 한 번만 체크하도록 막음.
+    if (notifyCheckedRef.current) return;
+    notifyCheckedRef.current = true;
     listenForeground();
     if (typeof Notification === "undefined") return;
     if (Notification.permission === "granted") {
