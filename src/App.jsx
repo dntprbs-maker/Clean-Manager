@@ -2336,12 +2336,15 @@ function SideDrawer() {
               <span className="text-sm font-medium text-gray-700 flex-1 text-left">완료 보고 내역</span>
             </button>
           )}
-          <button
-            onClick={() => { setCurrentScreen("links"); setDrawer(false); }}
-            className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
-            <ExternalLink size={20} className="text-purple-500" />
-            <span className="text-sm font-medium text-gray-700 flex-1 text-left">자주 쓰는 외부 링크</span>
-          </button>
+          {/* 자주 쓰는 외부 링크 - 사이드 메뉴에서 임시로 숨김 (요청 많아지면 false만 지우면 복구) */}
+          {false && (
+            <button
+              onClick={() => { setCurrentScreen("links"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <ExternalLink size={20} className="text-purple-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">자주 쓰는 외부 링크</span>
+            </button>
+          )}
           {/* 캘린더 가져오기 - 팀원 제외 */}
           {currentUser.role !== "팀원" && (
             <button
