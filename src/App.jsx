@@ -3889,7 +3889,7 @@ function FieldReportScreen({ ev, onClose }) {
 
       {/* STEP 1: 청소 시작 보고 */}
       {step === "start" && (
-        <div className="flex-1 overflow-y-auto px-4 py-2 flex flex-col gap-4">
+        <div className="flex-1 overflow-y-auto px-4 py-2 pb-24 flex flex-col gap-4">
           <div className="flex items-center gap-2 py-2">
             <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">1</div>
             <span className="font-bold text-gray-800 text-sm">현장 도착 확인 · 청소 전 사진</span>
@@ -3927,18 +3927,13 @@ function FieldReportScreen({ ev, onClose }) {
               className="w-full border border-gray-200 rounded-xl p-3 text-sm text-gray-800 outline-none resize-none bg-gray-50 placeholder-gray-300"
               rows={3}/>
           </div>
-          <button onClick={() => { if (window.confirm("청소를 시작하시겠습니까?")) handleStart(); }}
-            className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2"
-            style={{ background: "linear-gradient(135deg, #1a56db 0%, #2563eb 100%)" }}>
-            🚀 청소 시작 보고
-          </button>
           <div className="h-4"/>
         </div>
       )}
 
       {/* STEP 2: 완료 보고 */}
       {step === "working" && !showLog && (
-        <div className="flex-1 overflow-y-auto px-4 py-2 flex flex-col gap-4">
+        <div className="flex-1 overflow-y-auto px-4 py-2 pb-24 flex flex-col gap-4">
           <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-xl border border-blue-100">
             <span className="text-blue-500 text-sm font-bold">✅ 청소 시작됨</span>
             <span className="text-xs text-gray-400 ml-auto">{startTime} 시작</span>
@@ -4008,12 +4003,26 @@ function FieldReportScreen({ ev, onClose }) {
               className="w-full border border-gray-200 rounded-xl p-3 text-sm text-gray-800 outline-none resize-none bg-gray-50 placeholder-gray-300"
               rows={3}/>
           </div>
-          <button onClick={() => { if (window.confirm("청소 완료로 전송하시겠습니까?")) handleComplete(); }} disabled={uploading}
-            className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2 disabled:opacity-60"
-            style={{ background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)" }}>
-            {uploading ? "사진 업로드 중..." : "✔ 청소 완료 전송"}
-          </button>
           <div className="h-4"/>
+        </div>
+      )}
+
+      {/* 청소 시작 보고 / 청소 완료 전송 버튼 — 스크롤과 무관하게 항상 화면 하단에 고정 */}
+      {((step === "start") || (step === "working" && !showLog)) && (
+        <div className="shrink-0 px-4 py-3 border-t border-gray-100 bg-white">
+          {step === "start" ? (
+            <button onClick={() => { if (window.confirm("청소를 시작하시겠습니까?")) handleStart(); }}
+              className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2"
+              style={{ background: "linear-gradient(135deg, #1a56db 0%, #2563eb 100%)" }}>
+              🚀 청소 시작 보고
+            </button>
+          ) : (
+            <button onClick={() => { if (window.confirm("청소 완료로 전송하시겠습니까?")) handleComplete(); }} disabled={uploading}
+              className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-2 disabled:opacity-60"
+              style={{ background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)" }}>
+              {uploading ? "사진 업로드 중..." : "✔ 청소 완료 전송"}
+            </button>
+          )}
         </div>
       )}
 
