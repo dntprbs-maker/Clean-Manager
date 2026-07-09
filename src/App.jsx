@@ -23,6 +23,7 @@ import { enablePush, disablePush, listenForeground } from "./fcm";
 import { collection, doc, setDoc, getDoc, getDocs, updateDoc, onSnapshot, query, where, orderBy, deleteDoc, serverTimestamp, arrayUnion } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
+import { addPendingPhoto, getPendingPhotosByReport, getAllPendingPhotos, deletePendingPhoto } from "./pendingUploads";
 
 // ── 캘린더 목록 ───────────────────────────────────────────────
 // 신규 업체 가입 시 기본으로 깔리는 캘린더(=담당팀별 색상). 가입 시 Firestore에도 시드된다.
@@ -590,6 +591,44 @@ function Provider({ children, loginUser, onLogout }) {
     return updateDoc(doc(companyRef, "reports", id), patch);
   }, [companyRef]);
 
+  // ── 현장 사진 백그라운드 업로드 (IndexedDB 대기열 기반) ──
+  // 사진은 먼저 pendingUploads(IndexedDB)에 저장해두고 여기서 하나씩 실제 업로드한다.
+  // 화면이 닫히거나 탭이 강제 종료돼도 큐는 브라우저에 남아있으므로,
+  // 앱을 다시 열면(로그인 세션 시작 시 useEffect) 못 끝낸 사진을 이어서 올린다.
+  const inFlightUploadsRef = useRef(new Set());
+  const processPendingUploads = useCallback(async (reportId) => {
+    if (inFlightUploadsRef.current.has(reportId)) return;
+    inFlightUploadsRef.current.add(reportId);
+    try {
+      const pending = await getPendingPhotosByReport(reportId);
+      for (const item of pending) {
+        try {
+          const path = `companies/${loginUser.companyId}/reports/${item.eventId || "misc"}/${item.tag}/${item.createdAt}_${item.name}`;
+          const sRef = storageRef(storage, path);
+          await uploadBytes(sRef, item.blob);
+          const url = await getDownloadURL(sRef);
+          await updateReport(reportId, { [`${item.tag}Photos`]: arrayUnion({ name: item.name, url }) });
+          await deletePendingPhoto(item.id);
+        } catch (e) {
+          console.error("[사진 업로드 대기열] 실패, 다음에 다시 시도:", item.name, e);
+          // 이 항목은 큐에 남겨두고 다음 기회(다음 앱 실행)에 다시 시도
+        }
+      }
+    } catch { /* IndexedDB 미지원 등은 무시 — 이 경우 사진은 화면에 켜져있는 동안만 업로드됨 */ }
+    finally { inFlightUploadsRef.current.delete(reportId); }
+  }, [loginUser.companyId, updateReport]);
+
+  // 로그인 직후 한 번: 이전 세션에서 못 끝낸 업로드가 있으면 이어서 처리
+  useEffect(() => {
+    (async () => {
+      try {
+        const all = await getAllPendingPhotos();
+        const reportIds = [...new Set(all.map(p => p.reportId))];
+        reportIds.forEach(id => processPendingUploads(id));
+      } catch { /* IndexedDB 미지원 등은 무시 */ }
+    })();
+  }, [processPendingUploads]);
+
   const addLog = useCallback((action, detail) => {
     const newLogRef = doc(collection(companyRef, "activityLogs"));
     const now = new Date();
@@ -811,7 +850,7 @@ function Provider({ children, loginUser, onLogout }) {
       links,setLinks,addLink,deleteLink,updateLink,persistLinkOrder,
       linkCategories,saveLinkCategories,
       titleRule,typeKeywords,saveTitleRule,
-      reports,addReport,updateReport,
+      reports,addReport,updateReport,processPendingUploads,
       companyDoc,
       companyId: loginUser.companyId
     }}>
@@ -3614,7 +3653,7 @@ function SearchModal() {
 
 // ── 현장 완료 보고 화면 (2단계: 시작 → 완료) ─────────────────────
 function FieldReportScreen({ ev, onClose }) {
-  const { currentUser, addReport, updateReport, reports, companyId, isDemo } = useC();
+  const { currentUser, addReport, updateReport, processPendingUploads, reports, companyId, isDemo } = useC();
   // 이전에 "청소 시작"까지만 하고 나갔던 진행중 보고가 있으면 이어서 재개
   const existingReport = ev ? reports.find(r => r.eventId === ev.id && r.status === "진행중") : null;
   const [step, setStep] = useState(existingReport ? "working" : "start");
@@ -3665,25 +3704,6 @@ function FieldReportScreen({ ev, onClose }) {
     return { name: p.name, url };
   }));
 
-  // 한 장씩 순서대로 올려서 성공할 때마다 바로 Firestore에 반영(arrayUnion) —
-  // 컴포넌트 상태가 아니라 인자로 받은 값만 참조하는 순수 함수라, 이 화면이 닫혀
-  // 언마운트돼도(그냥 실행 중인 프라미스일 뿐이므로) 백그라운드에서 계속 진행됨.
-  const uploadPhotosBackground = async (photos, tag, id) => {
-    for (const p of photos) {
-      try {
-        const blob = await (await fetch(p.data)).blob();
-        const path = `companies/${companyId}/reports/${ev?.id || "misc"}/${tag}/${Date.now()}_${p.name}`;
-        const sRef = storageRef(storage, path);
-        await uploadBytes(sRef, blob);
-        const url = await getDownloadURL(sRef);
-        await updateReport(id, { [`${tag}Photos`]: arrayUnion({ name: p.name, url }) });
-      } catch (e) {
-        console.error(`[현장보고] ${tag} 사진 업로드 실패 (${p.name}):`, e);
-        // 개별 사진 실패는 건너뛰고 나머지는 계속 진행
-      }
-    }
-  };
-
   const handleStart = async () => {
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
@@ -3713,7 +3733,21 @@ function FieldReportScreen({ ev, onClose }) {
           createdAt: now.toISOString(),
         });
         setReportId(id);
-        if (photosToUpload.length > 0) uploadPhotosBackground(photosToUpload, "before", id);
+        if (photosToUpload.length > 0) {
+          // 사진을 먼저 로컬(IndexedDB) 대기열에 안전하게 저장한 뒤 백그라운드 업로드 시작 —
+          // 탭이 강제 종료돼도 큐에 남아있으므로 앱을 다시 열면 이어서 올라간다.
+          (async () => {
+            try {
+              for (const p of photosToUpload) {
+                const blob = await (await fetch(p.data)).blob();
+                await addPendingPhoto({ reportId: id, eventId: ev?.id || null, tag: "before", name: p.name, blob });
+              }
+              processPendingUploads(id);
+            } catch (e) {
+              console.error("[현장보고] 사진 대기열 저장 실패:", e);
+            }
+          })();
+        }
       } catch (e) {
         alert("청소 시작 정보를 저장하는 중 오류: " + e.message);
         return;
