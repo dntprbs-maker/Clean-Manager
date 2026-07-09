@@ -730,6 +730,22 @@ function Provider({ children, loginUser, onLogout }) {
   const [currentUser, setCurrentUser] = useState(loginUser);
   useEffect(() => { setCurrentUser(loginUser); }, [loginUser]);
 
+  // 로그인 세션(loginUser)은 로그인 시점에 localStorage에 캐시해둔 값이라,
+  // 관리자가 직원관리에서 이름/팀/직급을 바꿔도 이미 로그인해있는 그 직원의
+  // 화면에는(새로고침해도) 반영되지 않았음. users는 실시간(onSnapshot)이므로
+  // 여기서 최신 값을 감지해 currentUser + localStorage 캐시를 같이 갱신해준다.
+  // (관리자가 SideDrawer의 "다른 직원으로 보기" 테스트 전환 중일 땐 건드리지 않음)
+  useEffect(() => {
+    if (!loginUser?.uid || currentUser.uid !== loginUser.uid) return;
+    const fresh = users.find(u => u.id === loginUser.uid);
+    if (!fresh) return;
+    const fields = ["name", "phone", "team", "role", "pw"];
+    if (fields.every(k => fresh[k] === currentUser[k])) return;
+    const updated = { ...currentUser, ...Object.fromEntries(fields.map(k => [k, fresh[k]])) };
+    setCurrentUser(updated);
+    try { localStorage.setItem("loginUser", JSON.stringify(updated)); } catch {}
+  }, [users, loginUser?.uid, currentUser]);
+
   const openModal   = useCallback((date=null,editId=null,scope="all",instanceEv=null)=>setModal({open:true,date,editId,scope,instanceEv}),[]);
   const closeModal  = useCallback(()=>setModal({open:false,date:null,editId:null,scope:"all",instanceEv:null}),[]);
 
