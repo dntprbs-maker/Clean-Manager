@@ -32,6 +32,8 @@ const DEFAULT_CALS = [
   { id: "clean1", label: "영업팀",     name: "영업팀",     color: "#16a34a", checked: true, isField: false },
   { id: "clean2", label: "입주청소팀", name: "입주청소팀", color: "#ea580c", checked: true, isField: true  },
 ];
+// 정기청소 배정에서 자동 생성되는 캘린더의 고정 id — 팀 관리와 무관하게 이 기능 전용으로 씀
+const REGULAR_CAL_ID = "regular_cleaning";
 // 모듈 전역에서 calById/색상 조회에 쓰는 "현재 캘린더" 미러.
 // Provider가 Firestore cals 스냅샷을 받을 때마다 내용물을 교체(splice)해서 항상 최신값을 유지한다.
 // (const 참조는 그대로 두고 배열 내용만 갈아끼워야 기존 calById/CALS.find 호출부가 전부 동작함)
@@ -60,6 +62,13 @@ const HOLIDAYS = {
   "2026-09-25":"추석","2026-10-03":"개천절","2026-10-09":"한글날","2026-12-25":"크리스마스",
 };
 const WD = ["일","월","화","수","목","금","토"];
+// 정기청소 배정 급여 유형 — 일급/주급/월급 중 택1
+const WAGE_TYPES = [
+  { value: "daily",   label: "일급" },
+  { value: "weekly",  label: "주급" },
+  { value: "monthly", label: "월급" },
+];
+const wageTypeLabel = t => WAGE_TYPES.find(w => w.value === t)?.label || "일급";
 const REPEAT_OPTS = [
   {value:"none",label:"반복 없음"},{value:"daily",label:"매일"},
   {value:"weekly",label:"매주"},{value:"monthly",label:"매월"},{value:"yearly",label:"매년"},
@@ -488,6 +497,11 @@ function Provider({ children, loginUser, onLogout }) {
   const [typeKeywords, setTypeKeywords] = useState(DEFAULT_TYPE_KEYWORDS);
   const [reports, setReports] = useState([]);
   const [companyDoc, setCompanyDoc] = useState({}); // 회사 문서 자체 (요금제/기능 플래그 등)
+  const [sites, setSites] = useState([]); // 정기청소 현장
+  const [assignments, setAssignments] = useState([]); // 정기청소 배정(직원×현장×요일×일급)
+  const [attendance, setAttendanceList] = useState([]); // 정기청소 출근확인
+  const [extraPayments, setExtraPayments] = useState([]); // 정기청소 추가지급
+  const [monthlySettlements, setMonthlySettlements] = useState([]); // 정기청소 월정산
 
   // 모듈 전역 CALS 미러를 항상 최신 cals로 유지 (calById/CALS.find 호출부가 전부 이걸 본다)
   useEffect(() => { CALS.splice(0, CALS.length, ...cals); }, [cals]);
@@ -530,9 +544,24 @@ function Provider({ children, loginUser, onLogout }) {
       setReports(snap.docs.map(d => ({ ...d.data(), id: d.id }))
         .sort((a,b) => (b.date||"").localeCompare(a.date||"")));
     });
+    const unsubSites = onSnapshot(collection(companyRef, "sites"), snap => {
+      setSites(snap.docs.filter(d => d.data().status !== "deleted").map(d => ({ ...d.data(), id: d.id })));
+    });
+    const unsubAssignments = onSnapshot(collection(companyRef, "assignments"), snap => {
+      setAssignments(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    const unsubAttendance = onSnapshot(collection(companyRef, "attendance"), snap => {
+      setAttendanceList(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    const unsubExtraPayments = onSnapshot(collection(companyRef, "extraPayments"), snap => {
+      setExtraPayments(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    const unsubSettlements = onSnapshot(collection(companyRef, "monthlySettlements"), snap => {
+      setMonthlySettlements(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
 
     return () => {
-      unsubEvents(); unsubUsers(); unsubConfig(); unsubLogs(); unsubNotices(); unsubLinks(); unsubCals(); unsubReports(); unsubCompanyDoc();
+      unsubEvents(); unsubUsers(); unsubConfig(); unsubLogs(); unsubNotices(); unsubLinks(); unsubCals(); unsubReports(); unsubCompanyDoc(); unsubSites(); unsubAssignments(); unsubAttendance(); unsubExtraPayments(); unsubSettlements();
     };
   }, [loginUser.companyId]);
 
@@ -640,6 +669,137 @@ function Provider({ children, loginUser, onLogout }) {
       detail,
     });
   }, [loginUser, companyRef]);
+
+  // ── 정기청소 현장 CRUD (Firestore 영속) ──
+  const addSite = useCallback(s => {
+    const ref = doc(collection(companyRef, "sites"));
+    setDoc(ref, { ...s, id: ref.id });
+    addLog("등록", `'${s.name}' 현장을 등록했습니다.`);
+  }, [companyRef, addLog]);
+  const updateSite = useCallback(s => {
+    setDoc(doc(companyRef, "sites", s.id), s, { merge: true });
+    addLog("수정", `'${s.name}' 현장 정보를 수정했습니다.`);
+  }, [companyRef, addLog]);
+  const deleteSite = useCallback(id => {
+    const target = sites.find(s => s.id === id);
+    deleteDoc(doc(companyRef, "sites", id));
+    if (target) addLog("삭제", `'${target.name}' 현장을 삭제했습니다.`);
+  }, [companyRef, sites, addLog]);
+
+  // ── 정기청소 배정 → 현장 캘린더 동기화 ──
+  // 한 현장에 걸린 모든 배정의 요일을 합집합으로 모아 그 현장 하나당 반복일정 한 개로 유지.
+  // 요일 구성이 바뀌면 과거 일정은 그대로 두고 오늘부터 새 시리즈로 분리한다(기존 반복일정 수정 시
+  // "이후 전체만 수정"하는 방식과 동일한 원리 — updateEventScoped의 following 분기 참고).
+  // 호출 시점의 state는 Firestore 쓰기 직후라 아직 최신이 아닐 수 있어, 최신 배정/현장 목록을 인자로 직접 받는다.
+  const syncSiteCalendar = useCallback(async (siteId, assignmentsList, sitesList) => {
+    const site = sitesList.find(s => s.id === siteId);
+    if (!site) return;
+    const weekdays = [...new Set(
+      assignmentsList
+        .filter(a => a.siteId === siteId)
+        .flatMap(a => (a.days || []))
+    )].sort((a,b) => a-b);
+
+    const prevWeekdays = site.calWeekdays || [];
+    const sameSet = weekdays.length === prevWeekdays.length && weekdays.every(w => prevWeekdays.includes(w));
+    if (sameSet) return;
+
+    const todayStr = fmt(new Date());
+    const yesterday = add(todayStr, -1);
+
+    if (site.eventId) {
+      await setDoc(doc(companyRef, "events", site.eventId), { repeatUntil: yesterday }, { merge: true });
+    }
+
+    if (weekdays.length === 0) {
+      await setDoc(doc(companyRef, "sites", siteId), { eventId: null, calWeekdays: [] }, { merge: true });
+      return;
+    }
+
+    // "정기청소" 담당팀 캘린더는 팀 관리와 무관하게 이 기능 전용으로 고정 id로 자동 생성/재사용.
+    // (특정 팀 이름에 의존하면 회사마다 팀 구성이 달라 매칭이 깨짐 — 배정만 있으면 바로 동작하도록 분리)
+    let regularCal = cals.find(c => c.id === REGULAR_CAL_ID);
+    if (!regularCal) {
+      regularCal = { id: REGULAR_CAL_ID, label: "정기청소", name: "정기청소", color: "#16a34a", checked: true, isField: true };
+      await setDoc(doc(companyRef, "cals", REGULAR_CAL_ID), regularCal);
+      setCals(prev => prev.some(c => c.id === REGULAR_CAL_ID) ? prev : [...prev, regularCal]);
+    }
+    const newRef = doc(collection(companyRef, "events"));
+    await setDoc(newRef, {
+      title: `${site.name} 정기청소`,
+      start: todayStr, end: todayStr,
+      allDay: true,
+      repeat: "weekly", repeatWeekdays: weekdays, repeatInterval: 1, repeatUntil: "",
+      calId: regularCal.id,
+      place: site.address || "",
+      description: "",
+      source: "regular", siteId,
+    });
+    await setDoc(doc(companyRef, "sites", siteId), { eventId: newRef.id, calWeekdays: weekdays }, { merge: true });
+  }, [companyRef, cals]);
+
+  // ── 정기청소 배정 CRUD (Firestore 영속) ──
+  const addAssignment = useCallback(async a => {
+    const ref = doc(collection(companyRef, "assignments"));
+    const newAssignment = { ...a, id: ref.id };
+    await setDoc(ref, newAssignment);
+    const emp = users.find(u => u.id === a.employeeId);
+    const site = sites.find(s => s.id === a.siteId);
+    addLog("등록", `${emp?.name || "직원"} - ${site?.name || "현장"} 배정을 등록했습니다.`);
+    await syncSiteCalendar(a.siteId, [...assignments, newAssignment], sites);
+  }, [companyRef, assignments, sites, users, addLog, syncSiteCalendar]);
+
+  const updateAssignment = useCallback(async a => {
+    const prev = assignments.find(x => x.id === a.id);
+    await setDoc(doc(companyRef, "assignments", a.id), a, { merge: true });
+    const emp = users.find(u => u.id === a.employeeId);
+    const site = sites.find(s => s.id === a.siteId);
+    addLog("수정", `${emp?.name || "직원"} - ${site?.name || "현장"} 배정을 수정했습니다.`);
+    const nextAssignments = assignments.map(x => x.id === a.id ? a : x);
+    await syncSiteCalendar(a.siteId, nextAssignments, sites);
+    if (prev && prev.siteId !== a.siteId) await syncSiteCalendar(prev.siteId, nextAssignments, sites);
+  }, [companyRef, assignments, sites, users, addLog, syncSiteCalendar]);
+
+  const deleteAssignment = useCallback(async id => {
+    const target = assignments.find(x => x.id === id);
+    await deleteDoc(doc(companyRef, "assignments", id));
+    if (target) {
+      const emp = users.find(u => u.id === target.employeeId);
+      const site = sites.find(s => s.id === target.siteId);
+      addLog("삭제", `${emp?.name || "직원"} - ${site?.name || "현장"} 배정을 삭제했습니다.`);
+      const nextAssignments = assignments.filter(x => x.id !== id);
+      await syncSiteCalendar(target.siteId, nextAssignments, sites);
+    }
+  }, [companyRef, assignments, sites, users, addLog, syncSiteCalendar]);
+
+  // ── 정기청소 출근확인 (Firestore 영속) ──
+  // date+employeeId+siteId 조합을 문서 id로 고정해 항상 upsert(있으면 갱신, 없으면 생성).
+  const setAttendanceCheck = useCallback((date, employeeId, siteId, confirmed, confirmedBy) => {
+    const id = `${date}_${employeeId}_${siteId}`;
+    setDoc(doc(companyRef, "attendance", id), { date, employeeId, siteId, confirmed, confirmedBy }, { merge: true });
+  }, [companyRef]);
+
+  // ── 정기청소 추가지급 CRUD ──
+  const addExtraPayment = useCallback(p => {
+    const ref = doc(collection(companyRef, "extraPayments"));
+    setDoc(ref, { ...p, id: ref.id });
+  }, [companyRef]);
+  const deleteExtraPayment = useCallback(id => {
+    deleteDoc(doc(companyRef, "extraPayments", id));
+  }, [companyRef]);
+
+  // ── 정기청소 직원 일 보조금(dailyAllowance) — users 문서에 필드로 저장 ──
+  const setEmployeeAllowance = useCallback((employeeId, dailyAllowance) => {
+    updateDoc(doc(companyRef, "users", employeeId), { dailyAllowance }).catch(() => {});
+  }, [companyRef]);
+
+  // ── 정기청소 월정산 확정 — employeeId+yearMonth를 문서id로 고정해 upsert ──
+  const confirmSettlement = useCallback((employeeId, yearMonth, finalAmount) => {
+    const id = `${employeeId}_${yearMonth}`;
+    setDoc(doc(companyRef, "monthlySettlements", id), {
+      employeeId, yearMonth, finalAmount, confirmedAt: new Date().toISOString(),
+    }, { merge: true });
+  }, [companyRef]);
 
   const addEvent = useCallback(ev => {
     const { _id, ...evData } = ev;
@@ -765,6 +925,10 @@ function Provider({ children, loginUser, onLogout }) {
   const [currentScreen, setCurrentScreen] = useState("calendar");
   const [empModal, setEmpModal] = useState({ open: false, editId: null });
   const [companySettingsModal, setCompanySettingsModal] = useState(false);
+  const [siteModal, setSiteModal] = useState({ open: false, editId: null });
+  const [assignmentModal, setAssignmentModal] = useState({ open: false, editId: null, presetSiteId: null });
+  const [extraPaymentModal, setExtraPaymentModal] = useState({ open: false, employeeId: null });
+  const [siteDetailId, setSiteDetailId] = useState(null);
 
   const [currentUser, setCurrentUser] = useState(loginUser);
   useEffect(() => { setCurrentUser(loginUser); }, [loginUser]);
@@ -863,6 +1027,13 @@ function Provider({ children, loginUser, onLogout }) {
       titleRule,typeKeywords,saveTitleRule,
       reports,addReport,updateReport,processPendingUploads,
       companyDoc,
+      sites,addSite,updateSite,deleteSite,siteModal,setSiteModal,
+      assignments,addAssignment,updateAssignment,deleteAssignment,assignmentModal,setAssignmentModal,
+      siteDetailId,setSiteDetailId,
+      attendance,setAttendanceCheck,
+      extraPayments,addExtraPayment,deleteExtraPayment,extraPaymentModal,setExtraPaymentModal,
+      setEmployeeAllowance,
+      monthlySettlements,confirmSettlement,
       companyId: loginUser.companyId
     }}>
       {children}
@@ -933,6 +1104,10 @@ function DemoProvider({ children }) {
   const [teamModal, setTeamModal] = useState(false);
   const [companySettingsModal, setCompanySettingsModal] = useState(false);
   const [fieldReportEv, setFieldReportEv] = useState(null);
+  const [siteModal, setSiteModal] = useState({ open: false, editId: null });
+  const [assignmentModal, setAssignmentModal] = useState({ open: false, editId: null, presetSiteId: null });
+  const [extraPaymentModal, setExtraPaymentModal] = useState({ open: false, employeeId: null });
+  const [siteDetailId, setSiteDetailId] = useState(null);
   const [titleRule] = useState(["time","district","area"]);
   const [typeKeywords] = useState(["입주청소","정기청소","에어컨청소","특수청소","줄눈청소"]);
   const [linkCategories] = useState(["업무","지도","연락처","기타"]);
@@ -971,6 +1146,13 @@ function DemoProvider({ children }) {
       teamModal, setTeamModal,
       companySettingsModal, setCompanySettingsModal,
       fieldReportEv, setFieldReportEv,
+      sites: [], addSite: demoAlert, updateSite: demoAlert, deleteSite: demoAlert, siteModal, setSiteModal,
+      assignments: [], addAssignment: demoAlert, updateAssignment: demoAlert, deleteAssignment: demoAlert, assignmentModal, setAssignmentModal,
+      siteDetailId, setSiteDetailId,
+      attendance: [], setAttendanceCheck: demoAlert,
+      extraPayments: [], addExtraPayment: demoAlert, deleteExtraPayment: demoAlert, extraPaymentModal, setExtraPaymentModal,
+      setEmployeeAllowance: demoAlert,
+      monthlySettlements: [], confirmSettlement: demoAlert,
       companyId: "demo",
     }}>
       {children}
@@ -1152,7 +1334,8 @@ function ScheduleList({ selDate, compact=false }) {
       setFieldReportEv(ev);
       return;
     }
-    if (currentUser.role === "팀원" || currentUser.role === "팀장") { setDetEv(ev); return; }
+    // 정기청소 배정에서 자동 생성된 일정은 배정 관리 화면에서만 바꿀 수 있어 항상 상세보기로만 감
+    if (currentUser.role === "팀원" || currentUser.role === "팀장" || ev.source === "regular") { setDetEv(ev); return; }
     if (ev._recurring) {
       const scope = await askRecurringScope(ev, "edit");
       if (!scope) return;
@@ -1749,6 +1932,8 @@ function DetailSheet() {
   },[vis, detEv?.id, currentUser.role]);
   if(!detEv) return null;
   const cal = cals.find(c=>c.id===detEv.calId) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af" };
+  // 정기청소 배정에서 자동 생성된 일정 — 배정 관리 화면에서만 바꿀 수 있고, 본문도 별도 렌더링
+  const isRegular = detEv.source === "regular";
   // 관리팀·영업팀은 담당 현장팀이 지정돼 있으면 그 팀 일정만 수정 가능 (지정 안 했으면 기존처럼 전체 수정 가능)
   const canEditEvent = currentUser.role === "최고관리자" ||
     (["관리팀","영업팀"].includes(currentUser.team) &&
@@ -1809,7 +1994,7 @@ function DetailSheet() {
           </div>
           <span className="text-base font-bold text-gray-800">일정</span>
           <div className="flex gap-1">
-            {canEditEvent && <>
+            {canEditEvent && !isRegular && <>
               <button onClick={handleEdit}
                 className="p-2 rounded-full hover:bg-gray-100"><Edit3 size={19} className="text-gray-600"/></button>
               <button onClick={handleDelete}
@@ -1819,6 +2004,7 @@ function DetailSheet() {
         </div>
 
         <div className="flex-1 overflow-y-auto pb-24 max-h-[80vh]">
+        {isRegular ? <RegularCleaningDetailBody detEv={detEv} cal={cal}/> : <>
           {/* 담당팀 */}
           <div className="flex items-center px-5 py-4 border-b border-gray-50 gap-1">
             <span style={{color:cal.color}} className="font-semibold text-[15px]">{cal.label}</span>
@@ -1934,12 +2120,13 @@ function DetailSheet() {
               )}
             </div>
           )}
-
+        </>}
         </div>
 
         {/* 현장 업무 보고 버튼 — 팀장 이상, 그리고 관리팀·영업팀 소속은 팀원이어도 겸직으로 현장에
-            나갈 수 있어 보고 가능(현장팀 소속 팀원은 기존처럼 제외) — 스크롤과 무관하게 하단 고정 */}
-        {(currentUser.role === "팀장" || currentUser.role === "최고관리자" ||
+            나갈 수 있어 보고 가능(현장팀 소속 팀원은 기존처럼 제외) — 스크롤과 무관하게 하단 고정.
+            정기청소 자동일정은 출근확인 버튼이 본문에 따로 있어 이 버튼은 숨김. */}
+        {!isRegular && (currentUser.role === "팀장" || currentUser.role === "최고관리자" ||
           (currentUser.role === "팀원" && ["관리팀","영업팀"].includes(currentUser.team))) && (
           <div className="shrink-0 px-4 py-3 border-t border-gray-100 bg-white">
             <button
@@ -1956,7 +2143,82 @@ function DetailSheet() {
   );
 }
 
+// ── 정기청소 일정 상세 본문 (DetailSheet 헤더/애니메이션은 공유, 본문만 교체) ──
+function RegularCleaningDetailBody({ detEv, cal }) {
+  const { sites, assignments, users, attendance, setAttendanceCheck, currentUser } = useC();
+  const site = sites.find(s => s.id === detEv.siteId);
+  const weekday = pd(detEv.start).getDay();
+  const todaysAssignments = assignments.filter(a => a.siteId === detEv.siteId && (a.days || []).includes(weekday));
+  const isAdmin = currentUser.role === "최고관리자";
 
+  return (
+    <>
+      <div className="flex items-center px-5 py-4 border-b border-gray-50 gap-1">
+        <span style={{ color: cal.color }} className="font-semibold text-[15px]">{cal.label}</span>
+      </div>
+
+      <div className="flex items-start px-5 py-5 border-b border-gray-100 gap-3">
+        <div className="w-4 h-4 rounded-full shrink-0 mt-1 shadow-sm" style={{ backgroundColor: cal.color }}/>
+        <h2 className="text-xl font-bold text-gray-900 leading-snug">{detEv.title}</h2>
+      </div>
+
+      <div className="flex items-start px-5 py-5 border-b border-gray-100 gap-4">
+        <Clock size={20} className="text-gray-400 shrink-0 mt-0.5"/>
+        <span className="text-[15px] text-gray-800">{detEv.start} ({WD[weekday]})</span>
+      </div>
+
+      {site?.address && (
+        <div className="flex items-start px-5 py-5 border-b border-gray-100 gap-4">
+          <MapPin size={20} className="text-gray-400 shrink-0 mt-0.5"/>
+          <a href={`https://map.naver.com/v5/search/${encodeURIComponent(site.address)}`} target="_blank" rel="noopener noreferrer"
+            className="flex-1 text-[15px] text-gray-800 hover:underline leading-relaxed">{site.address}</a>
+        </div>
+      )}
+
+      <div className="px-5 py-5">
+        <p className="text-[13px] font-bold text-gray-500 mb-3">배정된 직원 {todaysAssignments.length}명</p>
+        {todaysAssignments.length === 0 ? (
+          <p className="text-sm text-gray-400">이 요일에 배정된 직원이 없습니다.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {todaysAssignments.map(a => {
+              const emp = users.find(u => u.id === a.employeeId);
+              const att = attendance.find(x => x.date === detEv.start && x.employeeId === a.employeeId && x.siteId === detEv.siteId);
+              const confirmed = !!att?.confirmed;
+              const canCheck = isAdmin || currentUser.id === a.employeeId;
+              return (
+                <div key={a.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-900">{emp?.name || "탈퇴한 직원"}</p>
+                    {(a.startTime || a.endTime) && (
+                      <p className="text-xs text-gray-400 mt-0.5">{fmtTime(a.startTime)} ~ {fmtTime(a.endTime)}</p>
+                    )}
+                    {confirmed && att?.confirmedBy && (
+                      <p className="text-xs text-gray-400 mt-0.5">{att.confirmedBy === "self" ? "본인 체크" : "관리자 체크"}</p>
+                    )}
+                  </div>
+                  {canCheck ? (
+                    <button
+                      onClick={() => setAttendanceCheck(detEv.start, a.employeeId, detEv.siteId, !confirmed, currentUser.id === a.employeeId ? "self" : "admin")}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold transition-colors shrink-0"
+                      style={{ background: confirmed ? "#dcfce7" : "#f3f4f6", color: confirmed ? "#15803d" : "#6b7280" }}>
+                      <Check size={14}/> {confirmed ? "출근확인됨" : "출근확인"}
+                    </button>
+                  ) : (
+                    <span className="text-xs font-bold px-3 py-2 rounded-full shrink-0"
+                      style={{ background: confirmed ? "#dcfce7" : "#f3f4f6", color: confirmed ? "#15803d" : "#9ca3af" }}>
+                      {confirmed ? "출근확인됨" : "미확인"}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
 
 // ── 길게 누르기 메뉴 ───────────────────────────────────────────────
 function LongPressMenu({ ev, onClose, onEdit, onDelete }) {
@@ -2088,7 +2350,7 @@ function BottomTabBar() {
 
 // ── 사이드 드로어 (스와이프 열기/닫기 지원) ───────────────────────
 function SideDrawer() {
-  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, onLogout, companyId } = useC();
+  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, onLogout, companyId, assignments } = useC();
   const [pwModal, setPwModal] = useState(false);
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -2283,6 +2545,15 @@ function SideDrawer() {
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
               <User size={20} className="text-blue-500" />
               <span className="text-sm font-medium text-gray-700 flex-1 text-left">직원 관리</span>
+            </button>
+          )}
+          {/* 정기청소 근무관리 - 최고관리자이거나, 본인 앞으로 배정된 현장이 하나라도 있으면 노출 (팀 구성과 무관) */}
+          {(currentUser.role === "최고관리자" || assignments.some(a => a.employeeId === currentUser.id)) && (
+            <button
+              onClick={() => { setCurrentScreen("reg_hub"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <MapPin size={20} className="text-emerald-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">정기청소 근무관리</span>
             </button>
           )}
           {/* 팀별 일정 - 팀원 제외 */}
@@ -5577,6 +5848,12 @@ function AppInner() {
       {currentScreen === "report_history"&& <ReportHistoryScreen/>}
       {currentScreen === "faq"            && <FaqScreen/>}
       {currentScreen === "import_calendar"&& <ImportCalendarScreen/>}
+      {currentScreen === "reg_hub"        && <RegularCleaningHubScreen/>}
+      {currentScreen === "reg_sites"      && <SitesScreen/>}
+      {currentScreen === "reg_site_detail"&& <SiteDetailScreen/>}
+      {currentScreen === "reg_today"      && <TodayStatusScreen/>}
+      {currentScreen === "reg_my"         && <MyRegularCleaningScreen/>}
+      {currentScreen === "reg_settlement" && <MonthlySettlementScreen/>}
       <SideDrawer/>
       <DetailSheet/>
       <EventModal/>
@@ -5584,6 +5861,9 @@ function AppInner() {
       <EmployeeFormModal/>
       <TeamManagementModal/>
       <CompanySettingsModal/>
+      <SiteFormModal/>
+      <AssignmentFormModal/>
+      <ExtraPaymentModal/>
       <FieldReportGate/>
     </div>
   );
@@ -5952,6 +6232,731 @@ function EmployeeFormModal() {
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 정기청소 근무관리 허브 화면 ───────────────────────────────────────────────
+function RegularCleaningHubScreen() {
+  const { currentUser, setCurrentScreen } = useC();
+  const isAdmin = currentUser.role === "최고관리자";
+  const adminMenu = [
+    { key: "reg_sites", label: "현장 관리", icon: "🏢", desc: "현장 등록·수정 및 직원 배정" },
+    { key: "reg_today", label: "오늘 현황", icon: "✅", desc: "오늘 출근 예정자 확인·체크" },
+    { key: "reg_settlement", label: "월별 정산", icon: "💰", desc: "근무일수·급여 계산 및 확정" },
+  ];
+  const staffMenu = [
+    { key: "reg_my", label: "내 정기청소 근무", icon: "🧹", desc: "내 배정·출근체크·근무내역" },
+  ];
+  const menuItems = isAdmin ? adminMenu : staffMenu;
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
+      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-4 flex items-center justify-between">
+        <h2 className="text-xl font-bold text-gray-900">정기청소 근무관리</h2>
+        <button onClick={() => setCurrentScreen("calendar")} className="p-2 rounded-full hover:bg-gray-100">
+          <X size={22} className="text-gray-500"/>
+        </button>
+      </div>
+      <div className="px-4 py-4 flex flex-col gap-3">
+        {menuItems.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
+            <div className="text-4xl mb-3">🧹</div>
+            <p className="text-sm text-gray-400 font-semibold">아직 준비 중인 화면입니다</p>
+          </div>
+        ) : menuItems.map(m => (
+          <button key={m.key} onClick={() => setCurrentScreen(m.key)}
+            className="text-left w-full rounded-2xl p-4 flex items-center gap-3 bg-white border border-gray-100 hover:border-blue-200 transition-all">
+            <span className="text-2xl shrink-0">{m.icon}</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-gray-900">{m.label}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{m.desc}</p>
+            </div>
+            <ChevronLeft size={16} className="text-gray-300 rotate-180 shrink-0"/>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── 정기청소 현장 관리 화면 (목록) ───────────────────────────────────────────────
+function SitesScreen() {
+  const { sites, assignments, setCurrentScreen, setSiteModal, setSiteDetailId, currentUser } = useC();
+  const isAdmin = currentUser.role === "최고관리자";
+  const assignedCount = siteId => assignments.filter(a => a.siteId === siteId).length;
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
+      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            <button onClick={() => setCurrentScreen("reg_hub")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+              <ChevronLeft size={24} className="text-gray-700"/>
+            </button>
+            <h2 className="text-xl font-bold text-gray-900">현장 관리</h2>
+          </div>
+          {isAdmin && (
+            <button onClick={() => setSiteModal({ open: true, editId: null })}
+              className="flex items-center gap-1 text-sm font-bold text-blue-600 px-4 py-2 rounded-full bg-blue-50">
+              + 현장 추가
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="px-4 py-4 flex flex-col gap-3">
+        {sites.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
+            <div className="text-4xl mb-3">🏢</div>
+            <p className="text-sm text-gray-400 font-semibold">등록된 현장이 없습니다</p>
+          </div>
+        ) : sites.map(s => (
+          <button key={s.id} onClick={() => { setSiteDetailId(s.id); setCurrentScreen("reg_site_detail"); }}
+            className="text-left bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 hover:border-blue-200 transition-all">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-gray-900 truncate">{s.name}</p>
+              {s.address && <p className="text-xs text-gray-400 mt-1 truncate">📍 {s.address}</p>}
+              <p className="text-xs text-blue-500 mt-1">배정 {assignedCount(s.id)}명</p>
+            </div>
+            <ChevronLeft size={16} className="text-gray-300 rotate-180 shrink-0"/>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── 정기청소 현장 상세 (현장 정보 + 이 현장의 배정 관리) ───────────────────────────────────────────────
+function SiteDetailScreen() {
+  const { sites, assignments, users, siteDetailId, setCurrentScreen, setSiteModal, deleteSite, setAssignmentModal, deleteAssignment, currentUser } = useC();
+  const isAdmin = currentUser.role === "최고관리자";
+  const site = sites.find(s => s.id === siteDetailId);
+  const siteAssignments = assignments.filter(a => a.siteId === siteDetailId);
+  const empName = id => users.find(u => u.id === id)?.name || "탈퇴한 직원";
+
+  if (!site) {
+    return (
+      <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
+        <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-4 flex items-center gap-1">
+          <button onClick={() => setCurrentScreen("reg_sites")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+            <ChevronLeft size={24} className="text-gray-700"/>
+          </button>
+          <h2 className="text-xl font-bold text-gray-900">현장 상세</h2>
+        </div>
+        <div className="p-10 text-center text-sm text-gray-400">삭제된 현장입니다</div>
+      </div>
+    );
+  }
+
+  const handleDeleteSite = async () => {
+    const message = siteAssignments.length > 0
+      ? `'${site.name}' 현장을 삭제하면 배정된 직원 ${siteAssignments.length}명의 배정도 모두 함께 삭제됩니다. 계속하시겠습니까?`
+      : `'${site.name}' 현장을 삭제하시겠습니까?`;
+    if (!window.confirm(message)) return;
+    await Promise.all(siteAssignments.map(a => deleteAssignment(a.id)));
+    deleteSite(site.id);
+    setCurrentScreen("reg_sites");
+  };
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
+      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1 min-w-0">
+            <button onClick={() => setCurrentScreen("reg_sites")} className="p-2 -ml-2 rounded-full hover:bg-gray-100 shrink-0">
+              <ChevronLeft size={24} className="text-gray-700"/>
+            </button>
+            <h2 className="text-xl font-bold text-gray-900 truncate">{site.name}</h2>
+          </div>
+          {isAdmin && (
+            <div className="flex items-center gap-1 shrink-0">
+              <button onClick={() => setSiteModal({ open: true, editId: site.id })} className="p-2 rounded-full hover:bg-gray-100">
+                <Edit3 size={16} className="text-gray-400"/>
+              </button>
+              <button onClick={handleDeleteSite} className="p-2 rounded-full hover:bg-gray-100">
+                <Trash2 size={16} className="text-gray-400"/>
+              </button>
+            </div>
+          )}
+        </div>
+        {site.address && <p className="text-xs text-gray-400 mt-1 pl-1">📍 {site.address}</p>}
+      </div>
+      <div className="px-4 py-4 flex flex-col gap-3">
+        <div className="flex items-center justify-between px-1">
+          <p className="text-[13px] font-bold text-gray-500">배정된 직원 {siteAssignments.length}명</p>
+          {isAdmin && (
+            <button onClick={() => setAssignmentModal({ open: true, editId: null, presetSiteId: site.id })}
+              className="text-sm font-bold text-blue-600">+ 배정 추가</button>
+          )}
+        </div>
+        {siteAssignments.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
+            <div className="text-4xl mb-3">📋</div>
+            <p className="text-sm text-gray-400 font-semibold">배정된 직원이 없습니다</p>
+          </div>
+        ) : siteAssignments.map(a => (
+          <div key={a.id} className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-gray-900 truncate">{empName(a.employeeId)}</p>
+              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                {(a.days || []).sort((x, y) => x - y).map(i => (
+                  <span key={i} className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">{WD[i]}</span>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 mt-1 text-xs text-gray-400 flex-wrap">
+                {(a.startTime || a.endTime) && <span>{fmtTime(a.startTime)} ~ {fmtTime(a.endTime)}</span>}
+                <span>{wageTypeLabel(a.wageType)} {Number(a.wageAmount ?? a.dailyWage ?? 0).toLocaleString()}원</span>
+              </div>
+            </div>
+            {isAdmin && (
+              <div className="flex items-center gap-1 shrink-0">
+                <button onClick={() => setAssignmentModal({ open: true, editId: a.id, presetSiteId: site.id })} className="p-2 rounded-full hover:bg-gray-100">
+                  <Edit3 size={16} className="text-gray-400"/>
+                </button>
+                <button onClick={() => { if (window.confirm(`${empName(a.employeeId)} 배정을 삭제하시겠습니까?`)) deleteAssignment(a.id); }}
+                  className="p-2 rounded-full hover:bg-gray-100">
+                  <Trash2 size={16} className="text-gray-400"/>
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── 정기청소 오늘현황 (관리자용 출근체크) ───────────────────────────────────────────────
+function TodayStatusScreen() {
+  const { assignments, sites, users, attendance, setAttendanceCheck, setCurrentScreen } = useC();
+  const todayStr = fmt(new Date());
+  const weekday = new Date().getDay();
+  const todays = assignments.filter(a => (a.days || []).includes(weekday));
+  const bySite = sites
+    .map(site => ({ site, rows: todays.filter(a => a.siteId === site.id) }))
+    .filter(g => g.rows.length > 0);
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
+      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-4">
+        <div className="flex items-center gap-1">
+          <button onClick={() => setCurrentScreen("reg_hub")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+            <ChevronLeft size={24} className="text-gray-700"/>
+          </button>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">오늘 현황</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{todayStr} ({WD[weekday]})</p>
+          </div>
+        </div>
+      </div>
+      <div className="px-4 py-4 flex flex-col gap-3">
+        {bySite.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
+            <div className="text-4xl mb-3">📅</div>
+            <p className="text-sm text-gray-400 font-semibold">오늘 배정된 현장이 없습니다</p>
+          </div>
+        ) : bySite.map(({ site, rows }) => (
+          <div key={site.id} className="bg-white rounded-2xl border border-gray-100 p-4">
+            <p className="text-sm font-bold text-gray-900 mb-3">{site.name}</p>
+            <div className="flex flex-col gap-2">
+              {rows.map(a => {
+                const emp = users.find(u => u.id === a.employeeId);
+                const att = attendance.find(x => x.date === todayStr && x.employeeId === a.employeeId && x.siteId === a.siteId);
+                const confirmed = !!att?.confirmed;
+                return (
+                  <div key={a.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-gray-900">{emp?.name || "탈퇴한 직원"}</p>
+                      {confirmed && att?.confirmedBy && (
+                        <p className="text-xs text-gray-400 mt-0.5">{att.confirmedBy === "self" ? "본인 체크" : "관리자 체크"}</p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setAttendanceCheck(todayStr, a.employeeId, a.siteId, !confirmed, "admin")}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold transition-colors shrink-0"
+                      style={{ background: confirmed ? "#dcfce7" : "#f3f4f6", color: confirmed ? "#15803d" : "#6b7280" }}>
+                      <Check size={14}/> {confirmed ? "출근확인됨" : "출근확인"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── 정기청소 내 근무 (직원용 — 내 배정/셀프체크/근무내역) ───────────────────────────────────────────────
+function MyRegularCleaningScreen() {
+  const { currentUser, assignments, sites, attendance, setAttendanceCheck, monthlySettlements, setCurrentScreen } = useC();
+  const siteName = id => sites.find(s => s.id === id)?.name || "삭제된 현장";
+  const todayStr = fmt(new Date());
+  const weekday = new Date().getDay();
+  const myAssignments = assignments.filter(a => a.employeeId === currentUser.id);
+  const todaysMine = myAssignments.filter(a => (a.days || []).includes(weekday));
+  const myHistory = attendance
+    .filter(a => a.employeeId === currentUser.id && a.confirmed)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 30);
+  const mySettlements = monthlySettlements
+    .filter(s => s.employeeId === currentUser.id)
+    .sort((a, b) => b.yearMonth.localeCompare(a.yearMonth));
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
+      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-4 flex items-center gap-1">
+        <button onClick={() => setCurrentScreen("reg_hub")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+          <ChevronLeft size={24} className="text-gray-700"/>
+        </button>
+        <h2 className="text-xl font-bold text-gray-900">내 정기청소 근무</h2>
+      </div>
+
+      <div className="px-4 py-4 flex flex-col gap-3">
+        <p className="text-[13px] font-bold text-gray-500 px-1">오늘 출근 체크 · {todayStr} ({WD[weekday]})</p>
+        {todaysMine.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center">
+            <p className="text-sm text-gray-400">오늘은 배정된 현장이 없습니다</p>
+          </div>
+        ) : todaysMine.map(a => {
+          const att = attendance.find(x => x.date === todayStr && x.employeeId === currentUser.id && x.siteId === a.siteId);
+          const confirmed = !!att?.confirmed;
+          return (
+            <div key={a.id} className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3">
+              <p className="flex-1 text-sm font-bold text-gray-900">{siteName(a.siteId)}</p>
+              <button
+                onClick={() => setAttendanceCheck(todayStr, currentUser.id, a.siteId, !confirmed, "self")}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold transition-colors shrink-0"
+                style={{ background: confirmed ? "#dcfce7" : "#f3f4f6", color: confirmed ? "#15803d" : "#6b7280" }}>
+                <Check size={14}/> {confirmed ? "출근확인됨" : "출근확인"}
+              </button>
+            </div>
+          );
+        })}
+
+        <p className="text-[13px] font-bold text-gray-500 px-1 mt-3">내 배정</p>
+        {myAssignments.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center">
+            <p className="text-sm text-gray-400">배정된 현장이 없습니다</p>
+          </div>
+        ) : myAssignments.map(a => (
+          <div key={a.id} className="bg-white rounded-2xl border border-gray-100 p-4">
+            <p className="text-sm font-bold text-gray-900">{siteName(a.siteId)}</p>
+            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+              {(a.days || []).sort((x, y) => x - y).map(i => (
+                <span key={i} className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">{WD[i]}</span>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 mt-1 text-xs text-gray-400 flex-wrap">
+              {(a.startTime || a.endTime) && <span>{fmtTime(a.startTime)} ~ {fmtTime(a.endTime)}</span>}
+              <span>{wageTypeLabel(a.wageType)} {Number(a.wageAmount ?? a.dailyWage ?? 0).toLocaleString()}원</span>
+            </div>
+          </div>
+        ))}
+
+        <p className="text-[13px] font-bold text-gray-500 px-1 mt-3">근무내역</p>
+        {myHistory.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center">
+            <p className="text-sm text-gray-400">출근확인 기록이 없습니다</p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-gray-100 divide-y divide-gray-50">
+            {myHistory.map(h => (
+              <div key={h.id} className="flex items-center justify-between px-4 py-3">
+                <span className="text-sm text-gray-800">{siteName(h.siteId)}</span>
+                <span className="text-xs text-gray-400">{h.date}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <p className="text-[13px] font-bold text-gray-500 px-1 mt-3">내 급여</p>
+        {mySettlements.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center">
+            <p className="text-sm text-gray-400">아직 확정된 급여가 없습니다</p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-gray-100 divide-y divide-gray-50">
+            {mySettlements.map(s => (
+              <div key={s.id} className="flex items-center justify-between px-4 py-3">
+                <span className="text-sm text-gray-800">{s.yearMonth}</span>
+                <span className="text-sm font-bold text-gray-900">{Number(s.finalAmount || 0).toLocaleString()}원</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── 정기청소 월별 정산 (관리자용) ───────────────────────────────────────────────
+function MonthlySettlementScreen() {
+  const { users, assignments, setCurrentScreen } = useC();
+  const [ym, setYm] = useState(() => fmt(new Date()).slice(0, 7));
+  const shiftMonth = delta => {
+    const [y, m] = ym.split("-").map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    setYm(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  };
+  // 팀 구성과 무관하게, 배정이 하나라도 있는 직원만 정산 대상으로 노출
+  const employees = users.filter(u => assignments.some(a => a.employeeId === u.id));
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
+      <div className="bg-white border-b border-gray-100 px-5 pt-5 pb-4">
+        <div className="flex items-center gap-1 mb-2">
+          <button onClick={() => setCurrentScreen("reg_hub")} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+            <ChevronLeft size={24} className="text-gray-700"/>
+          </button>
+          <h2 className="text-xl font-bold text-gray-900">월별 정산</h2>
+        </div>
+        <div className="flex items-center justify-center gap-4">
+          <button onClick={() => shiftMonth(-1)} className="p-1.5 rounded-full hover:bg-gray-100"><ChevronLeft size={18}/></button>
+          <span className="text-sm font-bold text-gray-800">{ym}</span>
+          <button onClick={() => shiftMonth(1)} className="p-1.5 rounded-full hover:bg-gray-100"><ChevronRight size={18}/></button>
+        </div>
+      </div>
+      <div className="px-4 py-4 flex flex-col gap-3">
+        {employees.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
+            <p className="text-sm text-gray-400 font-semibold">배정된 직원이 없습니다</p>
+          </div>
+        ) : employees.map(emp => (
+          <SettlementCard key={`${emp.id}_${ym}`} employee={emp} ym={ym}/>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SettlementCard({ employee, ym }) {
+  const { assignments, attendance, extraPayments, monthlySettlements, setEmployeeAllowance, deleteExtraPayment, confirmSettlement, setExtraPaymentModal } = useC();
+  const monthAtt = attendance.filter(a => a.employeeId === employee.id && a.confirmed && a.date.startsWith(ym));
+  const workDays = new Set(monthAtt.map(a => a.date)).size;
+  // 일급 배정만 근무일수 기준으로 자동 합산 (레거시 데이터는 wageType 없이 dailyWage만 있어 "일급"으로 취급)
+  const isDaily = a => (a.wageType || "daily") === "daily";
+  const wageSum = monthAtt.reduce((sum, a) => {
+    const asg = assignments.find(x => x.employeeId === employee.id && x.siteId === a.siteId);
+    if (!asg || !isDaily(asg)) return sum;
+    return sum + Number(asg.wageAmount ?? asg.dailyWage ?? 0);
+  }, 0);
+  // 주급/월급 배정은 "며칠 일했는지"로 계산할 수 없어 자동합산하지 않고 참고용으로만 표시
+  const periodicAssignments = assignments.filter(a => a.employeeId === employee.id && !isDaily(a));
+  const myExtras = extraPayments.filter(p => p.employeeId === employee.id && (p.date || "").startsWith(ym));
+  const extraSum = myExtras.reduce((s, p) => s + Number(p.amount || 0), 0);
+  const [allowance, setAllowance] = useState(employee.dailyAllowance || 0);
+  const allowanceSum = allowance * workDays;
+  const refTotal = wageSum + allowanceSum + extraSum;
+  const settlement = monthlySettlements.find(s => s.employeeId === employee.id && s.yearMonth === ym);
+  const [finalAmount, setFinalAmount] = useState(settlement ? settlement.finalAmount : refTotal);
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 p-4 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-bold text-gray-900">{employee.name}</p>
+        {settlement && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-green-50 text-green-600">확정됨</span>}
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs text-gray-500">
+        <div>근무일수 <span className="font-bold text-gray-800">{workDays}일</span></div>
+        <div>일급합계 <span className="font-bold text-gray-800">{wageSum.toLocaleString()}원</span></div>
+      </div>
+      {periodicAssignments.length > 0 && (
+        <div className="rounded-xl bg-amber-50 border border-amber-100 p-2.5 text-[11px] text-amber-700 leading-relaxed">
+          ⚠️ 주급/월급 배정은 자동합산되지 않아요 — 참고 후 최종금액에 직접 반영하세요.
+          {periodicAssignments.map(a => (
+            <div key={a.id} className="font-bold mt-0.5">
+              {wageTypeLabel(a.wageType)} {Number(a.wageAmount || 0).toLocaleString()}원
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center gap-2 text-xs text-gray-500">
+        <span className="shrink-0">일 보조금</span>
+        <input type="number" inputMode="numeric" value={allowance}
+          onChange={e => setAllowance(Number(e.target.value) || 0)}
+          onBlur={() => setEmployeeAllowance(employee.id, allowance)}
+          className="w-20 px-2 py-1 rounded-lg border border-gray-200 text-right"/>
+        <span className="shrink-0">× {workDays}일 = {allowanceSum.toLocaleString()}원</span>
+      </div>
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-gray-500">추가지급 {extraSum.toLocaleString()}원</span>
+          <button onClick={() => setExtraPaymentModal({ open: true, employeeId: employee.id })} className="text-blue-600 font-bold">+ 추가</button>
+        </div>
+        {myExtras.map(p => (
+          <div key={p.id} className="flex items-center justify-between text-xs text-gray-400 pl-2">
+            <span>{p.date} · {p.reason || "사유없음"} · {Number(p.amount).toLocaleString()}원</span>
+            <button onClick={() => deleteExtraPayment(p.id)} className="text-gray-300 shrink-0 ml-2">✕</button>
+          </div>
+        ))}
+      </div>
+      <div className="h-px bg-gray-100"/>
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-gray-500">참고총액 (실시간 계산)</span>
+        <span className="text-sm font-bold text-gray-700">{refTotal.toLocaleString()}원</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <input type="number" inputMode="numeric" value={finalAmount}
+          onChange={e => setFinalAmount(Number(e.target.value) || 0)}
+          className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold"/>
+        <button onClick={() => confirmSettlement(employee.id, ym, finalAmount)}
+          className="px-4 py-2 rounded-xl text-xs font-bold text-white shrink-0"
+          style={{ background: "linear-gradient(135deg,#1a56db,#2563eb)" }}>
+          {settlement ? "재확정" : "확정"}
+        </button>
+      </div>
+      {settlement && <p className="text-[11px] text-gray-400">확정일: {settlement.confirmedAt ? fmt(new Date(settlement.confirmedAt)) : ""}</p>}
+    </div>
+  );
+}
+
+// ── 정기청소 추가지급 등록 모달 ───────────────────────────────────────────────
+function ExtraPaymentModal() {
+  const { extraPaymentModal, setExtraPaymentModal, addExtraPayment } = useC();
+  const [date, setDate] = useState(fmt(new Date()));
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+
+  useEffect(() => {
+    if (extraPaymentModal.open) { setDate(fmt(new Date())); setAmount(""); setReason(""); }
+  }, [extraPaymentModal.open]);
+
+  if (!extraPaymentModal.open) return null;
+  const close = () => setExtraPaymentModal({ open: false, employeeId: null });
+  const submit = () => {
+    if (!amount) return;
+    addExtraPayment({ employeeId: extraPaymentModal.employeeId, date, amount: Number(amount), reason: reason.trim() });
+    close();
+  };
+
+  return (
+    <div className="absolute inset-0 z-[80] flex flex-col justify-end">
+      <div className="absolute inset-0 bg-black/40" onClick={close} />
+      <div className="relative bg-white rounded-t-3xl p-5 shadow-2xl flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-gray-900">추가지급 등록</h2>
+          <button onClick={close} className="p-2 -mr-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100">
+            <X size={22}/>
+          </button>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">지급일</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)}
+            className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">금액</label>
+          <input type="number" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value)}
+            placeholder="예: 50000"
+            className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">사유</label>
+          <input value={reason} onChange={e => setReason(e.target.value)}
+            placeholder="예: 명절 보너스"
+            className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+        </div>
+        <button onClick={submit} disabled={!amount}
+          className="w-full py-3.5 rounded-xl text-sm text-white font-bold transition-colors"
+          style={{ background: amount ? "linear-gradient(135deg,#1a56db,#2563eb)" : "#e5e7eb" }}>
+          저장
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── 정기청소 현장 등록/수정 모달 ───────────────────────────────────────────────
+function SiteFormModal() {
+  const { siteModal, setSiteModal, sites, addSite, updateSite } = useC();
+  const [name, setName]       = useState("");
+  const [address, setAddress] = useState("");
+
+  useEffect(() => {
+    if (siteModal.open) {
+      const editing = siteModal.editId ? sites.find(s => s.id === siteModal.editId) : null;
+      setName(editing?.name || "");
+      setAddress(editing?.address || "");
+    }
+  }, [siteModal.open, siteModal.editId]);
+
+  if (!siteModal.open) return null;
+  const close = () => setSiteModal({ open: false, editId: null });
+
+  const submit = () => {
+    if (!name.trim()) return;
+    if (siteModal.editId) {
+      updateSite({ id: siteModal.editId, name: name.trim(), address: address.trim() });
+    } else {
+      addSite({ name: name.trim(), address: address.trim() });
+    }
+    close();
+  };
+
+  return (
+    <div className="absolute inset-0 z-[70] flex flex-col justify-end">
+      <div className="absolute inset-0 bg-black/40" onClick={close} />
+      <div className="relative bg-white rounded-t-3xl p-5 shadow-2xl flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-gray-900">{siteModal.editId ? "현장 수정" : "새 현장 등록"}</h2>
+          <button onClick={close} className="p-2 -mr-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100">
+            <X size={22}/>
+          </button>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">현장명</label>
+          <input autoFocus value={name} onChange={e => setName(e.target.value)}
+            placeholder="예: 상암동 오피스"
+            className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">주소</label>
+          <input value={address} onChange={e => setAddress(e.target.value)}
+            placeholder="예: 서울 마포구 상암동 115"
+            className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+        </div>
+        <button onClick={submit} disabled={!name.trim()}
+          className="w-full py-3.5 rounded-xl text-sm text-white font-bold transition-colors"
+          style={{ background: name.trim() ? "linear-gradient(135deg,#1a56db,#2563eb)" : "#e5e7eb" }}>
+          저장
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── 정기청소 배정 관리 화면 ───────────────────────────────────────────────
+// ── 정기청소 배정 등록/수정 모달 (현장 상세에서 진입 — 현장은 보통 고정) ───────────────────────────────────────────────
+function AssignmentFormModal() {
+  const { assignmentModal, setAssignmentModal, assignments, sites, users, addAssignment, updateAssignment } = useC();
+  const [employeeId, setEmployeeId] = useState("");
+  const [siteId, setSiteId]         = useState("");
+  const [days, setDays]             = useState([]);
+  const [startTime, setStartTime]   = useState("");
+  const [endTime, setEndTime]       = useState("");
+  const [wageType, setWageType]     = useState("daily");
+  const [wageAmount, setWageAmount] = useState("");
+
+  useEffect(() => {
+    if (assignmentModal.open) {
+      const editing = assignmentModal.editId ? assignments.find(a => a.id === assignmentModal.editId) : null;
+      setEmployeeId(editing?.employeeId || "");
+      setSiteId(editing?.siteId || assignmentModal.presetSiteId || "");
+      setDays(editing?.days || []);
+      setStartTime(editing?.startTime || "");
+      setEndTime(editing?.endTime || "");
+      setWageType(editing?.wageType || "daily");
+      setWageAmount(editing ? String(editing.wageAmount ?? editing.dailyWage ?? "") : "");
+    }
+  }, [assignmentModal.open, assignmentModal.editId, assignmentModal.presetSiteId]);
+
+  if (!assignmentModal.open) return null;
+  const close = () => setAssignmentModal({ open: false, editId: null, presetSiteId: null });
+  const valid = employeeId && siteId && days.length > 0;
+  const siteLocked = !!assignmentModal.presetSiteId;
+  const lockedSite = siteLocked ? sites.find(s => s.id === assignmentModal.presetSiteId) : null;
+
+  const submit = () => {
+    if (!valid) return;
+    // 같은 현장에 같은 직원을 중복 배정하면 배정 목록에서 헷갈리므로, 신규 등록 시에만 막는다
+    if (!assignmentModal.editId) {
+      const dup = assignments.some(a => a.employeeId === employeeId && a.siteId === siteId);
+      if (dup) { alert("이미 이 현장에 배정된 직원입니다. 기존 배정을 수정해주세요."); return; }
+    }
+    const data = {
+      employeeId, siteId, days: [...days].sort((a, b) => a - b),
+      startTime, endTime,
+      wageType, wageAmount: Number(wageAmount) || 0,
+    };
+    if (assignmentModal.editId) {
+      updateAssignment({ ...data, id: assignmentModal.editId });
+    } else {
+      addAssignment(data);
+    }
+    close();
+  };
+
+  const toggleDay = i => setDays(cur => cur.includes(i) ? cur.filter(x => x !== i) : [...cur, i]);
+
+  return (
+    <div className="absolute inset-0 z-[70] flex flex-col justify-end">
+      <div className="absolute inset-0 bg-black/40" onClick={close} />
+      <div className="relative bg-white rounded-t-3xl p-5 shadow-2xl flex flex-col gap-4 max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-gray-400">{assignmentModal.editId ? "배정 수정" : "새 배정 등록"}</p>
+            {siteLocked && <h2 className="text-xl font-bold text-gray-900 mt-0.5 truncate">{lockedSite?.name || "-"}</h2>}
+          </div>
+          <button onClick={close} className="p-2 -mr-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 shrink-0">
+            <X size={22}/>
+          </button>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">직원</label>
+          <select value={employeeId} onChange={e => setEmployeeId(e.target.value)}
+            className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500">
+            <option value="">직원 선택</option>
+            {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.team})</option>)}
+          </select>
+        </div>
+        {!siteLocked && (
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">현장</label>
+            <select value={siteId} onChange={e => setSiteId(e.target.value)}
+              className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500">
+              <option value="">현장 선택</option>
+              {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+        )}
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">근무 요일</label>
+          <div className="flex gap-1.5">
+            {WD.map((w,i) => {
+              const sel = days.includes(i);
+              return (
+                <button key={i} onClick={() => toggleDay(i)}
+                  className={`w-9 h-9 rounded-full text-xs font-bold shrink-0 ${sel?"bg-blue-500 text-white":"bg-gray-50 text-gray-500 border border-gray-200"}`}>
+                  {w}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className="block text-xs font-semibold text-gray-500 mb-1">시작 시간</label>
+            <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
+              className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+          </div>
+          <div className="flex-1">
+            <label className="block text-xs font-semibold text-gray-500 mb-1">종료 시간</label>
+            <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)}
+              className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">급여 유형</label>
+          <div className="flex gap-1.5 mb-2">
+            {WAGE_TYPES.map(w => (
+              <button key={w.value} onClick={() => setWageType(w.value)}
+                className={`flex-1 py-2 rounded-xl text-xs font-bold ${wageType===w.value?"bg-blue-500 text-white":"bg-gray-50 text-gray-500 border border-gray-200"}`}>
+                {w.label}
+              </button>
+            ))}
+          </div>
+          <input type="number" inputMode="numeric" value={wageAmount} onChange={e => setWageAmount(e.target.value)}
+            placeholder={`예: ${wageType === "monthly" ? "800000" : wageType === "weekly" ? "300000" : "80000"}`}
+            className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+        </div>
+        <button onClick={submit} disabled={!valid}
+          className="w-full py-3.5 rounded-xl text-sm text-white font-bold transition-colors"
+          style={{ background: valid ? "linear-gradient(135deg,#1a56db,#2563eb)" : "#e5e7eb" }}>
+          저장
+        </button>
       </div>
     </div>
   );
