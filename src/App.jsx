@@ -141,7 +141,7 @@ const fmtPhone = s => {
 function expandRecurring(events) {
   const HARD_CAP = 400; // 안전장치 (무한 루프 방지)
   const now = new Date();
-  const defaultUntil = fmt(new Date(now.getFullYear(), now.getMonth() + 6, now.getDate()));
+  const defaultUntil = fmt(new Date(now.getFullYear() + 1, now.getMonth(), now.getDate()));
   const out = [];
   for (const ev of events) {
     if (!ev.repeat || ev.repeat === "none") { out.push(ev); continue; }
@@ -207,6 +207,73 @@ function expandRecurring(events) {
     }
   }
   return out;
+}
+
+// ── 정기청소 배정 반복 규칙 ────────────────────────────────────────
+// 배정도 일정과 똑같은 반복 규칙(repeat/repeatWeekdays/repeatMonthlyType 등)을 쓴다.
+// 레거시 배정(옛 스키마: days=요일 배열만 있고 repeat 필드가 없음)은 "매주 그 요일들"로 취급해 하위호환한다.
+const assignmentRepeatRule = a => {
+  if (a.repeat) return a;
+  if (a.days?.length) return { ...a, repeat: "weekly", repeatWeekdays: a.days, start: a.start || "2020-01-01" };
+  return a;
+};
+// 이 배정이 특정 날짜(YYYY-MM-DD)에 해당하는지 — expandRecurring을 그대로 재사용해 일정 반복 로직과 100% 동일하게 판단
+function assignmentOccursOn(assignment, dateStr) {
+  const a = assignmentRepeatRule(assignment);
+  if (!a.start || !a.repeat || dateStr < a.start) return false;
+  const synthetic = {
+    id: a.id, start: a.start, end: a.start,
+    repeat: a.repeat, repeatInterval: a.repeatInterval,
+    repeatWeekdays: a.repeatWeekdays,
+    repeatMonthlyType: a.repeatMonthlyType, repeatMonthlyDay: a.repeatMonthlyDay,
+    repeatMonthlyOrdinal: a.repeatMonthlyOrdinal, repeatMonthlyWeekday: a.repeatMonthlyWeekday,
+    repeatYearlyType: a.repeatYearlyType, repeatYearlyMonth: a.repeatYearlyMonth,
+    repeatYearlyDay: a.repeatYearlyDay, repeatYearlyOrdinal: a.repeatYearlyOrdinal, repeatYearlyWeekday: a.repeatYearlyWeekday,
+    repeatUntil: a.repeatUntil || "",
+  };
+  return expandRecurring([synthetic]).some(inst => inst.start === dateStr);
+}
+// 배정의 반복 규칙을 사람이 읽는 문구로 ("매주 월,수" / "매월 둘째 토요일" 등)
+function describeRepeat(assignment) {
+  const a = assignmentRepeatRule(assignment);
+  const interval = a.repeatInterval || 1;
+  switch (a.repeat) {
+    case "daily":
+      return interval > 1 ? `${interval}일마다` : "매일";
+    case "weekly": {
+      const days = (a.repeatWeekdays || []).slice().sort((x,y)=>x-y).map(i=>WD[i]).join(",");
+      return interval > 1 ? `${interval}주마다 ${days}` : `매주 ${days}`;
+    }
+    case "monthly": {
+      if (a.repeatMonthlyType === "weekday") {
+        const ord = REPEAT_ORD_OPTS.find(o=>o.v===a.repeatMonthlyOrdinal)?.l || "";
+        return `매월 ${ord} ${WD[a.repeatMonthlyWeekday]}요일`;
+      }
+      return `매월 ${a.repeatMonthlyDay}일`;
+    }
+    case "yearly": {
+      if (a.repeatYearlyType === "weekday") {
+        const ord = REPEAT_ORD_OPTS.find(o=>o.v===a.repeatYearlyOrdinal)?.l || "";
+        return `매년 ${ord} ${WD[a.repeatYearlyWeekday]}요일`;
+      }
+      return `매년 ${a.repeatYearlyMonth}월 ${a.repeatYearlyDay}일`;
+    }
+    default:
+      return "반복 미설정";
+  }
+}
+// 배정의 반복 규칙 필드만 뽑아 문자열로 비교 — 규칙이 실제로 바뀌었는지 판단할 때 사용
+const REPEAT_FIELDS = ["repeat","repeatInterval","repeatWeekdays","repeatMonthlyType","repeatMonthlyDay","repeatMonthlyOrdinal","repeatMonthlyWeekday","repeatYearlyType","repeatYearlyMonth","repeatYearlyDay","repeatYearlyOrdinal","repeatYearlyWeekday"];
+const pickRepeatFields = a => JSON.stringify(REPEAT_FIELDS.map(k => a[k] ?? null));
+// 배정 폼 저장 전 유효성 — 반복 유형별로 필수값이 채워졌는지
+function repeatRuleValid(form) {
+  switch (form.repeat) {
+    case "weekly":  return (form.repeatWeekdays||[]).length > 0;
+    case "monthly": return form.repeatMonthlyType === "weekday" ? (form.repeatMonthlyOrdinal && form.repeatMonthlyWeekday != null) : !!form.repeatMonthlyDay;
+    case "yearly":  return form.repeatYearlyType === "weekday" ? (form.repeatYearlyOrdinal && form.repeatYearlyWeekday != null) : (!!form.repeatYearlyMonth && !!form.repeatYearlyDay);
+    case "daily":   return true;
+    default:        return false;
+  }
 }
 
 // 시간 포맷: "09:00" → "오전 9:00"
@@ -686,34 +753,23 @@ function Provider({ children, loginUser, onLogout }) {
     if (target) addLog("삭제", `'${target.name}' 현장을 삭제했습니다.`);
   }, [companyRef, sites, addLog]);
 
-  // ── 정기청소 배정 → 현장 캘린더 동기화 ──
-  // 한 현장에 걸린 모든 배정의 요일을 합집합으로 모아 그 현장 하나당 반복일정 한 개로 유지.
-  // 요일 구성이 바뀌면 과거 일정은 그대로 두고 오늘부터 새 시리즈로 분리한다(기존 반복일정 수정 시
+  // ── 정기청소 배정 → 캘린더 동기화 (배정 1건 = 캘린더 반복일정 1건) ──
+  // 배정마다 반복 규칙이 다를 수 있어(요일별/매월 몇째주 등) 예전처럼 현장 하나에 합치지 않고 배정 단위로 관리.
+  // 반복 규칙이나 현장이 바뀌면 과거 일정은 그대로 두고 오늘부터 새 시리즈로 분리한다(기존 반복일정 수정 시
   // "이후 전체만 수정"하는 방식과 동일한 원리 — updateEventScoped의 following 분기 참고).
-  // 호출 시점의 state는 Firestore 쓰기 직후라 아직 최신이 아닐 수 있어, 최신 배정/현장 목록을 인자로 직접 받는다.
-  const syncSiteCalendar = useCallback(async (siteId, assignmentsList, sitesList) => {
-    const site = sitesList.find(s => s.id === siteId);
+  const syncAssignmentCalendar = useCallback(async (assignment, prevAssignment, sitesList) => {
+    const site = sitesList.find(s => s.id === assignment.siteId);
     if (!site) return;
-    const weekdays = [...new Set(
-      assignmentsList
-        .filter(a => a.siteId === siteId)
-        .flatMap(a => (a.days || []))
-    )].sort((a,b) => a-b);
-
-    const prevWeekdays = site.calWeekdays || [];
-    const sameSet = weekdays.length === prevWeekdays.length && weekdays.every(w => prevWeekdays.includes(w));
-    if (sameSet) return;
+    const sameRule = prevAssignment
+      && prevAssignment.siteId === assignment.siteId
+      && pickRepeatFields(prevAssignment) === pickRepeatFields(assignment);
+    if (sameRule) return;
 
     const todayStr = fmt(new Date());
     const yesterday = add(todayStr, -1);
 
-    if (site.eventId) {
-      await setDoc(doc(companyRef, "events", site.eventId), { repeatUntil: yesterday }, { merge: true });
-    }
-
-    if (weekdays.length === 0) {
-      await setDoc(doc(companyRef, "sites", siteId), { eventId: null, calWeekdays: [] }, { merge: true });
-      return;
+    if (prevAssignment?.eventId) {
+      await setDoc(doc(companyRef, "events", prevAssignment.eventId), { repeatUntil: yesterday }, { merge: true });
     }
 
     // "정기청소" 담당팀 캘린더는 팀 관리와 무관하게 이 기능 전용으로 고정 id로 자동 생성/재사용.
@@ -727,27 +783,37 @@ function Provider({ children, loginUser, onLogout }) {
     const newRef = doc(collection(companyRef, "events"));
     await setDoc(newRef, {
       title: `${site.name} 정기청소`,
-      start: todayStr, end: todayStr,
-      allDay: true,
-      repeat: "weekly", repeatWeekdays: weekdays, repeatInterval: 1, repeatUntil: "",
+      start: todayStr, end: todayStr, allDay: true,
+      repeat: assignment.repeat, repeatInterval: assignment.repeatInterval || 1,
+      repeatWeekdays: assignment.repeatWeekdays || [],
+      repeatMonthlyType: assignment.repeatMonthlyType || null,
+      repeatMonthlyDay: assignment.repeatMonthlyDay || null,
+      repeatMonthlyOrdinal: assignment.repeatMonthlyOrdinal || null,
+      repeatMonthlyWeekday: assignment.repeatMonthlyWeekday ?? null,
+      repeatYearlyType: assignment.repeatYearlyType || null,
+      repeatYearlyMonth: assignment.repeatYearlyMonth || null,
+      repeatYearlyDay: assignment.repeatYearlyDay || null,
+      repeatYearlyOrdinal: assignment.repeatYearlyOrdinal || null,
+      repeatYearlyWeekday: assignment.repeatYearlyWeekday ?? null,
+      repeatUntil: assignment.repeatUntil || "",
       calId: regularCal.id,
       place: site.address || "",
       description: "",
-      source: "regular", siteId,
+      source: "regular", siteId: assignment.siteId, assignmentId: assignment.id,
     });
-    await setDoc(doc(companyRef, "sites", siteId), { eventId: newRef.id, calWeekdays: weekdays }, { merge: true });
+    await setDoc(doc(companyRef, "assignments", assignment.id), { eventId: newRef.id, start: todayStr }, { merge: true });
   }, [companyRef, cals]);
 
   // ── 정기청소 배정 CRUD (Firestore 영속) ──
   const addAssignment = useCallback(async a => {
     const ref = doc(collection(companyRef, "assignments"));
-    const newAssignment = { ...a, id: ref.id };
+    const newAssignment = { ...a, id: ref.id, start: fmt(new Date()) };
     await setDoc(ref, newAssignment);
     const emp = users.find(u => u.id === a.employeeId);
     const site = sites.find(s => s.id === a.siteId);
     addLog("등록", `${emp?.name || "직원"} - ${site?.name || "현장"} 배정을 등록했습니다.`);
-    await syncSiteCalendar(a.siteId, [...assignments, newAssignment], sites);
-  }, [companyRef, assignments, sites, users, addLog, syncSiteCalendar]);
+    await syncAssignmentCalendar(newAssignment, null, sites);
+  }, [companyRef, sites, users, addLog, syncAssignmentCalendar]);
 
   const updateAssignment = useCallback(async a => {
     const prev = assignments.find(x => x.id === a.id);
@@ -755,10 +821,8 @@ function Provider({ children, loginUser, onLogout }) {
     const emp = users.find(u => u.id === a.employeeId);
     const site = sites.find(s => s.id === a.siteId);
     addLog("수정", `${emp?.name || "직원"} - ${site?.name || "현장"} 배정을 수정했습니다.`);
-    const nextAssignments = assignments.map(x => x.id === a.id ? a : x);
-    await syncSiteCalendar(a.siteId, nextAssignments, sites);
-    if (prev && prev.siteId !== a.siteId) await syncSiteCalendar(prev.siteId, nextAssignments, sites);
-  }, [companyRef, assignments, sites, users, addLog, syncSiteCalendar]);
+    await syncAssignmentCalendar(a, prev, sites);
+  }, [companyRef, assignments, sites, users, addLog, syncAssignmentCalendar]);
 
   const deleteAssignment = useCallback(async id => {
     const target = assignments.find(x => x.id === id);
@@ -767,10 +831,11 @@ function Provider({ children, loginUser, onLogout }) {
       const emp = users.find(u => u.id === target.employeeId);
       const site = sites.find(s => s.id === target.siteId);
       addLog("삭제", `${emp?.name || "직원"} - ${site?.name || "현장"} 배정을 삭제했습니다.`);
-      const nextAssignments = assignments.filter(x => x.id !== id);
-      await syncSiteCalendar(target.siteId, nextAssignments, sites);
+      if (target.eventId) {
+        await setDoc(doc(companyRef, "events", target.eventId), { repeatUntil: add(fmt(new Date()), -1) }, { merge: true });
+      }
     }
-  }, [companyRef, assignments, sites, users, addLog, syncSiteCalendar]);
+  }, [companyRef, assignments, sites, users, addLog]);
 
   // ── 정기청소 출근확인 (Firestore 영속) ──
   // date+employeeId+siteId 조합을 문서 id로 고정해 항상 upsert(있으면 갱신, 없으면 생성).
@@ -2148,7 +2213,7 @@ function RegularCleaningDetailBody({ detEv, cal }) {
   const { sites, assignments, users, attendance, setAttendanceCheck, currentUser } = useC();
   const site = sites.find(s => s.id === detEv.siteId);
   const weekday = pd(detEv.start).getDay();
-  const todaysAssignments = assignments.filter(a => a.siteId === detEv.siteId && (a.days || []).includes(weekday));
+  const todaysAssignments = assignments.filter(a => a.siteId === detEv.siteId && assignmentOccursOn(a, detEv.start));
   const isAdmin = currentUser.role === "최고관리자";
 
   return (
@@ -2781,7 +2846,7 @@ function WheelPicker({ items, value, onChange, renderItem, loop=false }) {
             <div key={i} style={{ height: ITEM_H, scrollSnapAlign: "center",
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: sel ? 17 : 15, fontWeight: sel ? 700 : 400,
-              color: sel ? "#111827" : "#9ca3af" }}>
+              color: sel ? "#111827" : "#9ca3af", whiteSpace: "nowrap" }}>
               {display(item)}
             </div>
           );
@@ -2981,7 +3046,7 @@ function DateTimePicker({ form, set, errs, lockRepeat }) {
             <WheelPicker key={`y`}  items={years}  value={pYear}  onChange={chYear}  renderItem={v=>String(v)}/>
             <WheelPicker key={`mo`} items={months} value={pMonth} onChange={chMonth} renderItem={v=>`${v}월`} loop/>
             <WheelPicker key={`${pYear}-${pMonth}-d`} items={days} value={pDay} onChange={chDay}
-              renderItem={v=>`${v}일 ${WD[new Date(pYear,pMonth-1,v).getDay()]}`} loop/>
+              renderItem={v=>`${v}일`} loop/>
             {!form.allDay && <>
               <WheelPicker key={`h24`} items={hours24} value={pH24} onChange={chH24} renderItem={fmtH24} loop/>
               <WheelPicker key={`m`}   items={mins}    value={pMin} onChange={chMin} renderItem={v=>String(v).padStart(2,"0")} loop/>
@@ -3031,7 +3096,8 @@ function RepeatToggleButton({ form, open, setOpen }) {
 }
 
 // ── 반복 설정 패널 — 없음/매일/매주/매월/매년 + 세부 옵션 ────────────
-function RepeatPanel({ form, set }) {
+// excludeNone: true면 "반복 없음" 버튼을 숨김(정기청소 배정처럼 항상 반복이 있어야 하는 곳에서 사용)
+function RepeatPanel({ form, set, excludeNone=false }) {
   const stepper = (value, onChange, min=1, max=99) => (
     <div className="flex items-center gap-1.5 bg-white rounded-full px-1 border border-gray-200 shrink-0">
       <button onClick={()=>onChange(Math.max(min, (value||1)-1))} className="w-7 h-7 rounded-full text-gray-600 font-bold">−</button>
@@ -3063,7 +3129,7 @@ function RepeatPanel({ form, set }) {
   return (
     <div className="px-4 pb-4">
       <div className="flex flex-wrap gap-2 mb-3">
-        {REPEAT_OPTS.map(opt=>(
+        {REPEAT_OPTS.filter(opt=>!excludeNone || opt.value!=="none").map(opt=>(
           <button key={opt.value} onClick={()=>selectType(opt.value)}
             className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition
               ${form.repeat===opt.value?"bg-blue-500 border-blue-400 text-white":"bg-white border-gray-200 text-gray-600"}`}>
@@ -3174,8 +3240,9 @@ function RepeatUntilPicker({ form, set }) {
   const [open, setOpen] = useState(false);
   const WD = ["일","월","화","수","목","금","토"];
 
+  const oneYearFromNow = () => { const n = new Date(); return new Date(n.getFullYear()+1, n.getMonth(), n.getDate()); };
   const parseRepeat = () => {
-    const d = form.repeatUntil ? pd(form.repeatUntil) : new Date();
+    const d = form.repeatUntil ? pd(form.repeatUntil) : oneYearFromNow();
     return { year: d.getFullYear(), month: d.getMonth()+1, day: d.getDate() };
   };
   const init = parseRepeat();
@@ -3198,14 +3265,16 @@ function RepeatUntilPicker({ form, set }) {
   const days   = Array.from({length:daysInMonth},(_,i)=>i+1);
 
   const dispDate = s => {
-    if (!s) return <span className="text-gray-400 font-normal">날짜 선택 (비우면 6개월)</span>;
-    const d = pd(s); if (!d) return "--";
-    return `${String(d.getFullYear()).slice(2)}. ${d.getMonth()+1}. ${d.getDate()}.(${WD[d.getDay()]})`;
+    const d = s ? pd(s) : oneYearFromNow();
+    if (!d) return "--";
+    const text = `${String(d.getFullYear()).slice(2)}. ${d.getMonth()+1}. ${d.getDate()}.(${WD[d.getDay()]})`;
+    return s ? text : `${text} · 기본값`;
   };
 
   return (
     <>
-      <button onClick={()=>setOpen(o=>!o)} className="text-sm text-blue-600 font-semibold py-1">
+      <button onClick={()=>setOpen(o=>!o)}
+        className="text-sm font-semibold py-1.5 px-3 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors">
         {dispDate(form.repeatUntil)}
       </button>
       {open && (
@@ -3214,7 +3283,7 @@ function RepeatUntilPicker({ form, set }) {
             <WheelPicker key="ry" items={years}  value={pYear}  onChange={chYear}  renderItem={v=>String(v)}/>
             <WheelPicker key="rm" items={months} value={pMonth} onChange={chMonth} renderItem={v=>`${v}월`}/>
             <WheelPicker key={`${pYear}-${pMonth}-rd`} items={days} value={pDay} onChange={chDay}
-              renderItem={v=>`${v}일 ${WD[new Date(pYear,pMonth-1,v).getDay()]}`}/>
+              renderItem={v=>`${v}일`}/>
           </div>
         </div>
       )}
@@ -6367,7 +6436,11 @@ function SiteDetailScreen() {
             <button onClick={() => setCurrentScreen("reg_sites")} className="p-2 -ml-2 rounded-full hover:bg-gray-100 shrink-0">
               <ChevronLeft size={24} className="text-gray-700"/>
             </button>
-            <h2 className="text-xl font-bold text-gray-900 truncate">{site.name}</h2>
+            <p className="text-sm font-bold truncate">
+              <span className="text-gray-400">현장 관리</span>
+              <span className="text-gray-300 mx-1">›</span>
+              <span className="text-gray-900">{site.name}</span>
+            </p>
           </div>
           {isAdmin && (
             <div className="flex items-center gap-1 shrink-0">
@@ -6399,11 +6472,7 @@ function SiteDetailScreen() {
           <div key={a.id} className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3">
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold text-gray-900 truncate">{empName(a.employeeId)}</p>
-              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                {(a.days || []).sort((x, y) => x - y).map(i => (
-                  <span key={i} className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">{WD[i]}</span>
-                ))}
-              </div>
+              <p className="text-xs font-bold text-blue-600 mt-1.5">{describeRepeat(a)}</p>
               <div className="flex items-center gap-2 mt-1 text-xs text-gray-400 flex-wrap">
                 {(a.startTime || a.endTime) && <span>{fmtTime(a.startTime)} ~ {fmtTime(a.endTime)}</span>}
                 <span>{wageTypeLabel(a.wageType)} {Number(a.wageAmount ?? a.dailyWage ?? 0).toLocaleString()}원</span>
@@ -6432,7 +6501,7 @@ function TodayStatusScreen() {
   const { assignments, sites, users, attendance, setAttendanceCheck, setCurrentScreen } = useC();
   const todayStr = fmt(new Date());
   const weekday = new Date().getDay();
-  const todays = assignments.filter(a => (a.days || []).includes(weekday));
+  const todays = assignments.filter(a => assignmentOccursOn(a, todayStr));
   const bySite = sites
     .map(site => ({ site, rows: todays.filter(a => a.siteId === site.id) }))
     .filter(g => g.rows.length > 0);
@@ -6496,7 +6565,7 @@ function MyRegularCleaningScreen() {
   const todayStr = fmt(new Date());
   const weekday = new Date().getDay();
   const myAssignments = assignments.filter(a => a.employeeId === currentUser.id);
-  const todaysMine = myAssignments.filter(a => (a.days || []).includes(weekday));
+  const todaysMine = myAssignments.filter(a => assignmentOccursOn(a, todayStr));
   const myHistory = attendance
     .filter(a => a.employeeId === currentUser.id && a.confirmed)
     .sort((a, b) => b.date.localeCompare(a.date))
@@ -6544,11 +6613,7 @@ function MyRegularCleaningScreen() {
         ) : myAssignments.map(a => (
           <div key={a.id} className="bg-white rounded-2xl border border-gray-100 p-4">
             <p className="text-sm font-bold text-gray-900">{siteName(a.siteId)}</p>
-            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-              {(a.days || []).sort((x, y) => x - y).map(i => (
-                <span key={i} className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">{WD[i]}</span>
-              ))}
-            </div>
+            <p className="text-xs font-bold text-blue-600 mt-1.5">{describeRepeat(a)}</p>
             <div className="flex items-center gap-2 mt-1 text-xs text-gray-400 flex-wrap">
               {(a.startTime || a.endTime) && <span>{fmtTime(a.startTime)} ~ {fmtTime(a.endTime)}</span>}
               <span>{wageTypeLabel(a.wageType)} {Number(a.wageAmount ?? a.dailyWage ?? 0).toLocaleString()}원</span>
@@ -6832,30 +6897,34 @@ function SiteFormModal() {
 // ── 정기청소 배정 등록/수정 모달 (현장 상세에서 진입 — 현장은 보통 고정) ───────────────────────────────────────────────
 function AssignmentFormModal() {
   const { assignmentModal, setAssignmentModal, assignments, sites, users, addAssignment, updateAssignment } = useC();
-  const [employeeId, setEmployeeId] = useState("");
-  const [siteId, setSiteId]         = useState("");
-  const [days, setDays]             = useState([]);
-  const [startTime, setStartTime]   = useState("");
-  const [endTime, setEndTime]       = useState("");
-  const [wageType, setWageType]     = useState("daily");
-  const [wageAmount, setWageAmount] = useState("");
+  const blankForm = () => ({
+    employeeId: "", siteId: "",
+    start: fmt(new Date()),
+    repeat: "weekly", repeatInterval: 1, repeatWeekdays: [],
+    repeatMonthlyType: "day", repeatMonthlyDay: null, repeatMonthlyOrdinal: null, repeatMonthlyWeekday: null,
+    repeatYearlyType: "date", repeatYearlyMonth: null, repeatYearlyDay: null, repeatYearlyOrdinal: null, repeatYearlyWeekday: null,
+    repeatUntil: "",
+    startTime: "", endTime: "",
+    wageType: "daily", wageAmount: "",
+  });
+  const [form, setForm] = useState(blankForm());
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   useEffect(() => {
-    if (assignmentModal.open) {
-      const editing = assignmentModal.editId ? assignments.find(a => a.id === assignmentModal.editId) : null;
-      setEmployeeId(editing?.employeeId || "");
-      setSiteId(editing?.siteId || assignmentModal.presetSiteId || "");
-      setDays(editing?.days || []);
-      setStartTime(editing?.startTime || "");
-      setEndTime(editing?.endTime || "");
-      setWageType(editing?.wageType || "daily");
-      setWageAmount(editing ? String(editing.wageAmount ?? editing.dailyWage ?? "") : "");
+    if (!assignmentModal.open) return;
+    const editing = assignmentModal.editId ? assignments.find(a => a.id === assignmentModal.editId) : null;
+    if (editing) {
+      // 레거시 배정(옛 요일배열 스키마)도 반복 규칙으로 정규화해서 폼에 채운다
+      const normalized = assignmentRepeatRule(editing);
+      setForm({ ...blankForm(), ...normalized, wageAmount: String(normalized.wageAmount ?? normalized.dailyWage ?? "") });
+    } else {
+      setForm({ ...blankForm(), siteId: assignmentModal.presetSiteId || "" });
     }
   }, [assignmentModal.open, assignmentModal.editId, assignmentModal.presetSiteId]);
 
   if (!assignmentModal.open) return null;
   const close = () => setAssignmentModal({ open: false, editId: null, presetSiteId: null });
-  const valid = employeeId && siteId && days.length > 0;
+  const valid = form.employeeId && form.siteId && repeatRuleValid(form);
   const siteLocked = !!assignmentModal.presetSiteId;
   const lockedSite = siteLocked ? sites.find(s => s.id === assignmentModal.presetSiteId) : null;
 
@@ -6863,13 +6932,20 @@ function AssignmentFormModal() {
     if (!valid) return;
     // 같은 현장에 같은 직원을 중복 배정하면 배정 목록에서 헷갈리므로, 신규 등록 시에만 막는다
     if (!assignmentModal.editId) {
-      const dup = assignments.some(a => a.employeeId === employeeId && a.siteId === siteId);
+      const dup = assignments.some(a => a.employeeId === form.employeeId && a.siteId === form.siteId);
       if (dup) { alert("이미 이 현장에 배정된 직원입니다. 기존 배정을 수정해주세요."); return; }
     }
     const data = {
-      employeeId, siteId, days: [...days].sort((a, b) => a - b),
-      startTime, endTime,
-      wageType, wageAmount: Number(wageAmount) || 0,
+      employeeId: form.employeeId, siteId: form.siteId,
+      repeat: form.repeat, repeatInterval: form.repeatInterval || 1,
+      repeatWeekdays: form.repeatWeekdays || [],
+      repeatMonthlyType: form.repeatMonthlyType, repeatMonthlyDay: form.repeatMonthlyDay,
+      repeatMonthlyOrdinal: form.repeatMonthlyOrdinal, repeatMonthlyWeekday: form.repeatMonthlyWeekday,
+      repeatYearlyType: form.repeatYearlyType, repeatYearlyMonth: form.repeatYearlyMonth,
+      repeatYearlyDay: form.repeatYearlyDay, repeatYearlyOrdinal: form.repeatYearlyOrdinal, repeatYearlyWeekday: form.repeatYearlyWeekday,
+      repeatUntil: form.repeatUntil,
+      startTime: form.startTime, endTime: form.endTime,
+      wageType: form.wageType, wageAmount: Number(form.wageAmount) || 0,
     };
     if (assignmentModal.editId) {
       updateAssignment({ ...data, id: assignmentModal.editId });
@@ -6879,13 +6955,11 @@ function AssignmentFormModal() {
     close();
   };
 
-  const toggleDay = i => setDays(cur => cur.includes(i) ? cur.filter(x => x !== i) : [...cur, i]);
-
   return (
     <div className="absolute inset-0 z-[70] flex flex-col justify-end">
       <div className="absolute inset-0 bg-black/40" onClick={close} />
-      <div className="relative bg-white rounded-t-3xl p-5 shadow-2xl flex flex-col gap-4 max-h-[85vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
+      <div className="relative bg-white rounded-t-3xl shadow-2xl flex flex-col max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-5 pb-0">
           <div className="min-w-0">
             <p className="text-xs font-semibold text-gray-400">{assignmentModal.editId ? "배정 수정" : "새 배정 등록"}</p>
             {siteLocked && <h2 className="text-xl font-bold text-gray-900 mt-0.5 truncate">{lockedSite?.name || "-"}</h2>}
@@ -6894,69 +6968,63 @@ function AssignmentFormModal() {
             <X size={22}/>
           </button>
         </div>
-        <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1">직원</label>
-          <select value={employeeId} onChange={e => setEmployeeId(e.target.value)}
-            className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500">
-            <option value="">직원 선택</option>
-            {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.team})</option>)}
-          </select>
-        </div>
-        {!siteLocked && (
+        <div className="p-5 pt-4 flex flex-col gap-4">
           <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1">현장</label>
-            <select value={siteId} onChange={e => setSiteId(e.target.value)}
+            <label className="block text-xs font-semibold text-gray-500 mb-1">직원</label>
+            <select value={form.employeeId} onChange={e => set("employeeId", e.target.value)}
               className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500">
-              <option value="">현장 선택</option>
-              {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              <option value="">직원 선택</option>
+              {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.team})</option>)}
             </select>
           </div>
-        )}
-        <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1">근무 요일</label>
-          <div className="flex gap-1.5">
-            {WD.map((w,i) => {
-              const sel = days.includes(i);
-              return (
-                <button key={i} onClick={() => toggleDay(i)}
-                  className={`w-9 h-9 rounded-full text-xs font-bold shrink-0 ${sel?"bg-blue-500 text-white":"bg-gray-50 text-gray-500 border border-gray-200"}`}>
-                  {w}
+          {!siteLocked && (
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">현장</label>
+              <select value={form.siteId} onChange={e => set("siteId", e.target.value)}
+                className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500">
+                <option value="">현장 선택</option>
+                {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs font-semibold text-gray-500 mb-1">시작 시간</label>
+              <input type="time" value={form.startTime} onChange={e => set("startTime", e.target.value)}
+                className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-semibold text-gray-500 mb-1">종료 시간</label>
+              <input type="time" value={form.endTime} onChange={e => set("endTime", e.target.value)}
+                className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">급여 유형</label>
+            <div className="flex gap-1.5 mb-2">
+              {WAGE_TYPES.map(w => (
+                <button key={w.value} onClick={() => set("wageType", w.value)}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold ${form.wageType===w.value?"bg-blue-500 text-white":"bg-gray-50 text-gray-500 border border-gray-200"}`}>
+                  {w.label}
                 </button>
-              );
-            })}
-          </div>
-        </div>
-        <div className="flex gap-3">
-          <div className="flex-1">
-            <label className="block text-xs font-semibold text-gray-500 mb-1">시작 시간</label>
-            <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
+              ))}
+            </div>
+            <input type="number" inputMode="numeric" value={form.wageAmount} onChange={e => set("wageAmount", e.target.value)}
+              placeholder={`예: ${form.wageType === "monthly" ? "800000" : form.wageType === "weekly" ? "300000" : "80000"}`}
               className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
           </div>
-          <div className="flex-1">
-            <label className="block text-xs font-semibold text-gray-500 mb-1">종료 시간</label>
-            <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)}
-              className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+          <div>
+            <p className="text-xs font-semibold text-gray-500 mb-1">근무 주기</p>
           </div>
         </div>
-        <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1">급여 유형</label>
-          <div className="flex gap-1.5 mb-2">
-            {WAGE_TYPES.map(w => (
-              <button key={w.value} onClick={() => setWageType(w.value)}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold ${wageType===w.value?"bg-blue-500 text-white":"bg-gray-50 text-gray-500 border border-gray-200"}`}>
-                {w.label}
-              </button>
-            ))}
-          </div>
-          <input type="number" inputMode="numeric" value={wageAmount} onChange={e => setWageAmount(e.target.value)}
-            placeholder={`예: ${wageType === "monthly" ? "800000" : wageType === "weekly" ? "300000" : "80000"}`}
-            className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+        <RepeatPanel form={form} set={set} excludeNone/>
+        <div className="p-5 pt-0">
+          <button onClick={submit} disabled={!valid}
+            className="w-full py-3.5 rounded-xl text-sm text-white font-bold transition-colors"
+            style={{ background: valid ? "linear-gradient(135deg,#1a56db,#2563eb)" : "#e5e7eb" }}>
+            저장
+          </button>
         </div>
-        <button onClick={submit} disabled={!valid}
-          className="w-full py-3.5 rounded-xl text-sm text-white font-bold transition-colors"
-          style={{ background: valid ? "linear-gradient(135deg,#1a56db,#2563eb)" : "#e5e7eb" }}>
-          저장
-        </button>
       </div>
     </div>
   );
