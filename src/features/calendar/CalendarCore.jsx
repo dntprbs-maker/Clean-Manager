@@ -217,12 +217,32 @@ export function ScheduleList({ selDate, compact=false }) {
   const DAYS=["일","월","화","수","목","금","토"];
   const isHol=!!HOLIDAYS[selDate];
 
-  const dayEvts = visibleEvents
+  // 정기청소는 배정마다 이벤트가 따로 생성되므로, 같은 현장에 여러 명이 배정된 경우
+  // 이 날짜 목록에서는 하나로 합쳐서 "N명"으로 표시한다 (상세보기는 원래대로 현장 전체 배정을 보여줌)
+  const mergeRegularBySite = (evts) => {
+    const siteIdx = {};
+    const result = [];
+    evts.forEach(ev => {
+      if (ev.source === "regular" && ev.siteId) {
+        const idx = siteIdx[ev.siteId];
+        if (idx !== undefined) {
+          const existing = result[idx];
+          result[idx] = { ...existing, _mergedCount: (existing._mergedCount || 1) + 1 };
+          return;
+        }
+        siteIdx[ev.siteId] = result.length;
+      }
+      result.push(ev);
+    });
+    return result;
+  };
+
+  const dayEvts = mergeRegularBySite(visibleEvents
     .filter(ev=>ev.start<=selDate&&(ev.end||ev.start)>=selDate)
     .sort((a,b)=>{
       if(a.allDay!==b.allDay) return a.allDay?-1:1;
       return (a.startTime||"").localeCompare(b.startTime||"");
-    });
+    }));
 
   const allDayEvts=dayEvts.filter(e=>e.allDay);
   const timedEvts =dayEvts.filter(e=>!e.allDay);
@@ -278,10 +298,10 @@ export function ScheduleList({ selDate, compact=false }) {
               className="flex items-center px-4 py-1.5 border-b border-gray-50 cursor-pointer">
               {isMulti
                 ? <span className="text-sm px-2 py-0.5 rounded text-white font-medium mr-2 truncate max-w-[80%]"
-                    style={{background:c.color}}>{ev.title}</span>
+                    style={{background:c.color}}>{ev.title}{ev._mergedCount ? ` (${ev._mergedCount}명)` : ""}</span>
                 : <>
                     <div className="w-1 h-5 rounded-full mr-3" style={{background:c.color}}/>
-                    <span className="text-sm text-gray-800">{ev.title}</span>
+                    <span className="text-sm text-gray-800">{ev.title}{ev._mergedCount ? ` (${ev._mergedCount}명)` : ""}</span>
                   </>
               }
             </div>
@@ -317,7 +337,7 @@ export function ScheduleList({ selDate, compact=false }) {
                   {/* 제목 + 장소 + 썸네일 */}
                   <div className="flex-1 flex flex-col justify-center min-w-0">
                     <div className="flex items-start justify-between gap-1">
-                      <p className="text-sm font-semibold text-gray-900 leading-snug">{ev.title}</p>
+                      <p className="text-sm font-semibold text-gray-900 leading-snug">{ev.title}{ev._mergedCount ? ` (${ev._mergedCount}명)` : ""}</p>
                       {(ev.photos||[]).length > 0 && (
                         <span className="text-xs text-gray-400 shrink-0 flex items-center gap-0.5">
                           📎{(ev.photos||[]).length}
