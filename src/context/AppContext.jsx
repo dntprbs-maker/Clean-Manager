@@ -667,6 +667,7 @@ export function DemoProvider({ children }) {
       companyDoc: { aiImageExtraction: true }, // 데모에선 기능 시연을 위해 전부 켜둠
       currentUser: DEMO_USER, setCurrentUser: noop,
       loginUser: DEMO_USER, onLogout: noop,
+      currentScreen, setCurrentScreen,
       titleRule, typeKeywords, saveTitleRule: noop,
       addEvent: demoAlert, updateEvent: demoAlert, deleteEvent: demoAlert, updateLeaderComment: demoAlert,
       updateEventScoped: demoAlert, deleteEventScoped: demoAlert,
