@@ -25,6 +25,9 @@ export const diff = (s,e)=>!s||!e?0:Math.round((pd(e)-pd(s))/864e5);
 export const add  = (s,n)=>{ const d=pd(s); d.setDate(d.getDate()+n); return fmt(d); };
 export const addMonths = (s,n)=>{ const d=pd(s); d.setMonth(d.getMonth()+n); return fmt(d); };
 
+// 앱 로드 시점의 "오늘" 날짜 문자열 — 여러 화면에서 "오늘/어제" 라벨링에 공용으로 씀
+export const today = fmt(new Date());
+
 // 시간 포맷: "09:00" → "오전 9:00"
 export const fmtTime = t => {
   if(!t) return "";
