@@ -192,6 +192,15 @@ export function useDates(current) {
 export function ScheduleList({ selDate, compact=false }) {
   const { visibleEvents, setDetEv, setSelDate, setCurrent, setSheetMode, openModal, currentUser, cals, reports, setFieldReportEv } = useC();
   const calByIdLocal = id => cals.find(c=>c.id===id) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af", checked:true };
+  // 청소 진행도 텍스트 컬러 — 완료보고(reports) 플로우를 타는 입주청소 등 일반 일정에만 적용.
+  // 정기청소(source:"regular")는 출근확인 방식이라 이 진행도 개념이 없어 제외.
+  const progressTextColor = (ev) => {
+    if (ev.source === "regular") return undefined;
+    const status = getReportStatus(ev.id, reports);
+    if (status === "중") return "#2563eb";
+    if (status === "완료") return "#16a34a";
+    return undefined; // "전" — 기존 검정 유지
+  };
   // 일정 등록은 사장/관리팀·영업팀만 — 현장팀(청소팀) 팀장은 등록 불가, 보고만 가능
   const canAdd = currentUser.role === "최고관리자" || ["관리팀","영업팀"].includes(currentUser.team);
   const handleCardClick = async (ev) => {
@@ -301,7 +310,7 @@ export function ScheduleList({ selDate, compact=false }) {
                     style={{background:c.color}}>{ev.title}{ev._mergedCount ? ` (${ev._mergedCount}명)` : ""}</span>
                 : <>
                     <div className="w-1 h-5 rounded-full mr-3" style={{background:c.color}}/>
-                    <span className="text-sm text-gray-800">{ev.title}{ev._mergedCount ? ` (${ev._mergedCount}명)` : ""}</span>
+                    <span className="text-sm text-gray-800" style={{color: progressTextColor(ev)}}>{ev.title}{ev._mergedCount ? ` (${ev._mergedCount}명)` : ""}</span>
                   </>
               }
             </div>
@@ -337,7 +346,7 @@ export function ScheduleList({ selDate, compact=false }) {
                   {/* 제목 + 장소 + 썸네일 */}
                   <div className="flex-1 flex flex-col justify-center min-w-0">
                     <div className="flex items-start justify-between gap-1">
-                      <p className="text-sm font-semibold text-gray-900 leading-snug">{ev.title}{ev._mergedCount ? ` (${ev._mergedCount}명)` : ""}</p>
+                      <p className="text-sm font-semibold text-gray-900 leading-snug" style={{color: progressTextColor(ev)}}>{ev.title}{ev._mergedCount ? ` (${ev._mergedCount}명)` : ""}</p>
                       {(ev.photos||[]).length > 0 && (
                         <span className="text-xs text-gray-400 shrink-0 flex items-center gap-0.5">
                           📎{(ev.photos||[]).length}
