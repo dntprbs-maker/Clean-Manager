@@ -4,6 +4,7 @@ import { useC } from "../../context/AppContext";
 import { fmt, WD, fmtTime } from "../../lib/dateTime";
 import { assignmentOccursOn, describeRepeat, repeatRuleValid, assignmentRepeatRule, WAGE_TYPES, wageTypeLabel } from "../../lib/repeat";
 import { RepeatPanel } from "../../components/shared/RepeatPicker";
+import { teamsLabel } from "../../lib/membership";
 
 // ── 정기청소 근무관리 허브 화면 ───────────────────────────────────────────────
 export function RegularCleaningHubScreen() {
@@ -673,7 +674,7 @@ export function AssignmentFormModal() {
             <select value={form.employeeId} onChange={e => set("employeeId", e.target.value)}
               className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500">
               <option value="">직원 선택</option>
-              {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.team})</option>)}
+              {users.map(u => <option key={u.id} value={u.id}>{u.name} ({teamsLabel(u)})</option>)}
             </select>
           </div>
           {!siteLocked && (

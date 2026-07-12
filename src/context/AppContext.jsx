@@ -16,6 +16,7 @@ import { DEFAULT_CALS, REGULAR_CAL_ID, CALS } from "../lib/calendars";
 import { expandRecurring, pickRepeatFields } from "../lib/repeat";
 import { DEFAULT_TITLE_RULE, DEFAULT_TYPE_KEYWORDS } from "../lib/eventTextParser";
 import { INIT_TEAMS, INIT_USERS } from "../lib/constants";
+import { isSuperAdmin, myTeamNames } from "../lib/membership";
 
 // ── Context ───────────────────────────────────────────────────
 export const Ctx = createContext(null);
@@ -521,24 +522,17 @@ export function Provider({ children, loginUser, onLogout }) {
     // 다른 사람의 개인 캘린더 일정은 제외
     const hiddenPersonalIds = new Set(cals.filter(c => !isMine(c)).map(c => c.id));
     if (hiddenPersonalIds.size) evs = evs.filter(e => !hiddenPersonalIds.has(e.calId));
-    if (currentUser.role !== "최고관리자") {
-      if (["관리팀", "영업팀"].includes(currentUser.team)) {
-        // 담당 현장팀이 지정된 관리팀·영업팀 직원은 그 팀 일정만 표시 (지정 안 했으면 전체 표시, 기존과 동일)
-        if (currentUser.assignedCals?.length) {
-          const allowed = new Set(currentUser.assignedCals);
-          evs = evs.filter(e => allowed.has(e.calId) || cals.find(c=>c.id===e.calId)?.personal);
-        }
-      } else {
-        // cals를 직접 사용해 정확히 매칭 (CALS 전역 배열 stale 문제 방지)
-        const myCal = cals.find(c => c.label === currentUser.team);
-        if (myCal) {
-          evs = evs.filter(e => e.calId === myCal.id || cals.find(c=>c.id===e.calId)?.personal);
-        }
-        // 매칭 cal이 없으면 전체 표시 (팀에 대응하는 캘린더가 없는 경우)
+    if (!isSuperAdmin(currentUser)) {
+      // 소속된 모든 팀(멤버십)의 캘린더를 합쳐서 표시 — 한 사람이 여러 팀 소속이면 그 팀들 전부.
+      // 소속 팀이 하나도 없으면(신규/미배정) 기존처럼 전체 표시.
+      const myTeams = myTeamNames(currentUser);
+      if (myTeams.length) {
+        const allowedCalIds = new Set(cals.filter(c => myTeams.includes(c.label)).map(c => c.id));
+        evs = evs.filter(e => allowedCalIds.has(e.calId) || cals.find(c=>c.id===e.calId)?.personal);
       }
     }
     return expandRecurring(evs);
-  }, [events, checkedIds, cals, currentUser.team, currentUser.role, currentUser.assignedCals, isMine]);
+  }, [events, checkedIds, cals, currentUser, isMine]);
 
   return (
     <Ctx.Provider value={{

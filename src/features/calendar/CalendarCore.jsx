@@ -22,6 +22,7 @@ import { REPEAT_OPTS } from "../../lib/repeat";
 import { getReportStatus } from "../../lib/reports";
 import { fmtPhone } from "../../lib/phone";
 import { parseEventText } from "../../lib/eventTextParser";
+import { isSuperAdmin, isAdminStaff, isLeaderOf, isMemberOf, myTeamNames, hasLeadershipSomewhere, teamsLabel } from "../../lib/membership";
 import { useC } from "../../context/AppContext";
 import { ReportStatusBadge } from "../../components/shared/ReportStatusBadge";
 import { openLightbox } from "../../components/shared/PhotoLightbox";
@@ -202,18 +203,19 @@ export function ScheduleList({ selDate, compact=false }) {
     return undefined; // "전" — 기존 검정 유지
   };
   // 일정 등록은 사장/관리팀·영업팀만 — 현장팀(청소팀) 팀장은 등록 불가, 보고만 가능
-  const canAdd = currentUser.role === "최고관리자" || ["관리팀","영업팀"].includes(currentUser.team);
+  const canAdd = isSuperAdmin(currentUser) || isAdminStaff(currentUser);
   const handleCardClick = async (ev) => {
     // 청소 시작까지 진행된 일정이면 상세보기를 건너뛰고 바로 이어서(청소 완료 보고) 열기 —
-    // 실제로 현장 보고를 하는 현장팀 팀장에게만 해당. 사장/관리팀·영업팀은 청소 완료 보고를
-    // 하지 않으므로 평소처럼 상세보기/수정 화면으로 감(청소 상태는 배지로만 확인)
-    const canContinue = currentUser.role === "팀장" && !["관리팀","영업팀"].includes(currentUser.team);
+    // 실제로 이 일정의 담당팀 팀장에게만 해당(다른 팀 팀장이면 대상 아님). 사장/관리팀·영업팀은
+    // 청소 완료 보고를 하지 않으므로 평소처럼 상세보기/수정 화면으로 감(청소 상태는 배지로만 확인)
+    const evTeam = calById(ev.calId)?.label;
+    const canContinue = isLeaderOf(currentUser, evTeam) && !["관리팀","영업팀"].includes(evTeam);
     if (canContinue && reports.some(r => r.eventId === ev.id && r.status === "진행중")) {
       setFieldReportEv(ev);
       return;
     }
     // 정기청소 배정에서 자동 생성된 일정은 배정 관리 화면에서만 바꿀 수 있어 항상 상세보기로만 감
-    if (currentUser.role === "팀원" || currentUser.role === "팀장" || ev.source === "regular") { setDetEv(ev); return; }
+    if (!isSuperAdmin(currentUser) || ev.source === "regular") { setDetEv(ev); return; }
     if (ev._recurring) {
       const scope = await askRecurringScope(ev, "edit");
       if (!scope) return;
@@ -606,7 +608,7 @@ export function CalendarView() {
   } = useC();
   // 청소 시작까지 진행된 일정이면 상세보기를 건너뛰고 바로 이어서(청소 완료 보고) 열기
   const handleEventClick = (ev) => {
-    const canContinue = currentUser.role === "팀장" || currentUser.role === "최고관리자";
+    const canContinue = isSuperAdmin(currentUser) || isLeaderOf(currentUser, calById(ev.calId)?.label);
     if (canContinue && reports.some(r => r.eventId === ev.id && r.status === "진행중")) {
       setFieldReportEv(ev);
       return;
@@ -816,27 +818,28 @@ export function DetailSheet() {
   const [commentDraft, setCommentDraft] = useState("");
   const [savedComment, setSavedComment] = useState("");
   const commentRef = useRef(null);
+  // 훅 순서 유지를 위해 이른 리턴(!detEv) 전에 계산 — detEv 없으면 null
+  const cal = detEv ? (cals.find(c=>c.id===detEv.calId) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af" }) : null;
   useEffect(()=>{ if(detEv)setTimeout(()=>setVis(true),10); else setVis(false); },[detEv]);
   useEffect(()=>{
     // 새 항목 입력칸은 항상 비운 채로 시작 — 기존 기록은 savedComment(누적본)로 따로 보관
     setCommentDraft(""); setSavedComment(detEv?.leaderComment || "");
   },[detEv?.id]);
-  // 팀장이면 열리자마자 특이사항 입력칸에 커서가 깜빡이도록 자동 포커스
+  // 이 일정 담당팀의 팀장이면 열리자마자 특이사항 입력칸에 커서가 깜빡이도록 자동 포커스
   useEffect(()=>{
-    if (vis && currentUser.role === "팀장" && commentRef.current) {
+    if (vis && cal && isLeaderOf(currentUser, cal.label) && commentRef.current) {
       const t = setTimeout(()=>commentRef.current?.focus(), 300);
       return ()=>clearTimeout(t);
     }
-  },[vis, detEv?.id, currentUser.role]);
+  },[vis, detEv?.id, cal, currentUser]);
   if(!detEv) return null;
-  const cal = cals.find(c=>c.id===detEv.calId) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af" };
   // 정기청소 배정에서 자동 생성된 일정 — 배정 관리 화면에서만 바꿀 수 있고, 본문도 별도 렌더링
   const isRegular = detEv.source === "regular";
-  // 관리팀·영업팀은 담당 현장팀이 지정돼 있으면 그 팀 일정만 수정 가능 (지정 안 했으면 기존처럼 전체 수정 가능)
-  const canEditEvent = currentUser.role === "최고관리자" ||
-    (["관리팀","영업팀"].includes(currentUser.team) &&
-      (!currentUser.assignedCals?.length || currentUser.assignedCals.includes(detEv.calId)));
-  const canWriteComment = currentUser.role === "팀장";
+  // 관리팀·영업팀은 현장팀 멤버십이 따로 있으면 그 팀 일정만 수정 가능 (없으면 기존처럼 전체 수정 가능)
+  const myFieldTeams = myTeamNames(currentUser).filter(t => !["관리팀","영업팀"].includes(t));
+  const canEditEvent = isSuperAdmin(currentUser) ||
+    (isAdminStaff(currentUser) && (myFieldTeams.length === 0 || myFieldTeams.includes(cal.label)));
+  const canWriteComment = isLeaderOf(currentUser, cal.label);
   const commentDirty = canWriteComment && commentDraft.trim() !== "";
   const close=()=>{ setVis(false); setTimeout(()=>setDetEv(null),280); };
   const requestClose = () => {
@@ -1024,8 +1027,7 @@ export function DetailSheet() {
         {/* 현장 업무 보고 버튼 — 팀장 이상, 그리고 관리팀·영업팀 소속은 팀원이어도 겸직으로 현장에
             나갈 수 있어 보고 가능(현장팀 소속 팀원은 기존처럼 제외) — 스크롤과 무관하게 하단 고정.
             정기청소 자동일정은 출근확인 버튼이 본문에 따로 있어 이 버튼은 숨김. */}
-        {!isRegular && (currentUser.role === "팀장" || currentUser.role === "최고관리자" ||
-          (currentUser.role === "팀원" && ["관리팀","영업팀"].includes(currentUser.team))) && (
+        {!isRegular && (isSuperAdmin(currentUser) || isAdminStaff(currentUser) || isLeaderOf(currentUser, cal.label)) && (
           <div className="shrink-0 px-4 py-3 border-t border-gray-100 bg-white">
             <button
               // detEv는 그대로 둬서(닫지 않고) 현장 완료 보고 화면을 닫으면
@@ -1325,7 +1327,7 @@ export function SideDrawer() {
         <div className="px-4 pt-12 pb-4 border-b border-gray-100">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              {currentUser.role === "최고관리자" && (
+              {isSuperAdmin(currentUser) && (
                 <button onClick={() => { setDrawer(false); setCompanySettingsModal(true); }} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-800 rounded-full hover:bg-gray-100 transition-colors">
                   <Settings size={20} />
                 </button>
@@ -1334,20 +1336,20 @@ export function SideDrawer() {
               <div>
                 <div className="flex items-center gap-2">
                   <p className="font-bold text-base">{currentUser.name}</p>
-                  {currentUser.role !== "최고관리자" && (
+                  {!isSuperAdmin(currentUser) && (
                     <button onClick={() => { setPwModal(true); }}
                       className="text-[10px] text-gray-400 border border-gray-200 px-1.5 py-0.5 rounded-full hover:text-blue-500 hover:border-blue-300 transition-colors">
                       비밀번호
                     </button>
                   )}
                 </div>
-                <p className="text-xs text-gray-500">{currentUser.team} · {currentUser.role}</p>
+                <p className="text-xs text-gray-500">{teamsLabel(currentUser)}</p>
               </div>
             </div>
-            {/* 테스트용 계정 전환 — 크린드림 사장 계정만 노출 */}
-            {currentUser.role === "최고관리자" && currentUser.team === "사장" && currentUser.companyName === "크린드림" && (
+            {/* 테스트용 계정 전환 — 크린드림 사장(최고관리자) 계정만 노출 */}
+            {isSuperAdmin(currentUser) && currentUser.companyName === "크린드림" && (
               <select className="text-[10px] border border-gray-200 text-gray-500 p-1 rounded outline-none" onChange={e => setCurrentUser([loginUser, ...users].find(u=>u.id===e.target.value))} value={currentUser.id}>
-                {[loginUser, ...users.filter(u=>u.id!==loginUser.id)].map(u => <option key={u.id} value={u.id}>{u.name} ({u.team})</option>)}
+                {[loginUser, ...users.filter(u=>u.id!==loginUser.id)].map(u => <option key={u.id} value={u.id}>{u.name} ({teamsLabel(u)})</option>)}
               </select>
             )}
           </div>
@@ -1360,8 +1362,8 @@ export function SideDrawer() {
 
         {/* 전체 메뉴 */}
         <div className="flex-1 overflow-y-auto bg-gray-50 py-3">
-          {(currentUser.team === "관리팀" || currentUser.team === "사장") && (
-            <button 
+          {(isSuperAdmin(currentUser) || isMemberOf(currentUser, "관리팀")) && (
+            <button
               onClick={() => { setCurrentScreen("employees"); setDrawer(false); }}
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
               <User size={20} className="text-blue-500" />
@@ -1369,7 +1371,7 @@ export function SideDrawer() {
             </button>
           )}
           {/* 정기청소 근무관리 - 최고관리자이거나, 본인 앞으로 배정된 현장이 하나라도 있으면 노출 (팀 구성과 무관) */}
-          {(currentUser.role === "최고관리자" || assignments.some(a => a.employeeId === currentUser.id)) && (
+          {(isSuperAdmin(currentUser) || assignments.some(a => a.employeeId === currentUser.id)) && (
             <button
               onClick={() => { setCurrentScreen("reg_hub"); setDrawer(false); }}
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
@@ -1377,8 +1379,8 @@ export function SideDrawer() {
               <span className="text-sm font-medium text-gray-700 flex-1 text-left">정기청소 근무관리</span>
             </button>
           )}
-          {/* 팀별 일정 - 팀원 제외 */}
-          {currentUser.role !== "팀원" && (
+          {/* 팀별 일정 - 순수 팀원(어느 팀에서도 리더/관리 아님)은 제외 */}
+          {(isSuperAdmin(currentUser) || isAdminStaff(currentUser) || hasLeadershipSomewhere(currentUser)) && (
             <button
               onClick={() => { setCurrentScreen("team_schedule"); setDrawer(false); }}
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
@@ -1387,8 +1389,8 @@ export function SideDrawer() {
             </button>
           )}
 
-          {/* 대시보드 - 팀원 제외 */}
-          {currentUser.role !== "팀원" && (
+          {/* 대시보드 - 순수 팀원 제외 */}
+          {(isSuperAdmin(currentUser) || isAdminStaff(currentUser) || hasLeadershipSomewhere(currentUser)) && (
             <button
               onClick={() => { setCurrentScreen("dashboard"); setDrawer(false); }}
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
@@ -1412,8 +1414,8 @@ export function SideDrawer() {
             })()}
           </button>
 
-          {/* 변경 로그 - 최고관리자, 관리팀장만 */}
-          {(currentUser.role === "최고관리자" || currentUser.role === "관리팀장") && (
+          {/* 변경 로그 - 최고관리자, 관리팀 팀장만 */}
+          {(isSuperAdmin(currentUser) || isLeaderOf(currentUser, "관리팀")) && (
             <button
               onClick={() => { setCurrentScreen("activity_log"); setDrawer(false); }}
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
@@ -1440,9 +1442,9 @@ export function SideDrawer() {
               <span className="text-sm font-medium text-gray-700 flex-1 text-left">자주 쓰는 외부 링크</span>
             </button>
           )}
-          {/* 캘린더 가져오기 - 사장, 관리팀장·영업팀장만 */}
-          {(currentUser.role === "최고관리자" ||
-            (currentUser.role === "팀장" && ["관리팀","영업팀"].includes(currentUser.team))) && (
+          {/* 캘린더 가져오기 - 사장, 관리팀·영업팀 팀장만 */}
+          {(isSuperAdmin(currentUser) ||
+            isLeaderOf(currentUser, "관리팀") || isLeaderOf(currentUser, "영업팀")) && (
             <button
               onClick={() => { setCurrentScreen("import_calendar"); setDrawer(false); }}
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
@@ -2030,7 +2032,7 @@ export function EventModal() {
           {editId && <ReportStatusBadge eventId={editId} reports={reports}/>}
           {/* 사장이 직접 현장 청소를 겸할 때를 위한 진입점 — 평소엔 상세보기를 거치지 않고
               바로 이 화면으로 오기 때문에, 필요할 때만 쓰는 선택적 버튼으로 여기 둠 */}
-          {editId && editEv && currentUser.role === "최고관리자" && getReportStatus(editId, reports) !== "완료" && (
+          {editId && editEv && isSuperAdmin(currentUser) && getReportStatus(editId, reports) !== "완료" && (
             <button onClick={() => setFieldReportEv(editEv)}
               className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded-full text-white shrink-0"
               style={{ background: "#1a56db" }}>
@@ -2241,7 +2243,7 @@ export function TopHeader() {
 
   // 로그인 시 다중 소속 여부 미리 확인
   useEffect(()=>{
-    if(currentUser.role==="최고관리자") { setIsMulti(false); return; }
+    if(isSuperAdmin(currentUser)) { setIsMulti(false); return; }
     const phone = currentUser.phone;
     if(!phone) { setIsMulti(false); return; }
     getDocs(query(collection(db,"staffs"), where("phone","==",phone))).then(snap=>{
@@ -2252,7 +2254,7 @@ export function TopHeader() {
 
   // 다중 소속 회사 목록 불러오기
   const checkMulti = async () => {
-    if(currentUser.role !== "팀원" && currentUser.role !== "팀장") return;
+    if(isSuperAdmin(currentUser)) return;
     const phone = currentUser.phone;
     if(!phone) return;
     let snap = await getDocs(query(collection(db,"staffs"), where("phone","==",phone)));
@@ -2362,7 +2364,7 @@ export function TopHeader() {
 export function FloatingButtons() {
   const { openModal, selDate, setCurrent, setSelDate, currentUser } = useC();
   // 일정 등록은 사장/관리팀·영업팀만 — 현장팀(청소팀) 팀장은 등록 불가, 보고만 가능
-  const canAdd = currentUser.role === "최고관리자" || ["관리팀","영업팀"].includes(currentUser.team);
+  const canAdd = isSuperAdmin(currentUser) || isAdminStaff(currentUser);
   return (
     <div className="fixed bottom-20 flex flex-col items-end gap-3 pointer-events-none z-40"
       style={{right: "max(1rem, calc((100vw - 430px) / 2 + 1rem))"}}>

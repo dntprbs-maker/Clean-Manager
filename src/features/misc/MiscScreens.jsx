@@ -5,6 +5,7 @@ import { db } from "../../firebase";
 import { fmt, diff, fmtTime } from "../../lib/dateTime";
 import { parseEventText, DEFAULT_TITLE_RULE, DEFAULT_TYPE_KEYWORDS, TITLE_TOKEN_LABELS } from "../../lib/eventTextParser";
 import { useC } from "../../context/AppContext";
+import { isSuperAdmin, isMemberOf, accessTier } from "../../lib/membership";
 
 // ── 팀별 일정 화면 ───────────────────────────────────────────────
 export function TeamScheduleScreen() {
@@ -209,9 +210,10 @@ const DEFAULT_DASH_CARDS = {
 export function DashboardScreen() {
   const { visibleEvents, setCurrentScreen, visibleCals: cals, currentUser } = useC();
   const [editing, setEditing]   = useState(false);
-  const [selectedIds, setSelectedIds] = useState(DEFAULT_DASH_CARDS[currentUser.role]||["today_count"]);
+  const tier = accessTier(currentUser);
+  const [selectedIds, setSelectedIds] = useState(DEFAULT_DASH_CARDS[tier]||["today_count"]);
 
-  const available = ALL_DASH_CARDS.filter(c=>c.roles.includes(currentUser.role)||currentUser.role==="최고관리자");
+  const available = ALL_DASH_CARDS.filter(c=>c.roles.includes(tier)||tier==="최고관리자");
   const selected  = available.filter(c=>selectedIds.includes(c.id));
 
   const toggle = (id) => setSelectedIds(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
@@ -223,9 +225,9 @@ export function DashboardScreen() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-xl font-bold text-gray-900">
-              {currentUser.role==="최고관리자"?"사장님 대시보드":"일정 요약"}
+              {isSuperAdmin(currentUser)?"사장님 대시보드":"일정 요약"}
             </h2>
-            <p className="text-xs text-gray-400 mt-0.5">{currentUser.name} · {currentUser.role}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{currentUser.name} · {tier}</p>
           </div>
           <div className="flex items-center gap-1">
             <button onClick={()=>setEditing(p=>!p)}
@@ -328,7 +330,7 @@ export function NoticeScreen() {
   const [important, setImportant] = useState(false);
   const [readIds, setReadIds]     = useState(()=>JSON.parse(localStorage.getItem("readNotices")||"[]"));
 
-  const isAdmin = currentUser.role === "최고관리자" || currentUser.team === "관리팀" || currentUser.team === "사장";
+  const isAdmin = isSuperAdmin(currentUser) || isMemberOf(currentUser, "관리팀");
 
   const markRead = (id) => {
     if(readIds.includes(id)) return;
