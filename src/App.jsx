@@ -107,10 +107,25 @@ function AppInner() {
     prevOpenCountRef.current = openCount;
   });
 
+  // 캘린더 화면(맨 아래, 아무 팝업도 없는 상태)에서 뒤로가기를 눌러도 바로 앱이
+  // 꺼지지 않도록, 시작할 때 히스토리에 "바닥" 상태를 하나 깔아둔다.
+  const guardPushedRef = useRef(false);
+  useEffect(() => {
+    if (guardPushedRef.current) return;
+    guardPushedRef.current = true;
+    window.history.pushState({ __guard: true }, "");
+  }, []);
+
   useEffect(() => {
     const onPopState = () => {
       const top = backLayers.find(l => l.open);
-      if (top) { isPopRef.current = true; top.close(); }
+      if (top) { isPopRef.current = true; top.close(); return; }
+      // 열려있는 게 아무것도 없다 = 앱을 나가려는 뒤로가기 → 확인 후 처리
+      if (window.confirm("앱을 종료하시겠습니까?")) {
+        window.history.back();
+      } else {
+        window.history.pushState({ __guard: true }, "");
+      }
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
