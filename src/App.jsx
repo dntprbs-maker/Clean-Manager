@@ -76,11 +76,17 @@ function AppInner() {
   const needsSetup = !isDemo && !currentUser?.companyName;
   const [showNotifyPrompt, setShowNotifyPrompt] = useState(false);
   const [notifyRequesting, setNotifyRequesting] = useState(false);
+  // 뒤로가기로 앱을 나가려 할 때 보여줄 확인 화면 — window.confirm()은 popstate
+  // 핸들러(직접 클릭이 아닌 컨텍스트)에서 호출하면 모바일 브라우저가 조용히
+  // 무시하는 경우가 많아(showNotifyPrompt와 같은 이유) 실제 UI로 직접 그린다.
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const reallyExitingRef = useRef(false);
 
   // 안드로이드 뒤로가기 처리 — 열려있는 팝업/모달이 있으면 그것부터 하나씩 닫고,
   // 아무것도 열려있지 않을 때만 화면을 캘린더로 되돌린다.
   // (배열 순서 = 우선순위. 더 안쪽/위에 뜨는 것부터 검사해서 그것만 닫는다)
   const backLayers = [
+    { open: showExitConfirm, close: () => setShowExitConfirm(false) },
     { open: !!fieldReportEv, close: () => setFieldReportEv(null) },
     { open: !!detEv,         close: () => setDetEv(null) },
     { open: modal.open,      close: closeModal },
@@ -120,16 +126,20 @@ function AppInner() {
     const onPopState = () => {
       const top = backLayers.find(l => l.open);
       if (top) { isPopRef.current = true; top.close(); return; }
-      // 열려있는 게 아무것도 없다 = 앱을 나가려는 뒤로가기 → 확인 후 처리
-      if (window.confirm("앱을 종료하시겠습니까?")) {
-        window.history.back();
-      } else {
-        window.history.pushState({ __guard: true }, "");
-      }
+      if (reallyExitingRef.current) return; // 확인 화면에서 "종료"를 눌러 나가는 중 — 더 이상 개입 안 함
+      // 열려있는 게 아무것도 없다 = 앱을 나가려는 뒤로가기 → 확인 화면부터 보여줌
+      setShowExitConfirm(true);
+      window.history.pushState({ __guard: true }, "");
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   });
+
+  const handleConfirmExit = () => {
+    reallyExitingRef.current = true;
+    setShowExitConfirm(false);
+    window.history.back();
+  };
 
   // FCM 푸시 — 포그라운드 수신 핸들러 + 이미 허용된 경우 토큰 갱신, 꺼져있으면 확인창으로 켜기 유도 (데모 제외)
   const notifyCheckedRef = useRef(false);
@@ -174,6 +184,24 @@ function AppInner() {
       <style>{ANIM_CSS}</style>
       <TopHeader/>
       {needsSetup && <SetupCompanyModal />}
+      {showExitConfirm && (
+        <div className="absolute inset-0 bg-black/40 z-[110] flex items-center justify-center px-6">
+          <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl">
+            <p className="text-base font-bold text-gray-900 mb-5">앱을 종료하시겠습니까?</p>
+            <div className="flex gap-2">
+              <button onClick={() => setShowExitConfirm(false)}
+                className="flex-1 py-3 rounded-xl text-sm font-bold text-gray-500 bg-gray-100">
+                취소
+              </button>
+              <button onClick={handleConfirmExit}
+                className="flex-1 py-3 rounded-xl text-sm font-bold text-white"
+                style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
+                종료
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showNotifyPrompt && (
         <div className="absolute inset-0 bg-black/40 z-[110] flex items-center justify-center px-6">
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl">
