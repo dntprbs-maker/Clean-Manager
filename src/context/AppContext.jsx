@@ -634,7 +634,7 @@ export function DemoProvider({ children }) {
   const [current, setCurrent] = useState(new Date());
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [detailSheet, setDetailSheet] = useState(null);
+  const [detEv, setDetEv] = useState(null);
   const [empModal, setEmpModal] = useState({open:false,editId:null});
   const [teamModal, setTeamModal] = useState(false);
   const [companySettingsModal, setCompanySettingsModal] = useState(false);
@@ -677,7 +677,7 @@ export function DemoProvider({ children }) {
       drawer, setDrawer,
       searchOpen, setSearchOpen,
       searchQuery, setSearchQuery,
-      detailSheet, setDetailSheet,
+      detEv, setDetEv,
       empModal, setEmpModal,
       teamModal, setTeamModal,
       companySettingsModal, setCompanySettingsModal,

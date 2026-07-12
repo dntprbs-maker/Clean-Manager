@@ -64,25 +64,57 @@ import {
 } from "./features/misc/MiscScreens";
 
 function AppInner() {
-  const { currentScreen, setCurrentScreen, currentUser, isDemo } = useC();
+  const {
+    currentScreen, setCurrentScreen, currentUser, isDemo,
+    modal, closeModal, detEv, setDetEv, fieldReportEv, setFieldReportEv,
+    drawer, setDrawer, searchOpen, setSearchOpen,
+    teamModal, setTeamModal, empModal, setEmpModal,
+    companySettingsModal, setCompanySettingsModal,
+    siteModal, setSiteModal, assignmentModal, setAssignmentModal,
+    extraPaymentModal, setExtraPaymentModal,
+  } = useC();
   const needsSetup = !isDemo && !currentUser?.companyName;
   const [showNotifyPrompt, setShowNotifyPrompt] = useState(false);
   const [notifyRequesting, setNotifyRequesting] = useState(false);
 
-  // 안드로이드 뒤로가기 처리
+  // 안드로이드 뒤로가기 처리 — 열려있는 팝업/모달이 있으면 그것부터 하나씩 닫고,
+  // 아무것도 열려있지 않을 때만 화면을 캘린더로 되돌린다.
+  // (배열 순서 = 우선순위. 더 안쪽/위에 뜨는 것부터 검사해서 그것만 닫는다)
+  const backLayers = [
+    { open: !!fieldReportEv, close: () => setFieldReportEv(null) },
+    { open: !!detEv,         close: () => setDetEv(null) },
+    { open: modal.open,      close: closeModal },
+    { open: showNotifyPrompt, close: () => setShowNotifyPrompt(false) },
+    { open: teamModal,               close: () => setTeamModal(false) },
+    { open: empModal.open,           close: () => setEmpModal({ open: false, editId: null }) },
+    { open: companySettingsModal,    close: () => setCompanySettingsModal(false) },
+    { open: siteModal.open,          close: () => setSiteModal({ open: false, editId: null }) },
+    { open: assignmentModal.open,    close: () => setAssignmentModal({ open: false, editId: null, presetSiteId: null }) },
+    { open: extraPaymentModal.open,  close: () => setExtraPaymentModal({ open: false, employeeId: null }) },
+    { open: searchOpen, close: () => setSearchOpen(false) },
+    { open: drawer,      close: () => setDrawer(false) },
+    { open: currentScreen !== "calendar", close: () => setCurrentScreen("calendar") },
+  ];
+  const openCount = backLayers.filter(l => l.open).length;
+  const prevOpenCountRef = useRef(0);
+  const isPopRef = useRef(false);
+
+  // 열린 레이어 수가 늘어날 때마다 늘어난 만큼 히스토리를 쌓는다 (중첩된 팝업도 각자 한 단계씩 차지)
   useEffect(() => {
-    if (currentScreen !== "calendar") {
-      window.history.pushState({ screen: currentScreen }, "");
-    }
-  }, [currentScreen]);
+    if (isPopRef.current) { isPopRef.current = false; prevOpenCountRef.current = openCount; return; }
+    const diff = openCount - prevOpenCountRef.current;
+    if (diff > 0) { for (let i = 0; i < diff; i++) window.history.pushState({}, ""); }
+    prevOpenCountRef.current = openCount;
+  });
 
   useEffect(() => {
     const onPopState = () => {
-      setCurrentScreen("calendar");
+      const top = backLayers.find(l => l.open);
+      if (top) { isPopRef.current = true; top.close(); }
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [setCurrentScreen]);
+  });
 
   // FCM 푸시 — 포그라운드 수신 핸들러 + 이미 허용된 경우 토큰 갱신, 꺼져있으면 확인창으로 켜기 유도 (데모 제외)
   const notifyCheckedRef = useRef(false);
