@@ -482,9 +482,12 @@ export function Provider({ children, loginUser, onLogout }) {
     if (!loginUser?.uid || currentUser.uid !== loginUser.uid) return;
     const fresh = users.find(u => u.id === loginUser.uid);
     if (!fresh) return;
-    const fields = ["name", "phone", "team", "role", "pw"];
-    if (fields.every(k => fresh[k] === currentUser[k])) return;
-    const updated = { ...currentUser, ...Object.fromEntries(fields.map(k => [k, fresh[k]])) };
+    const scalarFields = ["name", "phone", "team", "role", "pw"];
+    // memberships는 배열이라 onSnapshot마다 참조가 새로 생겨 ===로 비교하면 무한 루프에
+    // 빠질 수 있어, 값(JSON) 기준으로만 비교한다.
+    const membershipsChanged = JSON.stringify(fresh.memberships || null) !== JSON.stringify(currentUser.memberships || null);
+    if (scalarFields.every(k => fresh[k] === currentUser[k]) && !membershipsChanged) return;
+    const updated = { ...currentUser, ...Object.fromEntries(scalarFields.map(k => [k, fresh[k]])), memberships: fresh.memberships };
     setCurrentUser(updated);
     try { localStorage.setItem("loginUser", JSON.stringify(updated)); } catch {}
   }, [users, loginUser?.uid, currentUser]);
