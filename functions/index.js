@@ -22,6 +22,21 @@ function fmtTime(t) {
   return `${ap} ${h12}:${String(m).padStart(2, "0")}`;
 }
 
+// 직원-팀 다대다 멤버십 조회 — 클라이언트 src/lib/membership.js와 같은 규칙.
+// memberships 필드가 없는(리팩터 이전) 레거시 직원은 team/role 단일 필드에서 즉석 파생.
+function getMemberships(u) {
+  if (!u) return [];
+  if (u.memberships) return u.memberships;
+  if (u.role === "최고관리자") return [];
+  if (u.team && u.team !== "사장") {
+    return [{ team: u.team, role: u.role === "최고관리자" ? "팀장" : (u.role || "팀원") }];
+  }
+  return [];
+}
+function isMemberOfTeam(u, team) {
+  return getMemberships(u).some((m) => m.team === team);
+}
+
 // 공통: 특정 일정(ev)에 대해 담당 팀원에게 알림 발송
 // action: "created" | "updated" | "deleted"
 async function notifyTeam(companyId, eventId, ev, action) {
@@ -36,14 +51,14 @@ async function notifyTeam(companyId, eventId, ev, action) {
     } catch (e) { /* 무시 */ }
   }
 
-  // 2) 알림 받을 직원 추리기
+  // 2) 알림 받을 직원 추리기 (다대다 멤버십 기준)
   const usersSnap = await db.collection(`companies/${companyId}/users`).get();
   const targets = [];
   usersSnap.forEach((d) => {
     const u = d.data();
     if (u.status === "deleted") return;
-    const isTeamMember = teamName && u.team === teamName;
-    const isManager = !teamName && (u.role === "최고관리자" || u.team === "관리팀" || u.team === "사장");
+    const isTeamMember = teamName && isMemberOfTeam(u, teamName);
+    const isManager = !teamName && (u.role === "최고관리자" || isMemberOfTeam(u, "관리팀"));
     if (isTeamMember || isManager) {
       (u.fcmTokens || []).forEach((t) => targets.push({ token: t, userRef: d.ref }));
     }
@@ -107,9 +122,11 @@ export const sendEventUpdateNotification = onDocumentUpdated(
     const after = event.data?.after?.data();
     if (!after) return;
 
-    // 핵심 필드가 바뀐 경우에만 알림 (완료토글 등 잡음 방지)
-    const keys = ["title", "start", "end", "startTime", "endTime", "allDay", "place", "calId", "team", "description"];
-    const changed = keys.some((k) => JSON.stringify(before?.[k]) !== JSON.stringify(after?.[k]));
+    // 팀장 코멘트(leaderComment*)만 바뀐 경우는 "일정 수정"이 아니라 별도 메모 기능이라 제외.
+    // 그 외에는 반복 설정 등 어떤 필드든 바뀌면 알림 (예전엔 특정 필드만 봐서 반복만 바꾼 수정이 누락됐음)
+    const NOISE_KEYS = new Set(["leaderComment", "leaderCommentBy", "leaderCommentAt"]);
+    const allKeys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
+    const changed = [...allKeys].some((k) => !NOISE_KEYS.has(k) && JSON.stringify(before?.[k]) !== JSON.stringify(after?.[k]));
     if (!changed) return;
 
     await notifyTeam(event.params.companyId, event.params.eventId, after, "updated");
