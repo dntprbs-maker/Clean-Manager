@@ -108,19 +108,20 @@ export function EmployeeListScreen() {
   );
 }
 
-// ── 직원 등록/수정 모달 — 이름/연락처/최고관리자 여부만. 팀 소속은 팀 관리 화면에서 배정 ──
+// ── 직원 등록/수정 모달 — 이름/연락처만. 최고관리자(사장)는 1명뿐이라 여기서 부여하지 않음.
+// 팀 소속은 팀 관리 화면에서 배정 ──
 export function EmployeeFormModal() {
   const { empModal, setEmpModal, users, companyId } = useC();
-  const [form, setForm] = useState({ name: "", phone: "", isSuperAdmin: false, pw: "" });
+  const [form, setForm] = useState({ name: "", phone: "", pw: "" });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (empModal.open) {
       if (empModal.editId) {
         const u = users.find(x => x.id === empModal.editId);
-        if (u) setForm({ name: u.name || "", phone: fmtPhone(u.phone), isSuperAdmin: isSuperAdmin(u), pw: u.pw || "" });
+        if (u) setForm({ name: u.name || "", phone: fmtPhone(u.phone), pw: u.pw || "" });
       } else {
-        setForm({ name: "", phone: "", isSuperAdmin: false, pw: "" });
+        setForm({ name: "", phone: "", pw: "" });
       }
     }
   }, [empModal.open, empModal.editId, users]);
@@ -137,7 +138,6 @@ export function EmployeeFormModal() {
       const baseData = {
         name: form.name,
         phone: onlyDigits(form.phone),
-        role: form.isSuperAdmin ? "최고관리자" : "",
       };
       if (empModal.editId) {
         // 기존 유저 수정 (비밀번호 포함 저장, 팀 소속(memberships)은 이 화면에서 건드리지 않음)
@@ -225,14 +225,7 @@ export function EmployeeFormModal() {
               }}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800" placeholder="010-0000-0000" />
           </div>
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <button type="button" onClick={()=>setForm(f=>({...f, isSuperAdmin: !f.isSuperAdmin}))}
-              className={`relative w-9 h-5 rounded-full transition-colors ${form.isSuperAdmin?"bg-blue-500":"bg-gray-200"}`}>
-              <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.isSuperAdmin?"translate-x-4":"translate-x-0"}`}/>
-            </button>
-            <span className="text-xs text-gray-600">최고관리자 권한 <span className="text-gray-400">(전체 열람·수정 가능)</span></span>
-          </label>
-          <p className="text-[11px] text-gray-400 -mt-2">팀 소속과 팀 내 역할(팀장/팀원)은 "팀 관리" 화면에서 배정합니다.</p>
+          <p className="text-[11px] text-gray-400">팀 소속과 팀 내 역할(팀장/팀원)은 "팀 관리" 화면에서 배정합니다.</p>
         </div>
         {empModal.editId && (
           <div className="px-5 pb-1">
