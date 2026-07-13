@@ -47,7 +47,7 @@ import {
   RegularCleaningHubScreen, SitesScreen, SiteDetailScreen, TodayStatusScreen,
   MyRegularCleaningScreen, MonthlySettlementScreen, ExtraPaymentModal, SiteFormModal, AssignmentFormModal,
 } from "./features/regular-cleaning/RegularCleaningScreens";
-import { EmployeeListScreen, EmployeeFormModal, TeamManagementModal } from "./features/employees/EmployeeTeamScreens";
+import { EmployeeListScreen, EmployeeFormModal } from "./features/employees/EmployeeTeamScreens";
 import {
   buildLayout, TextBar, FullMonthCell, DotCell, useDates, ScheduleList, useSwipe,
   SlideTransition, ListTransition, ModeTransition, CalendarView, DetailSheet,
@@ -68,7 +68,7 @@ function AppInner() {
     currentScreen, setCurrentScreen, currentUser, isDemo,
     modal, closeModal, detEv, setDetEv, fieldReportEv, setFieldReportEv,
     drawer, setDrawer, searchOpen, setSearchOpen,
-    teamModal, setTeamModal, empModal, setEmpModal,
+    empModal, setEmpModal,
     companySettingsModal, setCompanySettingsModal,
     siteModal, setSiteModal, assignmentModal, setAssignmentModal,
     extraPaymentModal, setExtraPaymentModal,
@@ -91,7 +91,6 @@ function AppInner() {
     { open: !!detEv,         close: () => setDetEv(null) },
     { open: modal.open,      close: closeModal },
     { open: showNotifyPrompt, close: () => setShowNotifyPrompt(false) },
-    { open: teamModal,               close: () => setTeamModal(false) },
     { open: empModal.open,           close: () => setEmpModal({ open: false, editId: null }) },
     { open: companySettingsModal,    close: () => setCompanySettingsModal(false) },
     { open: siteModal.open,          close: () => setSiteModal({ open: false, editId: null }) },
@@ -243,7 +242,6 @@ function AppInner() {
       <EventModal/>
       <SearchModal/>
       <EmployeeFormModal/>
-      <TeamManagementModal/>
       <CompanySettingsModal/>
       <SiteFormModal/>
       <AssignmentFormModal/>

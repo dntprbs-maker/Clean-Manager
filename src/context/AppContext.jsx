@@ -461,7 +461,6 @@ export function Provider({ children, loginUser, onLogout }) {
   const [searchOpen,setSearchOpen] = useState(false);
   const [searchQuery,setSearchQuery] = useState("");
   const [sheetMode,setSheetMode] = useState(1);
-  const [teamModal, setTeamModal] = useState(false);
   const [currentScreen, setCurrentScreen] = useState("calendar");
   const [empModal, setEmpModal] = useState({ open: false, editId: null });
   const [companySettingsModal, setCompanySettingsModal] = useState(false);
@@ -550,7 +549,7 @@ export function Provider({ children, loginUser, onLogout }) {
       searchOpen,setSearchOpen,
       searchQuery,setSearchQuery,
       sheetMode,setSheetMode,
-      teams,setTeams,saveTeams,teamModal,setTeamModal,
+      teams,setTeams,saveTeams,
       users,setUsers,
       currentUser,setCurrentUser,loginUser,onLogout,
       currentScreen,setCurrentScreen,
@@ -636,7 +635,6 @@ export function DemoProvider({ children }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [detEv, setDetEv] = useState(null);
   const [empModal, setEmpModal] = useState({open:false,editId:null});
-  const [teamModal, setTeamModal] = useState(false);
   const [companySettingsModal, setCompanySettingsModal] = useState(false);
   const [fieldReportEv, setFieldReportEv] = useState(null);
   const [siteModal, setSiteModal] = useState({ open: false, editId: null });
@@ -679,7 +677,6 @@ export function DemoProvider({ children }) {
       searchQuery, setSearchQuery,
       detEv, setDetEv,
       empModal, setEmpModal,
-      teamModal, setTeamModal,
       companySettingsModal, setCompanySettingsModal,
       fieldReportEv, setFieldReportEv,
       sites: [], addSite: demoAlert, updateSite: demoAlert, deleteSite: demoAlert, siteModal, setSiteModal,
