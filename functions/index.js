@@ -2,10 +2,15 @@
 import { onDocumentCreated, onDocumentUpdated, onDocumentDeleted } from "firebase-functions/v2/firestore";
 import { onCall, HttpsError, onRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
-import { initializeApp } from "firebase-admin/app";
+import { getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
-initializeApp();
+import { getMemberships } from "./lib/membership.js";
+import { fmtDate, addDays, expandRecurringForFeed } from "./lib/recurring.js";
+export { mcp } from "./mcp/index.js";
+// mcp/index.js가 (ESM import 순서상 이 줄보다 먼저 평가되며) lib/db.js를 통해
+// initializeApp()을 이미 호출했을 수 있으므로 중복 호출 방지 체크.
+if (getApps().length === 0) initializeApp();
 const db = getFirestore();
 
 const REGION = "asia-northeast3";
@@ -22,17 +27,6 @@ function fmtTime(t) {
   return `${ap} ${h12}:${String(m).padStart(2, "0")}`;
 }
 
-// 직원-팀 다대다 멤버십 조회 — 클라이언트 src/lib/membership.js와 같은 규칙.
-// memberships 필드가 없는(리팩터 이전) 레거시 직원은 team/role 단일 필드에서 즉석 파생.
-function getMemberships(u) {
-  if (!u) return [];
-  if (u.memberships) return u.memberships;
-  if (u.role === "최고관리자") return [];
-  if (u.team && u.team !== "사장") {
-    return [{ team: u.team, role: u.role === "최고관리자" ? "팀장" : (u.role || "팀원") }];
-  }
-  return [];
-}
 function isMemberOfTeam(u, team) {
   return getMemberships(u).some((m) => m.team === team);
 }
@@ -250,88 +244,6 @@ export const extractFromImage = onCall(
 // ── 팀 캘린더 구독 피드 (.ics) — 네이버/구글 캘린더 "URL로 구독"용 ──────────
 // 네이버는 자동 동기화용 구독 링크를 만들 수 있는 공개 쓰기 API가 없어서
 // 반대 방향(클린메니져 → 네이버)으로 표준 iCalendar 피드를 발행해 구독하게 함.
-const fmtDate = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-const parseDate = s => { if (!s) return null; const [y,m,dd] = s.split("-").map(Number); return new Date(y,m-1,dd); };
-const diffDays = (s,e) => !s||!e?0:Math.round((parseDate(e)-parseDate(s))/864e5);
-const addDays = (s,n) => { const d=parseDate(s); d.setDate(d.getDate()+n); return fmtDate(d); };
-const nthWeekdayOfMonthF = (year, monthIndex, weekday, ordinal) => {
-  if (ordinal === -1) {
-    const last = new Date(year, monthIndex+1, 0);
-    const back = (last.getDay() - weekday + 7) % 7;
-    last.setDate(last.getDate() - back);
-    return last;
-  }
-  const first = new Date(year, monthIndex, 1);
-  const fwd = (weekday - first.getDay() + 7) % 7;
-  return new Date(year, monthIndex, 1 + fwd + (ordinal-1)*7);
-};
-
-// 앱 캘린더 화면의 expandRecurring 과 동일한 규칙으로 반복 일정을 개별 회차로 전개
-function expandRecurringForFeed(events) {
-  const HARD_CAP = 400;
-  const now = new Date();
-  const defaultUntil = fmtDate(new Date(now.getFullYear(), now.getMonth() + 6, now.getDate()));
-  const out = [];
-  for (const ev of events) {
-    if (!ev.repeat || ev.repeat === "none") { out.push(ev); continue; }
-    const dur      = diffDays(ev.start, ev.end || ev.start);
-    const until    = ev.repeatUntil || defaultUntil;
-    const untilD   = parseDate(until);
-    const startD   = parseDate(ev.start);
-    const interval = Math.max(1, Number(ev.repeatInterval) || 1);
-    const push = (dStr) => {
-      const ex = ev.exceptions?.[dStr];
-      if (ex && ex._deleted) return;
-      const merged = ex ? { ...ev, ...ex } : ev;
-      const outStart = ex?.start || dStr;
-      const outEnd   = ex?.end   || addDays(outStart, dur);
-      out.push({ ...merged, _origDate: dStr, start: outStart, end: outEnd });
-    };
-    let count = 0;
-    if (ev.repeat === "daily") {
-      let cur = ev.start;
-      while (cur <= until && count < HARD_CAP) { push(cur); count++; cur = addDays(cur, interval); }
-    } else if (ev.repeat === "weekly") {
-      const weekdays  = (ev.repeatWeekdays && ev.repeatWeekdays.length) ? ev.repeatWeekdays : [startD.getDay()];
-      const weekStart = new Date(startD); weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-      let cur = new Date(startD);
-      while (cur <= untilD && count < HARD_CAP) {
-        const weekIdx = Math.floor((cur - weekStart) / (7*864e5));
-        if (weekIdx % interval === 0 && weekdays.includes(cur.getDay())) { push(fmtDate(cur)); count++; }
-        cur.setDate(cur.getDate() + 1);
-      }
-    } else if (ev.repeat === "monthly") {
-      let idx = 0;
-      while (count < HARD_CAP && idx < 400) {
-        const monTotal = startD.getMonth() + idx*interval;
-        const y  = startD.getFullYear() + Math.floor(monTotal/12);
-        const mo = ((monTotal%12)+12)%12;
-        const d  = ev.repeatMonthlyType === "weekday"
-          ? nthWeekdayOfMonthF(y, mo, ev.repeatMonthlyWeekday ?? startD.getDay(), ev.repeatMonthlyOrdinal || 1)
-          : new Date(y, mo, Math.min(ev.repeatMonthlyDay || startD.getDate(), new Date(y, mo+1, 0).getDate()));
-        if (d > untilD) break;
-        if (d >= startD) { push(fmtDate(d)); count++; }
-        idx++;
-      }
-    } else if (ev.repeat === "yearly") {
-      let idx = 0;
-      while (count < HARD_CAP && idx < 200) {
-        const year = startD.getFullYear() + idx*interval;
-        const mo   = (ev.repeatYearlyMonth || startD.getMonth()+1) - 1;
-        const d    = ev.repeatYearlyType === "weekday"
-          ? nthWeekdayOfMonthF(year, mo, ev.repeatYearlyWeekday ?? startD.getDay(), ev.repeatYearlyOrdinal || 1)
-          : new Date(year, mo, Math.min(ev.repeatYearlyDay || startD.getDate(), new Date(year, mo+1, 0).getDate()));
-        if (d > untilD) break;
-        if (d >= startD) { push(fmtDate(d)); count++; }
-        idx++;
-      }
-    } else {
-      out.push(ev);
-    }
-  }
-  return out;
-}
-
 function icsEscape(str) {
   return String(str || "")
     .replace(/\\/g, "\\\\")
