@@ -21,6 +21,16 @@ const app = express();
 // "너무 허용적"이라고 또 거부하므로, 정확히 한 홉(Google 프론트엔드)만 신뢰하도록 지정.
 app.set("trust proxy", 1);
 
+// 디버깅용 요청/응답 로깅 — SDK가 내부 에러를 상세 메시지 없이 삼키는 경우가 있어서
+// 최소한 "어느 경로로 몇 번 상태코드가 나갔는지"는 항상 보이게 함.
+app.use((req, res, next) => {
+  const t0 = Date.now();
+  res.on("finish", () => {
+    console.log(`[mcp] ${req.method} ${req.path} -> ${res.statusCode} (${Date.now() - t0}ms) auth=${req.headers.authorization ? "present" : "none"}`);
+  });
+  next();
+});
+
 // mcpAuthRouter가 /authorize, /token, /register, /revoke, /.well-known/oauth-*
 // 를 origin 루트에 통째로 깐다 (SDK 제약 — 경로 접두사로 못 묶음. firebase.json에서
 // 이 경로들을 개별적으로 이 함수(mcp)로 라우팅해줘야 함).
@@ -38,10 +48,25 @@ app.use(loginRouter);
 
 const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(MCP_URL);
 
+// requireBearerAuth가 verifyAccessToken 실패 사유를 응답엔 담아주지만 서버 로그엔 안 남기므로
+// 여기서 감싸서 원인을 기록 (토큰 위조/만료 vs 우리 쪽 버그를 구분하기 위함).
+const loggingVerifier = {
+  async verifyAccessToken(token) {
+    try {
+      const info = await provider.verifyAccessToken(token);
+      console.log(`[mcp] verifyAccessToken OK clientId=${info.clientId}`);
+      return info;
+    } catch (e) {
+      console.log(`[mcp] verifyAccessToken FAILED: ${e?.message || e}`);
+      throw e;
+    }
+  },
+};
+
 app.all(
   "/mcp",
   express.json(),
-  requireBearerAuth({ verifier: provider, resourceMetadataUrl }),
+  requireBearerAuth({ verifier: loggingVerifier, resourceMetadataUrl }),
   async (req, res) => {
     const companyId = MCP_COMPANY_ID.value();
     const server = createMcpServer(companyId);

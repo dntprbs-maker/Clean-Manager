@@ -12,16 +12,21 @@ function randomToken() {
   return randomBytes(32).toString("base64url");
 }
 
+// resource는 SDK가 URL 인스턴스로 넘겨줄 때가 있는데, Firestore는 URL 객체를 직렬화 못 해서
+// 그대로 쓰면 조용히 500이 난다 — 문자열로 정규화해서 저장.
+const resourceToString = (resource) => (resource ? (resource.href ?? String(resource)) : null);
+
 async function writePair(db, { clientId, scopes, resource, accessToken, refreshToken }) {
   const nowSec = Math.floor(Date.now() / 1000);
   const accessHash = sha256Hex(accessToken);
   const refreshHash = sha256Hex(refreshToken);
+  const resourceStr = resourceToString(resource);
   const batch = db.batch();
   batch.set(db.doc(`mcpOAuthTokens/${accessHash}`), {
     type: "access",
     clientId,
     scopes: scopes || [],
-    resource: resource || null,
+    resource: resourceStr,
     expiresAt: nowSec + ACCESS_TOKEN_TTL_SEC,
     pairHash: refreshHash,
   });
@@ -29,7 +34,7 @@ async function writePair(db, { clientId, scopes, resource, accessToken, refreshT
     type: "refresh",
     clientId,
     scopes: scopes || [],
-    resource: resource || null,
+    resource: resourceStr,
     expiresAt: nowSec + REFRESH_TOKEN_TTL_SEC,
     pairHash: accessHash,
   });
