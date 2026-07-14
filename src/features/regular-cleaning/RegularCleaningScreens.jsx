@@ -3,6 +3,7 @@ import { X, ChevronLeft, ChevronRight, Edit3, Trash2, Check } from "lucide-react
 import { useC } from "../../context/AppContext";
 import { fmt, WD, fmtTime } from "../../lib/dateTime";
 import { assignmentOccursOn, describeRepeat, repeatRuleValid, assignmentRepeatRule, WAGE_TYPES, wageTypeLabel } from "../../lib/repeat";
+import { computeSettlement } from "../../lib/settlement";
 import { RepeatPanel } from "../../components/shared/RepeatPicker";
 import { teamsLabel } from "../../lib/membership";
 
@@ -344,15 +345,50 @@ export function MyRegularCleaningScreen() {
           </div>
         ) : (
           <div className="bg-white rounded-2xl border border-gray-100 divide-y divide-gray-50">
-            {mySettlements.map(s => (
-              <div key={s.id} className="flex items-center justify-between px-4 py-3">
-                <span className="text-sm text-gray-800">{s.yearMonth}</span>
-                <span className="text-sm font-bold text-gray-900">{Number(s.finalAmount || 0).toLocaleString()}원</span>
-              </div>
-            ))}
+            {mySettlements.map(s => <MySettlementRow key={s.id} s={s}/>)}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// 내 급여 한 줄 — 탭하면 확정 당시 저장된 계산 내역(breakdown)을 명세처럼 펼쳐 보여준다.
+// breakdown이 없는 레거시 정산 문서는 금액만 표시.
+function MySettlementRow({ s }) {
+  const [open, setOpen] = useState(false);
+  const b = s.breakdown;
+  const Row = ({ label, value }) => (
+    <div className="flex items-center justify-between text-xs text-gray-500">
+      <span>{label}</span><span className="font-semibold text-gray-700">{Number(value || 0).toLocaleString()}원</span>
+    </div>
+  );
+  return (
+    <div className="px-4 py-3">
+      <button onClick={() => b && setOpen(o => !o)} className="w-full flex items-center justify-between">
+        <span className="text-sm text-gray-800 flex items-center gap-1.5">
+          {s.yearMonth}
+          {b && <span className="text-[10px] text-gray-400">{open ? "▲" : "▼ 내역"}</span>}
+        </span>
+        <span className="text-sm font-bold text-gray-900">{Number(s.finalAmount || 0).toLocaleString()}원</span>
+      </button>
+      {open && b && (
+        <div className="mt-2 pl-1 flex flex-col gap-1 border-l-2 border-gray-100 ml-1 pl-3">
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <span>근무일수</span><span className="font-semibold text-gray-700">{b.workDays}일</span>
+          </div>
+          {b.dailySum > 0 && <Row label="일급합계" value={b.dailySum}/>}
+          {b.weeklySum > 0 && <Row label="주급합계" value={b.weeklySum}/>}
+          {b.monthlySum > 0 && <Row label="월급합계" value={b.monthlySum}/>}
+          {b.allowanceSum > 0 && <Row label="일 보조금" value={b.allowanceSum}/>}
+          {b.extraSum > 0 && <Row label="추가지급" value={b.extraSum}/>}
+          <div className="h-px bg-gray-100 my-0.5"/>
+          <Row label="계산 총액" value={b.refTotal}/>
+          {Number(s.finalAmount || 0) !== Number(b.refTotal || 0) && (
+            <p className="text-[11px] text-gray-400">* 최종 확정금액은 계산 총액에서 조정된 금액입니다</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -398,25 +434,14 @@ export function MonthlySettlementScreen() {
 }
 
 function SettlementCard({ employee, ym }) {
-  const { assignments, attendance, extraPayments, monthlySettlements, setEmployeeAllowance, deleteExtraPayment, confirmSettlement, setExtraPaymentModal } = useC();
-  const monthAtt = attendance.filter(a => a.employeeId === employee.id && a.confirmed && a.date.startsWith(ym));
-  const workDays = new Set(monthAtt.map(a => a.date)).size;
-  // 일급 배정만 근무일수 기준으로 자동 합산 (레거시 데이터는 wageType 없이 dailyWage만 있어 "일급"으로 취급)
-  const isDaily = a => (a.wageType || "daily") === "daily";
-  const wageSum = monthAtt.reduce((sum, a) => {
-    const asg = assignments.find(x => x.employeeId === employee.id && x.siteId === a.siteId);
-    if (!asg || !isDaily(asg)) return sum;
-    return sum + Number(asg.wageAmount ?? asg.dailyWage ?? 0);
-  }, 0);
-  // 주급/월급 배정은 "며칠 일했는지"로 계산할 수 없어 자동합산하지 않고 참고용으로만 표시
-  const periodicAssignments = assignments.filter(a => a.employeeId === employee.id && !isDaily(a));
-  const myExtras = extraPayments.filter(p => p.employeeId === employee.id && (p.date || "").startsWith(ym));
-  const extraSum = myExtras.reduce((s, p) => s + Number(p.amount || 0), 0);
+  const { sites, assignments, attendance, extraPayments, monthlySettlements, setEmployeeAllowance, deleteExtraPayment, confirmSettlement, setExtraPaymentModal } = useC();
+  const siteName = id => sites.find(s => s.id === id)?.name || "삭제된 현장";
   const [allowance, setAllowance] = useState(employee.dailyAllowance || 0);
-  const allowanceSum = allowance * workDays;
-  const refTotal = wageSum + allowanceSum + extraSum;
+  const calc = computeSettlement({ employee, ym, assignments, attendance, extraPayments, allowance });
+  const { workDays, dailySum, weeklySum, monthlySum, weeklyLines, monthlyLines, myExtras, extraSum, allowanceSum, refTotal } = calc;
   const settlement = monthlySettlements.find(s => s.employeeId === employee.id && s.yearMonth === ym);
   const [finalAmount, setFinalAmount] = useState(settlement ? settlement.finalAmount : refTotal);
+  const breakdown = { workDays, dailySum, weeklySum, monthlySum, allowanceSum, extraSum, refTotal };
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-4 flex flex-col gap-3">
@@ -426,14 +451,26 @@ function SettlementCard({ employee, ym }) {
       </div>
       <div className="grid grid-cols-2 gap-2 text-xs text-gray-500">
         <div>근무일수 <span className="font-bold text-gray-800">{workDays}일</span></div>
-        <div>일급합계 <span className="font-bold text-gray-800">{wageSum.toLocaleString()}원</span></div>
+        <div>일급합계 <span className="font-bold text-gray-800">{dailySum.toLocaleString()}원</span></div>
       </div>
-      {periodicAssignments.length > 0 && (
-        <div className="rounded-xl bg-amber-50 border border-amber-100 p-2.5 text-[11px] text-amber-700 leading-relaxed">
-          ⚠️ 주급/월급 배정은 자동합산되지 않아요 — 참고 후 최종금액에 직접 반영하세요.
-          {periodicAssignments.map(a => (
-            <div key={a.id} className="font-bold mt-0.5">
-              {wageTypeLabel(a.wageType)} {Number(a.wageAmount || 0).toLocaleString()}원
+      {(weeklyLines.length > 0 || monthlyLines.length > 0) && (
+        <div className="flex flex-col gap-1 text-xs text-gray-500">
+          {weeklyLines.map(l => (
+            <div key={`w_${l.siteId}`} className="flex items-center justify-between">
+              <span>주급 · {siteName(l.siteId)} <span className="text-gray-400">({l.wageAmount.toLocaleString()} × {l.weeks}주)</span></span>
+              <span className="font-bold text-gray-800">{l.sum.toLocaleString()}원</span>
+            </div>
+          ))}
+          {monthlyLines.map(l => (
+            <div key={`m_${l.siteId}`} className="flex items-center justify-between">
+              {l.counted ? (
+                <>
+                  <span>월급 · {siteName(l.siteId)}</span>
+                  <span className="font-bold text-gray-800">{l.sum.toLocaleString()}원</span>
+                </>
+              ) : (
+                <span className="text-gray-300">월급 · {siteName(l.siteId)} — 이번달 출근 없음 (미합산)</span>
+              )}
             </div>
           ))}
         </div>
@@ -467,7 +504,7 @@ function SettlementCard({ employee, ym }) {
         <input type="number" inputMode="numeric" value={finalAmount}
           onChange={e => setFinalAmount(Number(e.target.value) || 0)}
           className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold"/>
-        <button onClick={() => confirmSettlement(employee.id, ym, finalAmount)}
+        <button onClick={() => confirmSettlement(employee.id, ym, finalAmount, breakdown)}
           className="px-4 py-2 rounded-xl text-xs font-bold text-white shrink-0"
           style={{ background: "linear-gradient(135deg,#1a56db,#2563eb)" }}>
           {settlement ? "재확정" : "확정"}

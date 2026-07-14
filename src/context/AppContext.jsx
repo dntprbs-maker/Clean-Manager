@@ -334,10 +334,12 @@ export function Provider({ children, loginUser, onLogout }) {
   }, [companyRef]);
 
   // ── 정기청소 월정산 확정 — employeeId+yearMonth를 문서id로 고정해 upsert ──
-  const confirmSettlement = useCallback((employeeId, yearMonth, finalAmount) => {
+  // breakdown(일급/주급/월급/보조금/추가지급 구성내역)을 같이 저장해 직원용 "내 급여"
+  // 명세에서 확정 당시 계산 근거를 보여준다 (레거시 문서는 breakdown 없이 finalAmount만 있음)
+  const confirmSettlement = useCallback((employeeId, yearMonth, finalAmount, breakdown = null) => {
     const id = `${employeeId}_${yearMonth}`;
     setDoc(doc(companyRef, "monthlySettlements", id), {
-      employeeId, yearMonth, finalAmount, confirmedAt: new Date().toISOString(),
+      employeeId, yearMonth, finalAmount, breakdown, confirmedAt: new Date().toISOString(),
     }, { merge: true });
   }, [companyRef]);
 
