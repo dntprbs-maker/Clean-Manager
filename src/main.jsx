@@ -19,6 +19,13 @@ if (faviconEl) {
   faviconEl.href = isLocal ? "/favicon-local.svg" : isPcClaudePreview ? "/favicon-preview.svg" : "/favicon.svg";
 }
 
+// 홈 화면 바로가기(삼성 인터넷 등)로 재접속하면 브라우저가 새로고침 없이 이전에
+// 열어뒀던 페이지(bfcache)를 그대로 복원해서 최신 배포 내용이 안 보이는 경우가 있다.
+// bfcache에서 복원된 진입(event.persisted)일 때만 강제로 새로고침한다.
+window.addEventListener("pageshow", (e) => {
+  if (e.persisted) window.location.reload();
+});
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     {isSuperAdmin ? <SuperAdmin /> : <App />}
