@@ -898,7 +898,7 @@ export function ExternalLinksScreen() {
 
 // ── 회사 정보 설정 모달 ───────────────────────────────────────────────
 export function CompanySettingsModal() {
-  const { companySettingsModal, setCompanySettingsModal, currentUser,
+  const { companySettingsModal, setCompanySettingsModal, currentUser, companyDoc,
           titleRule, typeKeywords, saveTitleRule } = useC();
   const [tab, setTab]             = useState("info");
   const [companyName, setCompanyName] = useState("");
@@ -912,8 +912,8 @@ export function CompanySettingsModal() {
 
   useEffect(() => {
     if (companySettingsModal) {
-      setCompanyName(currentUser?.companyName || "");
-      setLogoUrl(currentUser?.companyLogoUrl || "");
+      setCompanyName(companyDoc?.name ?? currentUser?.companyName ?? "");
+      setLogoUrl(companyDoc?.logoUrl ?? currentUser?.companyLogoUrl ?? "");
       setTab("info");
       setLocalRule(titleRule || DEFAULT_TITLE_RULE);
       setLocalKw(typeKeywords || DEFAULT_TYPE_KEYWORDS);
@@ -933,13 +933,14 @@ export function CompanySettingsModal() {
     setLoading(true);
     try {
       await updateDoc(doc(db, "companies", currentUser.companyId), { name: companyName, logoUrl });
-      // admins 문서의 companyName도 동기화 (로그인 후 localStorage에 반영되도록)
-      await updateDoc(doc(db, "admins", currentUser.uid), { companyName: companyName });
+      // admins 문서에도 동기화 — 다음 로그인 시 이 값으로 세션이 채워짐(회사 문서를 직접 못 읽는 경로 대비)
+      await updateDoc(doc(db, "admins", currentUser.uid), { companyName, companyLogoUrl: logoUrl });
       try {
         const saved = JSON.parse(localStorage.getItem("loginUser") || "{}");
         localStorage.setItem("loginUser", JSON.stringify({ ...saved, companyName, companyLogoUrl: logoUrl }));
       } catch {}
-      alert("저장됐습니다. 새로고침 시 적용됩니다."); window.location.reload();
+      // companyDoc은 실시간 리스너로 화면에 바로 반영되므로 새로고침 불필요
+      alert("저장됐습니다."); close();
     } catch(e) { alert("오류: " + e.message); } finally { setLoading(false); }
   };
 

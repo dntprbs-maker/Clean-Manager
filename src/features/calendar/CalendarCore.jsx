@@ -2335,7 +2335,7 @@ export function EventModal() {
 
 // ── 상단 헤더 ─────────────────────────────────────────────────────
 export function TopHeader() {
-  const { current, setCurrent, setDrawer, sheetMode, setSheetMode, selDate, setSelDate, setSearchOpen, currentUser, onLogout, extraCalFilter, setExtraCalFilter } = useC();
+  const { current, setCurrent, setDrawer, sheetMode, setSheetMode, selDate, setSelDate, setSearchOpen, currentUser, companyDoc, onLogout, extraCalFilter, setExtraCalFilter } = useC();
   const y=current.getFullYear(), m=current.getMonth();
   const [picker,setPicker]=useState(false);
   const [companyPicker,setCompanyPicker]=useState(false);
@@ -2384,11 +2384,11 @@ export function TopHeader() {
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white shadow-sm overflow-hidden"
             style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
-            {currentUser?.companyLogoUrl
-              ? <img src={currentUser.companyLogoUrl} alt="Logo" className="w-full h-full object-cover" />
-              : (currentUser?.companyName?.charAt(0) || "🏢")}
+            {(companyDoc?.logoUrl || currentUser?.companyLogoUrl)
+              ? <img src={companyDoc?.logoUrl || currentUser.companyLogoUrl} alt="Logo" className="w-full h-full object-cover" />
+              : ((companyDoc?.name || currentUser?.companyName)?.charAt(0) || "🏢")}
           </div>
-          <span className="font-extrabold text-gray-900 text-lg">{currentUser?.companyName || "로딩중..."}</span>
+          <span className="font-extrabold text-gray-900 text-lg">{companyDoc?.name || currentUser?.companyName || "로딩중..."}</span>
           {/* 다중 소속일 때만 전환 버튼 표시 */}
           {isMulti && (
             <button onClick={checkMulti} className="text-xs text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full font-bold">전환</button>

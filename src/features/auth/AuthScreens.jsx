@@ -62,7 +62,7 @@ export function LoginScreen({ onLogin }) {
         const firstData = activeDocs[0].data();
         if(!firstData.pw) {
           const compDoc = await getDoc(doc(db,"companies",firstData.companyId));
-          setPendingUser({...firstData, uid:activeDocs[0].id, companyName:compDoc.exists()?compDoc.data().name:"클린메니져"});
+          setPendingUser({...firstData, uid:activeDocs[0].id, companyName:compDoc.exists()?compDoc.data().name:"클린메니져", companyLogoUrl:compDoc.data()?.logoUrl});
           setMode("setPw"); setLoading(false); return;
         }
         if(!pw.trim()){ setError("비밀번호를 입력하세요."); setLoading(false); return; }
@@ -80,7 +80,7 @@ export function LoginScreen({ onLogin }) {
 
         // 단일 소속
         const compDoc = await getDoc(doc(db,"companies",firstData.companyId));
-        const user = {...firstData, uid:activeDocs[0].id, companyName:compDoc.exists()?compDoc.data().name:"클린메니져"};
+        const user = {...firstData, uid:activeDocs[0].id, companyName:compDoc.exists()?compDoc.data().name:"클린메니져", companyLogoUrl:compDoc.data()?.logoUrl};
         try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
         onLogin(user); return;
       } else {
@@ -95,7 +95,7 @@ export function LoginScreen({ onLogin }) {
         if(adminData.pw !== pw){ setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
         const compDoc = await getDoc(doc(db,"companies",adminData.companyId));
         if(compDoc.exists() && compDoc.data().status === "deleted"){ setError("탈퇴 또는 삭제된 업체입니다."); setLoading(false); return; }
-        const user = {...adminData, uid:activeAdmin.id, companyName:compDoc.exists()?compDoc.data().name:"클린메니져", role:"최고관리자"};
+        const user = {...adminData, uid:activeAdmin.id, companyName:compDoc.exists()?compDoc.data().name:"클린메니져", companyLogoUrl:compDoc.data()?.logoUrl, role:"최고관리자"};
         try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
         onLogin(user); return;
       }
