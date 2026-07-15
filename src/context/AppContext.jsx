@@ -513,6 +513,17 @@ export function Provider({ children, loginUser, onLogout }) {
     try { localStorage.setItem("loginUser", JSON.stringify(updated)); } catch {}
   }, [users, loginUser?.uid, currentUser]);
 
+  // 회사명/로고도 같은 문제 — localStorage에 로그인 시점 값(옛날엔 base64 통짜 로고)이
+  // 박제돼 있어서, 회사 설정에서 바꿔도 다음 접속 때 Firestore 스냅샷이 오기 전까지
+  // 계속 옛 로고가 보인다. companyDoc 스냅샷이 올 때마다 세션 캐시를 최신으로 맞춘다.
+  useEffect(() => {
+    if (!companyDoc?.name && !companyDoc?.logoUrl) return;
+    if (companyDoc.name === currentUser.companyName && companyDoc.logoUrl === currentUser.companyLogoUrl) return;
+    const updated = { ...currentUser, companyName: companyDoc.name, companyLogoUrl: companyDoc.logoUrl };
+    setCurrentUser(updated);
+    try { localStorage.setItem("loginUser", JSON.stringify(updated)); } catch {}
+  }, [companyDoc, currentUser]);
+
   const openModal   = useCallback((date=null,editId=null,scope="all",instanceEv=null)=>setModal({open:true,date,editId,scope,instanceEv}),[]);
   const closeModal  = useCallback(()=>setModal({open:false,date:null,editId:null,scope:"all",instanceEv:null}),[]);
 
