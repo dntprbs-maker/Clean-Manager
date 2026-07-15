@@ -927,14 +927,33 @@ export function CompanySettingsModal() {
 
   // 이미지를 Firestore에 base64로 직접 저장하면 문서 1MB 제한에 걸려 저장이 실패하므로,
   // Storage에 올리고 짧은 다운로드 URL만 Firestore에 저장한다.
+  // 원본 사진을 그대로 올리면 몇 MB짜리라 접속할 때마다 로고가 늦게 떠서,
+  // 업로드 전에 256px로 리사이즈하고(수십 KB) 브라우저가 캐시하도록 헤더도 지정한다.
+  const resizeLogo = (file, maxSize = 256) => new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("이미지 변환 실패")), "image/png");
+    };
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error("이미지를 읽을 수 없습니다")); };
+    img.src = objectUrl;
+  });
+
   const handleLogoUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setLogoUploading(true);
     try {
-      const path = `companies/${currentUser.companyId}/logo/${Date.now()}_${file.name}`;
+      const blob = await resizeLogo(file);
+      const path = `companies/${currentUser.companyId}/logo/${Date.now()}.png`;
       const sRef = storageRef(storage, path);
-      await uploadBytes(sRef, file);
+      await uploadBytes(sRef, blob, { cacheControl: "public,max-age=31536000,immutable" });
       const url = await getDownloadURL(sRef);
       setLogoUrl(url);
     } catch (err) {
