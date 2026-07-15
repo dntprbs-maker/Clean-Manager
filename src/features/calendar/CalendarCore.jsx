@@ -17,7 +17,7 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage
 import { httpsCallable } from "firebase/functions";
 
 import { HOLIDAYS, WD, fmt, pd, diff, add, fmtTime } from "../../lib/dateTime";
-import { CALS, calById } from "../../lib/calendars";
+import { CALS, calById, REGULAR_CAL_ID } from "../../lib/calendars";
 import { REPEAT_OPTS } from "../../lib/repeat";
 import { getReportStatus } from "../../lib/reports";
 import { fmtPhone } from "../../lib/phone";
@@ -1806,7 +1806,7 @@ export function DateTimePicker({ form, set, errs, lockRepeat }) {
 }
 
 export function EventModal() {
-  const { modal, closeModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, titleRule, typeKeywords, companyId, reports, companyDoc, currentUser, setFieldReportEv } = useC();
+  const { modal, closeModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, teams, titleRule, typeKeywords, companyId, reports, companyDoc, currentUser, setFieldReportEv } = useC();
   const { open, date, editId, scope, instanceEv } = modal;
   // 반복일정의 "이 일정만/이후 전체" 수정은 클릭한 회차(instanceEv)의 값으로 폼을 채운다.
   const editEv = editId ? ((scope && scope!=="all" && instanceEv) ? instanceEv : events.find(e=>e.id===editId)) : null;
@@ -1829,6 +1829,18 @@ export function EventModal() {
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
   const isDirty=()=>origForm.current && JSON.stringify(form)!==JSON.stringify(origForm.current);
   const tryClose=()=>{ if(editId&&isDirty()) setExitConfirm(true); else closeModal(); };
+
+  // 담당팀 배정 드롭다운 목록 — 개인 캘린더(본인 것만)는 항상 최상단, 나머지 팀은
+  // "팀" 탭에서 드래그로 정한 teams 배열 순서를 그대로 따른다(cals 컬렉션 자체엔 순서가 없음).
+  const myUserId = currentUser.id || currentUser.uid;
+  const calOptions = useMemo(() => cals
+    .filter(c => c.isField !== false && c.id !== REGULAR_CAL_ID && (!c.personal || c.ownerId === myUserId))
+    .sort((a, b) => {
+      if (a.personal) return -1;
+      if (b.personal) return 1;
+      const ai = teams.indexOf(a.label), bi = teams.indexOf(b.label);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    }), [cals, teams, myUserId]);
 
   useEffect(()=>{
     if(open){
@@ -2132,7 +2144,7 @@ export function EventModal() {
           )}
           {calDropOpen && (
             <div className="absolute left-0 top-full mt-1 bg-white rounded-xl shadow-xl border border-gray-100 z-[100] min-w-[140px] py-1 overflow-hidden">
-              {cals.filter(c => c.isField !== false).map(cal=>{
+              {calOptions.map(cal=>{
                 const selected = form.calId === cal.id;
                 return (
                   <button key={cal.id}

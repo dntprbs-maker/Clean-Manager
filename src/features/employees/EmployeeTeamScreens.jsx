@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Edit3, Trash2, Plus, Link2, MoreVertical } from "lucide-react";
+import { X, Edit3, Trash2, Plus, Link2, MoreVertical, ChevronRight } from "lucide-react";
 import { collection, doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../../firebase";
 import { useC } from "../../context/AppContext";
@@ -60,7 +60,8 @@ function EmployeeTab() {
       ) : (
         <div className="bg-gray-50 px-4 py-2 space-y-2">
           {sorted.map(u => (
-            <div key={u.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
+            <button key={u.id} onClick={() => setEmpModal({open:true, editId:u.id})}
+              className="w-full bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between text-left active:bg-gray-50 transition-colors">
               <div>
                 <div className="flex items-center gap-2 mb-0.5">
                   <span className="font-bold text-gray-900 text-sm">{u.name}</span>
@@ -70,10 +71,8 @@ function EmployeeTab() {
                 </div>
                 <div className="text-xs text-gray-400">📞 {fmtPhone(u.phone)}</div>
               </div>
-              <button onClick={() => setEmpModal({open:true, editId:u.id})} className="p-2 text-gray-400 hover:text-gray-800 hover:bg-gray-100 rounded-full">
-                <Edit3 size={16}/>
-              </button>
-            </div>
+              <ChevronRight size={16} className="text-gray-300 shrink-0"/>
+            </button>
           ))}
         </div>
       )}
@@ -550,8 +549,8 @@ function TeamTab() {
                   <button onClick={() => setMemberOpenIdx(memberOpenIdx === i ? null : i)} className="flex-1 flex items-center gap-1.5 text-left">
                     <span className="font-bold text-gray-800 text-sm">{t}</span>
                     <span className="text-[11px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{members.length}명</span>
-                    {cal && cal.isField === false && (
-                      <span className="text-[10px] text-gray-400 border border-gray-200 rounded-full px-1.5 py-0.5">업무팀</span>
+                    {cal && cal.isField !== false && (
+                      <span className="text-[10px] text-blue-600 border border-blue-200 bg-blue-50 rounded-full px-1.5 py-0.5">현장팀</span>
                     )}
                     {!cal && (
                       <span className="text-[10px] font-bold text-red-500 border border-dashed border-red-300 bg-red-50 rounded-full px-1.5 py-0.5">캘린더 없음</span>
@@ -568,20 +567,25 @@ function TeamTab() {
                       <MoreVertical size={16}/>
                     </button>
                     {menuIdx === i && (
-                      <div className="absolute right-0 top-9 bg-white rounded-xl shadow-xl border border-gray-100 z-20 w-48 py-1 flex flex-col">
-                        <div className="px-3 py-2 flex items-center gap-1.5 border-b border-gray-50">
-                          <span className="text-xs text-gray-400 mr-1 shrink-0">색상</span>
-                          {TEAM_COLORS.map(color => (
-                            <button key={color}
-                              onClick={() => cal && updateCal({...cal, color})}
-                              disabled={!cal}
-                              className="w-4 h-4 rounded-full border transition-transform shrink-0"
-                              style={{
-                                background: color,
-                                borderColor: cal?.color === color ? "#1a1a1a" : "transparent",
-                                transform: cal?.color === color ? "scale(1.25)" : "scale(1)",
-                              }}/>
-                          ))}
+                      <>
+                        {/* 바깥 클릭하면 닫히는 투명 배경 */}
+                        <div className="fixed inset-0 z-10" onClick={() => setMenuIdx(null)}/>
+                        <div className="absolute right-0 top-9 bg-white rounded-xl shadow-xl border border-gray-100 z-20 w-52 py-1 flex flex-col">
+                        <div className="px-3 py-2 flex flex-col gap-1.5 border-b border-gray-50">
+                          <span className="text-xs text-gray-400">색상</span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {TEAM_COLORS.map(color => (
+                              <button key={color}
+                                onClick={() => cal && updateCal({...cal, color})}
+                                disabled={!cal}
+                                className="w-4 h-4 rounded-full border transition-transform shrink-0"
+                                style={{
+                                  background: color,
+                                  borderColor: cal?.color === color ? "#1a1a1a" : "transparent",
+                                  transform: cal?.color === color ? "scale(1.25)" : "scale(1)",
+                                }}/>
+                            ))}
+                          </div>
                         </div>
                         {cal ? (
                           <button onClick={() => { updateCal({...cal, isField: !(cal.isField !== false)}); setMenuIdx(null); }}
@@ -608,7 +612,8 @@ function TeamTab() {
                           className="px-3 py-2 text-left text-xs font-medium text-red-500 hover:bg-red-50 flex items-center gap-1.5">
                           <Trash2 size={13}/> 삭제
                         </button>
-                      </div>
+                        </div>
+                      </>
                     )}
                   </div>
                 )}
@@ -671,11 +676,13 @@ function TeamTab() {
       {memberOpenIdx !== null && (() => {
         const t = visibleTeams[memberOpenIdx];
         if (!t) return null;
-        const members = users.filter(u => isMemberOf(u, t));
-        const nonMembers = users.filter(u => !isMemberOf(u, t));
+        const byName = (a, b) => (a.name || "").localeCompare(b.name || "", "ko");
+        const members = users.filter(u => isMemberOf(u, t)).sort(byName);
+        const nonMembers = users.filter(u => !isMemberOf(u, t)).sort(byName);
         return (
-          <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/40" onClick={() => { setMemberOpenIdx(null); setAddMemberIdx(null); }}>
-            <div className="bg-white w-full max-w-sm rounded-t-2xl p-4 max-h-[75vh] overflow-y-auto flex flex-col gap-2" onClick={e => e.stopPropagation()}>
+          <>
+          <div className="fixed inset-0 z-30 flex items-center justify-center px-4 pb-32 bg-black/40" onClick={() => { setMemberOpenIdx(null); setAddMemberIdx(null); }}>
+            <div className="bg-white w-full max-w-sm rounded-2xl p-4 max-h-[65vh] overflow-y-auto flex flex-col gap-2 shadow-2xl" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-1 gap-2">
                 <h3 className="font-bold text-gray-900 text-sm flex-1 truncate">{t} <span className="text-gray-400 font-normal">{members.length}명</span></h3>
                 {addMemberIdx !== memberOpenIdx && (
@@ -704,40 +711,46 @@ function TeamTab() {
                   </div>
                 </div>
               ))}
-
-              {addMemberIdx === memberOpenIdx && (
-                <div className="flex flex-col gap-3 bg-gray-50 rounded-lg border border-gray-100 p-3 mt-1">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[11px] text-gray-400 font-bold">직원</label>
-                    <select value={addMemberEmpId} onChange={e=>setAddMemberEmpId(e.target.value)}
-                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none bg-white">
-                      <option value="">직원 선택</option>
-                      {nonMembers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[11px] text-gray-400 font-bold">역할</label>
-                    <div className="flex bg-white border border-gray-200 rounded-lg p-0.5">
-                      {["팀장","팀원"].map(r => (
-                        <button key={r} onClick={()=>setAddMemberRole(r)}
-                          className={`flex-1 py-1.5 rounded-md text-xs font-bold transition-colors ${addMemberRole===r?"bg-blue-500 text-white":"text-gray-400"}`}>
-                          {r}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex gap-2 pt-2 border-t border-gray-200">
-                    <button onClick={() => { setAddMemberIdx(null); setAddMemberEmpId(""); }}
-                      className="flex-1 py-2 rounded-lg text-xs font-bold text-gray-500 bg-gray-100">취소</button>
-                    <button onClick={() => { if(addMemberEmpId){ addMember(t, addMemberEmpId, addMemberRole); setAddMemberIdx(null); setAddMemberEmpId(""); } }}
-                      disabled={!addMemberEmpId}
-                      className="flex-[2] py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
-                      style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>+ 팀에 추가</button>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
+
+          {/* 직원 추가 폼 — 바텀시트 안(화면 아래쪽)이 아니라 중앙보다 살짝 위쪽에 별도 팝업으로 */}
+          {addMemberIdx === memberOpenIdx && (
+            <div className="fixed inset-0 z-40 flex items-center justify-center px-4 pb-32"
+              onClick={() => { setAddMemberIdx(null); setAddMemberEmpId(""); }}>
+              <div className="bg-white w-full max-w-xs rounded-2xl shadow-2xl p-4 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
+                <h4 className="font-bold text-gray-900 text-sm">{t}에 직원 추가</h4>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] text-gray-400 font-bold">직원</label>
+                  <select value={addMemberEmpId} onChange={e=>setAddMemberEmpId(e.target.value)}
+                    className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none bg-white">
+                    <option value="">직원 선택</option>
+                    {nonMembers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] text-gray-400 font-bold">역할</label>
+                  <div className="flex bg-gray-50 border border-gray-200 rounded-lg p-0.5">
+                    {["팀장","팀원"].map(r => (
+                      <button key={r} onClick={()=>setAddMemberRole(r)}
+                        className={`flex-1 py-1.5 rounded-md text-xs font-bold transition-colors ${addMemberRole===r?"bg-blue-500 text-white":"text-gray-400"}`}>
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-2 border-t border-gray-100">
+                  <button onClick={() => { setAddMemberIdx(null); setAddMemberEmpId(""); }}
+                    className="flex-1 py-2 rounded-lg text-xs font-bold text-gray-500 bg-gray-100">취소</button>
+                  <button onClick={() => { if(addMemberEmpId){ addMember(t, addMemberEmpId, addMemberRole); setAddMemberIdx(null); setAddMemberEmpId(""); } }}
+                    disabled={!addMemberEmpId}
+                    className="flex-[2] py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
+                    style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>+ 팀에 추가</button>
+                </div>
+              </div>
+            </div>
+          )}
+          </>
         );
       })()}
     </div>
