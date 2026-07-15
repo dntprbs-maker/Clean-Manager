@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Edit3, Trash2, Plus, Link2 } from "lucide-react";
+import { X, Edit3, Trash2, Plus, Link2, MoreVertical } from "lucide-react";
 import { collection, doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../../firebase";
 import { useC } from "../../context/AppContext";
 import { onlyDigits, fmtPhone } from "../../lib/phone";
 import { genFeedToken, feedUrl } from "../../lib/calendarFeed";
-import { isSuperAdmin, isMemberOf, teamRole, getMemberships } from "../../lib/membership";
+import { isSuperAdmin, isMemberOf, teamRole, getMemberships, teamsLabel } from "../../lib/membership";
 
 // ── 직원/팀 관리 화면 — 상단 탭으로 "직원"과 "팀"을 전환 ──────────────────────────
 export function EmployeeListScreen() {
@@ -47,80 +47,36 @@ export function EmployeeListScreen() {
   );
 }
 
-// ── 직원 탭 (팀별 아코디언 — 한 직원이 여러 팀에 동시 표시될 수 있음) ──────
+// ── 직원 탭 (팀 구분 없이 이름순 목록, 소속 팀은 이름 옆에 작게 표시) ──────
 function EmployeeTab() {
-  const { users, setEmpModal, teams } = useC();
-  // 처음엔 모든 팀이 접힌 상태
-  const [openTeams, setOpenTeams] = useState(() => new Set());
+  const { users, setEmpModal } = useC();
 
-  const toggle = (team) => {
-    setOpenTeams(prev => {
-      const next = new Set(prev);
-      next.has(team) ? next.delete(team) : next.add(team);
-      return next;
-    });
-  };
-
-  // 팀별로 그룹핑 — 소속 멤버십 기준이라 한 직원이 여러 팀에 동시에 나타날 수 있음
-  const allTeams = teams.filter(t => t !== "사장");
-  const grouped = allTeams.map(team => ({
-    team,
-    members: users.filter(u => isMemberOf(u, team)),
-  }));
-  const superAdmins = users.filter(isSuperAdmin);
-  if (superAdmins.length) grouped.unshift({ team: "최고관리자", members: superAdmins });
-  const unassigned = users.filter(u => !isSuperAdmin(u) && getMemberships(u).length === 0);
-  if (unassigned.length) grouped.push({ team: "미배정", members: unassigned });
+  const sorted = [...users].sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko"));
 
   return (
     <div className="flex-1 overflow-y-auto pb-24">
-      {grouped.map(({ team, members }) => (
-        <div key={team} className="border-b border-gray-100 last:border-b-0">
-          {/* 팀 헤더 (클릭하면 토글) */}
-          <button
-            onClick={() => toggle(team)}
-            className="w-full flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50 active:bg-gray-100 transition-colors"
-          >
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-gray-800 text-sm">{team}</span>
-              <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{members.length}명</span>
+      {sorted.length === 0 ? (
+        <p className="text-xs text-gray-400 py-8 text-center">등록된 직원이 없습니다.</p>
+      ) : (
+        <div className="bg-gray-50 px-4 py-2 space-y-2">
+          {sorted.map(u => (
+            <div key={u.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="font-bold text-gray-900 text-sm">{u.name}</span>
+                  <span className="text-[11px] px-2 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">
+                    {isSuperAdmin(u) ? "최고관리자" : teamsLabel(u)}
+                  </span>
+                </div>
+                <div className="text-xs text-gray-400">📞 {fmtPhone(u.phone)}</div>
+              </div>
+              <button onClick={() => setEmpModal({open:true, editId:u.id})} className="p-2 text-gray-400 hover:text-gray-800 hover:bg-gray-100 rounded-full">
+                <Edit3 size={16}/>
+              </button>
             </div>
-            {/* 화살표 아이콘 */}
-            <span
-              className="text-gray-400 text-xs transition-transform duration-200"
-              style={{ transform: openTeams.has(team) ? "rotate(180deg)" : "rotate(0deg)" }}
-            >
-              ▼
-            </span>
-          </button>
-
-          {/* 팀 멤버 (펼쳐질 때만 표시) */}
-          {openTeams.has(team) && (
-            <div className="bg-gray-50 px-4 pb-2 space-y-2">
-              {members.length === 0 ? (
-                <p className="text-xs text-gray-400 py-3 text-center">등록된 직원이 없습니다.</p>
-              ) : (
-                members.map(u => (
-                  <div key={u.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="font-bold text-gray-900 text-sm">{u.name}</span>
-                        <span className="text-[11px] px-2 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">
-                          {team === "최고관리자" ? "최고관리자" : (teamRole(u, team) || "팀원")}
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-400">📞 {fmtPhone(u.phone)}</div>
-                    </div>
-                    <button onClick={() => setEmpModal({open:true, editId:u.id})} className="p-2 text-gray-400 hover:text-gray-800 hover:bg-gray-100 rounded-full">
-                      <Edit3 size={16}/>
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -337,13 +293,14 @@ function TeamTab() {
   const [newTeam, setNewTeam]       = useState("");
   const [newTeamIsField, setNewTeamIsField] = useState(true);
   const [newTeamColor, setNewTeamColor] = useState("#f59e0b");
-  const [colorPickerIdx, setColorPickerIdx] = useState(null);
   const [addPopup, setAddPopup]     = useState(false);
   const TEAM_COLORS = ["#f59e0b","#ec4899","#06b6d4","#84cc16","#8b5cf6","#f97316","#ef4444","#1a56db","#16a34a","#0891b2"];
   const [editIdx, setEditIdx]       = useState(null);
   const [editName, setEditName]     = useState("");
   const [dragIdx, setDragIdx]   = useState(null);
   const [overIdx, setOverIdx]   = useState(null);
+  const [reorderMode, setReorderMode] = useState(false);
+  const [menuIdx, setMenuIdx]         = useState(null); // 어느 팀의 "⋮" 액션 메뉴가 열려있는지
   const longPressTimer = useRef(null);
   const touchDragIdx   = useRef(null);
   const touchStartY    = useRef(null);
@@ -515,20 +472,25 @@ function TeamTab() {
         </div>
       )}
 
-      {/* 팀 추가 버튼 */}
+      {/* 상단 바: 순서 변경 토글 + 팀 추가 */}
       <div className="px-4 pt-4 flex items-center justify-between">
-        <p className="text-xs text-gray-400">≡ 핸들을 길게 누르면 드래그로 순서 변경</p>
+        <button onClick={() => { setReorderMode(v => !v); setMenuIdx(null); }}
+          className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-colors ${
+            reorderMode ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-500 border-gray-200"
+          }`}>
+          {reorderMode ? "순서 변경 완료" : "≡ 순서 변경"}
+        </button>
         <button onClick={() => setAddPopup(true)}
           className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition-colors shrink-0 ml-2">
           + 팀 추가
         </button>
       </div>
 
-      {/* 팀 목록 */}
+      {/* 팀 목록 — 기본은 이름+인원만, 나머지 기능은 ⋮ 메뉴 안에 */}
       <div className="p-4 flex flex-col gap-3">
         {visibleTeams.map((t, i) => {
           const members = users.filter(u => isMemberOf(u, t));
-          const nonMembers = users.filter(u => !isMemberOf(u, t));
+          const cal = cals.find(c => c.label === t || c.name === t);
           return (
           <div
             key={t}
@@ -539,229 +501,245 @@ function TeamTab() {
             `}
           >
             <div
-              draggable
+              draggable={reorderMode}
               onDragStart={e => onDragStart(e, i)}
               onDragOver={e => onDragOver(e, i)}
               onDrop={e => onDrop(e, i)}
               onDragEnd={onDragEnd}
               className="flex items-center gap-2 p-3"
             >
-            {/* 드래그 핸들 (▲▼ 클릭 + 롱프레스 드래그) */}
-            <div
-              className="flex flex-col items-center cursor-grab active:cursor-grabbing px-1 select-none touch-none"
-              onTouchStart={e => onTouchStart(e, i)}
-              onTouchMove={onTouchMove}
-              onTouchEnd={onTouchEnd}
-            >
-              {/* 위 버튼 */}
-              <button
-                onClick={e => { e.stopPropagation(); move(t, -1); }}
-                disabled={i === 0}
-                className="text-gray-300 hover:text-gray-600 disabled:opacity-20 text-[10px] leading-none"
-              >▲</button>
-              {/* 드래그 핸들 아이콘 */}
-              <span className="text-gray-300 text-sm leading-none select-none">≡</span>
-              {/* 아래 버튼 */}
-              <button
-                onClick={e => { e.stopPropagation(); move(t, 1); }}
-                disabled={i === visibleTeams.length - 1}
-                className="text-gray-300 hover:text-gray-600 disabled:opacity-20 text-[10px] leading-none"
-              >▼</button>
-            </div>
-
-            {/* 팀 컬러 원 */}
-            {(()=>{
-              const cal = cals.find(c => c.label === t || c.name === t);
-              if (!cal) return null;
-              return (
-                <div className="relative">
+            {reorderMode ? (
+              <>
+                {/* 드래그 핸들 (▲▼ 클릭 + 롱프레스 드래그) — 순서 변경 모드에서만 표시 */}
+                <div
+                  className="flex flex-col items-center cursor-grab active:cursor-grabbing px-1 select-none touch-none"
+                  onTouchStart={e => onTouchStart(e, i)}
+                  onTouchMove={onTouchMove}
+                  onTouchEnd={onTouchEnd}
+                >
                   <button
-                    onClick={() => setColorPickerIdx(colorPickerIdx === i ? null : i)}
-                    className="w-5 h-5 rounded-full border-2 border-white shadow shrink-0"
-                    style={{ background: cal.color }}
-                  />
-                  {colorPickerIdx === i && (
-                    <div className="absolute left-0 top-7 bg-white rounded-xl shadow-xl border border-gray-100 p-2 z-50 flex flex-wrap gap-1.5" style={{width:140}}>
-                      {TEAM_COLORS.map(color => (
-                        <button key={color}
-                          onClick={() => { updateCal({...cal, color}); setColorPickerIdx(null); }}
-                          className="w-6 h-6 rounded-full border-2 transition-transform"
-                          style={{
-                            background: color,
-                            borderColor: cal.color === color ? "#1a1a1a" : "transparent",
-                            transform: cal.color === color ? "scale(1.2)" : "scale(1)",
-                          }}/>
-                      ))}
-                    </div>
-                  )}
+                    onClick={e => { e.stopPropagation(); move(t, -1); }}
+                    disabled={i === 0}
+                    className="text-gray-300 hover:text-gray-600 disabled:opacity-20 text-[10px] leading-none"
+                  >▲</button>
+                  <span className="text-gray-300 text-sm leading-none select-none">≡</span>
+                  <button
+                    onClick={e => { e.stopPropagation(); move(t, 1); }}
+                    disabled={i === visibleTeams.length - 1}
+                    className="text-gray-300 hover:text-gray-600 disabled:opacity-20 text-[10px] leading-none"
+                  >▼</button>
                 </div>
-              );
-            })()}
-
-            {/* 팀명 */}
-            {editIdx === i ? (
-              <input
-                autoFocus
-                value={editName}
-                onChange={e => setEditName(e.target.value)}
-                onKeyDown={e => { if(e.key==="Enter") handleRename(t); if(e.key==="Escape") setEditIdx(null); }}
-                className="flex-1 border-b-2 border-blue-500 outline-none text-sm font-bold text-gray-800 bg-transparent px-1"
-              />
-            ) : (
-              <button onClick={() => setMemberOpenIdx(memberOpenIdx === i ? null : i)} className="flex-1 flex items-center gap-1.5 text-left">
-                <span className="font-bold text-gray-800 text-sm">{t}</span>
+                <span className="flex-1 font-bold text-gray-800 text-sm">{t}</span>
                 <span className="text-[11px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{members.length}명</span>
-              </button>
-            )}
-
-            {/* 현장팀 토글 — 예전 버그로 캘린더 없이 만들어진 팀은 눌러서 바로 생성 */}
-            {(()=>{
-              const cal = cals.find(c => c.label === t);
-              if (!cal) {
-                return (
-                  <button
-                    onClick={() => updateCal({ id: `cal_${Date.now()}`, label: t, name: t, color: "#9ca3af", checked: true, isField: true })}
-                    title="캘린더가 없는 팀입니다. 눌러서 현장팀으로 만들기"
-                    className="text-[10px] font-bold px-2 py-1 rounded-full border border-dashed border-red-300 text-red-500 bg-red-50">
-                    캘린더 없음
-                  </button>
-                );
-              }
-              const isField = cal.isField !== false;
-              return (
-                <button onClick={()=>updateCal({...cal, isField: !isField})}
-                  title={isField?"현장팀 (일정에 표시)":"업무팀 (일정에 미표시)"}
-                  className={`text-[10px] font-bold px-2 py-1 rounded-full border transition-all ${
-                    isField ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-gray-50 text-gray-400 border-gray-200"
-                  }`}>
-                  {isField ? "현장팀" : "업무팀"}
-                </button>
-              );
-            })()}
-
-            {/* 캘린더 구독(iCal) 링크 — 네이버 캘린더 등에서 URL로 구독 */}
-            {(()=>{
-              const cal = cals.find(c => c.label === t);
-              if (!cal) return null;
-              return (
-                <div className="relative">
-                  <button
-                    onClick={() => setSubscribeIdx(subscribeIdx === i ? null : i)}
-                    title="캘린더 구독 링크"
-                    className="text-gray-400 hover:text-blue-500 p-1.5 rounded-full hover:bg-blue-50 transition-colors">
-                    <Link2 size={15}/>
-                  </button>
-                  {subscribeIdx === i && (
-                    <div className="absolute right-0 top-8 bg-white rounded-xl shadow-xl border border-gray-100 p-3 z-50 flex flex-col gap-2" style={{width:280}}>
-                      <p className="text-xs font-bold text-gray-700">📡 {t} 캘린더 구독 링크</p>
-                      <p className="text-[11px] text-gray-400 leading-relaxed">
-                        이 URL을 네이버/구글 캘린더의 "다른 캘린더 구독(URL로 추가)"에 등록하면 이 팀 일정이 자동으로 보여요.
-                      </p>
-                      {cal.feedToken ? (
-                        <>
-                          <div className="flex gap-1">
-                            <input readOnly value={feedUrl(companyId, cal.id, cal.feedToken)}
-                              onFocus={e=>e.target.select()}
-                              className="flex-1 min-w-0 text-[10px] bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 outline-none text-gray-600"/>
-                            <button
-                              onClick={() => { navigator.clipboard.writeText(feedUrl(companyId, cal.id, cal.feedToken)); setCopiedIdx(i); setTimeout(()=>setCopiedIdx(null), 1500); }}
-                              className="shrink-0 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1.5 rounded-lg">
-                              {copiedIdx === i ? "복사됨!" : "복사"}
-                            </button>
-                          </div>
-                          <button
-                            onClick={() => { if (window.confirm("재발급하면 기존 링크를 구독 중인 사람은 다시 구독해야 해요. 계속할까요?")) updateCal({...cal, feedToken: genFeedToken()}); }}
-                            className="text-[11px] text-red-500 font-bold self-start hover:underline">
-                            🔄 링크 재발급 (기존 링크 무효화)
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          onClick={() => updateCal({...cal, feedToken: genFeedToken()})}
-                          className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg">
-                          구독 링크 만들기
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-
-            {/* 수정 / 저장 */}
-            {editIdx === i ? (
-              <button onClick={() => handleRename(t)} className="text-xs text-blue-600 font-bold px-2 py-1 hover:bg-blue-50 rounded-lg">저장</button>
+              </>
             ) : (
-              <button onClick={() => { setEditIdx(i); setEditName(t); }} className="text-gray-400 hover:text-blue-500 p-1.5 rounded-full hover:bg-blue-50 transition-colors">
-                <Edit3 size={15}/>
-              </button>
-            )}
+              <>
+                {/* 팀 컬러 표시 (변경은 ⋮ 메뉴에서) */}
+                {cal && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: cal.color }}/>}
 
-            {/* 삭제 */}
-            <button onClick={() => handleDelete(t)} className="text-gray-400 hover:text-red-500 p-1.5 rounded-full hover:bg-red-50 transition-colors">
-              <Trash2 size={15}/>
-            </button>
-            </div>
-
-            {/* 배정된 직원 목록 (펼쳐질 때만) */}
-            {memberOpenIdx === i && (
-              <div className="border-t border-gray-100 p-3 flex flex-col gap-2 bg-gray-50">
-                {members.length === 0 ? (
-                  <p className="text-xs text-gray-400 text-center py-2">배정된 직원이 없습니다.</p>
-                ) : members.map(u => (
-                  <div key={u.id} className="flex items-center justify-between bg-white rounded-lg border border-gray-100 px-3 py-2">
-                    <span className="text-sm font-medium text-gray-800">{u.name}</span>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => changeMemberRole(t, u.id, teamRole(u, t) === "팀장" ? "팀원" : "팀장")}
-                        className={`text-[11px] font-bold px-2 py-1 rounded-full border ${teamRole(u,t)==="팀장" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-gray-50 text-gray-500 border-gray-200"}`}>
-                        {teamRole(u, t) || "팀원"}
-                      </button>
-                      <button onClick={() => removeMember(t, u.id)} className="text-gray-300 hover:text-red-500 p-1">
-                        <X size={14}/>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-
-                {addMemberIdx === i ? (
-                  <div className="flex flex-col gap-2 bg-white rounded-lg border border-gray-100 p-2.5">
-                    <select value={addMemberEmpId} onChange={e=>setAddMemberEmpId(e.target.value)}
-                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none">
-                      <option value="">직원 선택</option>
-                      {nonMembers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                    </select>
-                    <div className="flex gap-1.5">
-                      {["팀장","팀원"].map(r => (
-                        <button key={r} onClick={()=>setAddMemberRole(r)}
-                          className={`flex-1 py-1.5 rounded-lg text-xs font-bold ${addMemberRole===r?"bg-blue-500 text-white":"bg-gray-50 text-gray-500 border border-gray-200"}`}>
-                          {r}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex gap-1.5">
-                      <button onClick={() => { setAddMemberIdx(null); setAddMemberEmpId(""); }}
-                        className="flex-1 py-1.5 rounded-lg text-xs font-bold text-gray-500 bg-gray-100">취소</button>
-                      <button onClick={() => { if(addMemberEmpId){ addMember(t, addMemberEmpId, addMemberRole); setAddMemberIdx(null); setAddMemberEmpId(""); } }}
-                        disabled={!addMemberEmpId}
-                        className="flex-1 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-40"
-                        style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>추가</button>
-                    </div>
-                  </div>
+                {/* 팀명 (탭하면 구성원 시트) */}
+                {editIdx === i ? (
+                  <input
+                    autoFocus
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    onKeyDown={e => { if(e.key==="Enter") handleRename(t); if(e.key==="Escape") setEditIdx(null); }}
+                    className="flex-1 border-b-2 border-blue-500 outline-none text-sm font-bold text-gray-800 bg-transparent px-1"
+                  />
                 ) : (
-                  <button onClick={() => { setAddMemberIdx(i); setAddMemberRole("팀원"); }}
-                    disabled={nonMembers.length === 0}
-                    className="text-xs font-bold text-blue-600 disabled:text-gray-300 self-start px-1">
-                    + 직원 추가
+                  <button onClick={() => setMemberOpenIdx(memberOpenIdx === i ? null : i)} className="flex-1 flex items-center gap-1.5 text-left">
+                    <span className="font-bold text-gray-800 text-sm">{t}</span>
+                    <span className="text-[11px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{members.length}명</span>
+                    {cal && cal.isField === false && (
+                      <span className="text-[10px] text-gray-400 border border-gray-200 rounded-full px-1.5 py-0.5">업무팀</span>
+                    )}
+                    {!cal && (
+                      <span className="text-[10px] font-bold text-red-500 border border-dashed border-red-300 bg-red-50 rounded-full px-1.5 py-0.5">캘린더 없음</span>
+                    )}
                   </button>
                 )}
-              </div>
+
+                {editIdx === i ? (
+                  <button onClick={() => handleRename(t)} className="text-xs text-blue-600 font-bold px-2 py-1 hover:bg-blue-50 rounded-lg">저장</button>
+                ) : (
+                  /* ⋮ 액션 메뉴 — 색상/현장팀 토글/구독링크/이름수정/삭제 */
+                  <div className="relative">
+                    <button onClick={() => setMenuIdx(menuIdx === i ? null : i)} className="text-gray-400 hover:text-gray-700 p-1.5 rounded-full hover:bg-gray-100">
+                      <MoreVertical size={16}/>
+                    </button>
+                    {menuIdx === i && (
+                      <div className="absolute right-0 top-9 bg-white rounded-xl shadow-xl border border-gray-100 z-20 w-48 py-1 flex flex-col">
+                        <div className="px-3 py-2 flex items-center gap-1.5 border-b border-gray-50">
+                          <span className="text-xs text-gray-400 mr-1 shrink-0">색상</span>
+                          {TEAM_COLORS.map(color => (
+                            <button key={color}
+                              onClick={() => cal && updateCal({...cal, color})}
+                              disabled={!cal}
+                              className="w-4 h-4 rounded-full border transition-transform shrink-0"
+                              style={{
+                                background: color,
+                                borderColor: cal?.color === color ? "#1a1a1a" : "transparent",
+                                transform: cal?.color === color ? "scale(1.25)" : "scale(1)",
+                              }}/>
+                          ))}
+                        </div>
+                        {cal ? (
+                          <button onClick={() => { updateCal({...cal, isField: !(cal.isField !== false)}); setMenuIdx(null); }}
+                            className="px-3 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50">
+                            {cal.isField !== false ? "업무팀으로 전환 (일정 미표시)" : "현장팀으로 전환 (일정 표시)"}
+                          </button>
+                        ) : (
+                          <button onClick={() => { updateCal({ id: `cal_${Date.now()}`, label: t, name: t, color: "#9ca3af", checked: true, isField: true }); setMenuIdx(null); }}
+                            className="px-3 py-2 text-left text-xs font-medium text-red-500 hover:bg-red-50">
+                            현장팀 캘린더 만들기
+                          </button>
+                        )}
+                        {cal && (
+                          <button onClick={() => { setSubscribeIdx(i); setMenuIdx(null); }}
+                            className="px-3 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5">
+                            <Link2 size={13}/> 캘린더 구독 링크
+                          </button>
+                        )}
+                        <button onClick={() => { setEditIdx(i); setEditName(t); setMenuIdx(null); }}
+                          className="px-3 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5">
+                          <Edit3 size={13}/> 이름 수정
+                        </button>
+                        <button onClick={() => { setMenuIdx(null); handleDelete(t); }}
+                          className="px-3 py-2 text-left text-xs font-medium text-red-500 hover:bg-red-50 flex items-center gap-1.5">
+                          <Trash2 size={13}/> 삭제
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
+            </div>
           </div>
         )})}
         {visibleTeams.length === 0 && (
           <div className="py-10 text-center text-gray-400 text-sm">등록된 팀이 없습니다.</div>
         )}
       </div>
+
+      {/* 캘린더 구독 링크 모달 */}
+      {subscribeIdx !== null && (() => {
+        const t = visibleTeams[subscribeIdx];
+        const cal = t && cals.find(c => c.label === t);
+        if (!cal) return null;
+        return (
+          <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30" onClick={() => setSubscribeIdx(null)}>
+            <div className="bg-white rounded-2xl p-5 w-80 shadow-2xl flex flex-col gap-3" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-bold text-gray-800">📡 {t} 캘린더 구독 링크</p>
+                <button onClick={() => setSubscribeIdx(null)}><X size={18} className="text-gray-400"/></button>
+              </div>
+              <p className="text-[11px] text-gray-400 leading-relaxed">
+                이 URL을 네이버/구글 캘린더의 "다른 캘린더 구독(URL로 추가)"에 등록하면 이 팀 일정이 자동으로 보여요.
+              </p>
+              {cal.feedToken ? (
+                <>
+                  <div className="flex gap-1">
+                    <input readOnly value={feedUrl(companyId, cal.id, cal.feedToken)}
+                      onFocus={e=>e.target.select()}
+                      className="flex-1 min-w-0 text-[10px] bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 outline-none text-gray-600"/>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(feedUrl(companyId, cal.id, cal.feedToken)); setCopiedIdx(subscribeIdx); setTimeout(()=>setCopiedIdx(null), 1500); }}
+                      className="shrink-0 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1.5 rounded-lg">
+                      {copiedIdx === subscribeIdx ? "복사됨!" : "복사"}
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => { if (window.confirm("재발급하면 기존 링크를 구독 중인 사람은 다시 구독해야 해요. 계속할까요?")) updateCal({...cal, feedToken: genFeedToken()}); }}
+                    className="text-[11px] text-red-500 font-bold self-start hover:underline">
+                    🔄 링크 재발급 (기존 링크 무효화)
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => updateCal({...cal, feedToken: genFeedToken()})}
+                  className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg self-start">
+                  구독 링크 만들기
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 구성원 바텀시트 */}
+      {memberOpenIdx !== null && (() => {
+        const t = visibleTeams[memberOpenIdx];
+        if (!t) return null;
+        const members = users.filter(u => isMemberOf(u, t));
+        const nonMembers = users.filter(u => !isMemberOf(u, t));
+        return (
+          <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/40" onClick={() => { setMemberOpenIdx(null); setAddMemberIdx(null); }}>
+            <div className="bg-white w-full max-w-sm rounded-t-2xl p-4 max-h-[75vh] overflow-y-auto flex flex-col gap-2" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-1 gap-2">
+                <h3 className="font-bold text-gray-900 text-sm flex-1 truncate">{t} <span className="text-gray-400 font-normal">{members.length}명</span></h3>
+                {addMemberIdx !== memberOpenIdx && (
+                  <button onClick={() => { setAddMemberIdx(memberOpenIdx); setAddMemberRole("팀원"); }}
+                    disabled={nonMembers.length === 0}
+                    className="text-xs font-bold text-blue-600 disabled:text-gray-300 shrink-0 px-1">
+                    + 직원 추가
+                  </button>
+                )}
+                <button onClick={() => { setMemberOpenIdx(null); setAddMemberIdx(null); }} className="shrink-0"><X size={20} className="text-gray-400"/></button>
+              </div>
+
+              {members.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-4">배정된 직원이 없습니다.</p>
+              ) : members.map(u => (
+                <div key={u.id} className="flex items-center justify-between bg-gray-50 rounded-lg border border-gray-100 px-3 py-2">
+                  <span className="text-sm font-medium text-gray-800">{u.name}</span>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => changeMemberRole(t, u.id, teamRole(u, t) === "팀장" ? "팀원" : "팀장")}
+                      className={`text-[11px] font-bold px-2 py-1 rounded-full border ${teamRole(u,t)==="팀장" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-white text-gray-500 border-gray-200"}`}>
+                      {teamRole(u, t) || "팀원"}
+                    </button>
+                    <button onClick={() => removeMember(t, u.id)} className="text-gray-300 hover:text-red-500 p-1">
+                      <X size={14}/>
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {addMemberIdx === memberOpenIdx && (
+                <div className="flex flex-col gap-3 bg-gray-50 rounded-lg border border-gray-100 p-3 mt-1">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] text-gray-400 font-bold">직원</label>
+                    <select value={addMemberEmpId} onChange={e=>setAddMemberEmpId(e.target.value)}
+                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none bg-white">
+                      <option value="">직원 선택</option>
+                      {nonMembers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] text-gray-400 font-bold">역할</label>
+                    <div className="flex bg-white border border-gray-200 rounded-lg p-0.5">
+                      {["팀장","팀원"].map(r => (
+                        <button key={r} onClick={()=>setAddMemberRole(r)}
+                          className={`flex-1 py-1.5 rounded-md text-xs font-bold transition-colors ${addMemberRole===r?"bg-blue-500 text-white":"text-gray-400"}`}>
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 pt-2 border-t border-gray-200">
+                    <button onClick={() => { setAddMemberIdx(null); setAddMemberEmpId(""); }}
+                      className="flex-1 py-2 rounded-lg text-xs font-bold text-gray-500 bg-gray-100">취소</button>
+                    <button onClick={() => { if(addMemberEmpId){ addMember(t, addMemberEmpId, addMemberRole); setAddMemberIdx(null); setAddMemberEmpId(""); } }}
+                      disabled={!addMemberEmpId}
+                      className="flex-[2] py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
+                      style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>+ 팀에 추가</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

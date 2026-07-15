@@ -605,10 +605,15 @@ export function CalendarView() {
     sheetMode, setSheetMode,
     setDetEv, drawer,
     currentUser, reports, setFieldReportEv,
+    cals,
   } = useC();
+  // calById()는 모듈 전역 CALS 미러를 읽는데, 이 미러는 useEffect로 렌더 이후에 갱신돼서
+  // Firestore cals 스냅샷이 막 도착한 렌더에서는 한 박자 늦은(기본값) 색을 반환한다.
+  // 여기선 항상 최신인 context의 cals 상태를 직접 봐서 그 지연을 없앤다.
+  const calByIdLocal = id => cals.find(c => c.id === id) || { id: "unassigned", label: "미배정", name: "미배정", color: "#9ca3af", checked: true };
   // 청소 시작까지 진행된 일정이면 상세보기를 건너뛰고 바로 이어서(청소 완료 보고) 열기
   const handleEventClick = (ev) => {
-    const canContinue = isSuperAdmin(currentUser) || isLeaderOf(currentUser, calById(ev.calId)?.label);
+    const canContinue = isSuperAdmin(currentUser) || isLeaderOf(currentUser, calByIdLocal(ev.calId)?.label);
     if (canContinue && reports.some(r => r.eventId === ev.id && r.status === "진행중")) {
       setFieldReportEv(ev);
       return;
@@ -749,7 +754,7 @@ export function CalendarView() {
                     const dots = visibleEvents
                       .filter(ev => ev.start<=s && (ev.end||ev.start)>=s)
                       .slice(0,5)
-                      .map(ev => calById(ev.calId).color);
+                      .map(ev => calByIdLocal(ev.calId).color);
                     return (
                       <DotCell key={s} ds={s} isCm={cm} dots={dots}
                         onDate={d => {

@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFunctions } from "firebase/functions";
 import { getStorage } from "firebase/storage";
@@ -17,7 +17,17 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const secondaryApp = initializeApp(firebaseConfig, "Secondary");
 
-export const db            = getFirestore(app);
+// 로컬(IndexedDB) 캐시 활성화 — 재접속 시 캐시된 데이터를 즉시 보여주고 서버 동기화는 백그라운드에서 처리해
+// 모바일 네트워크에서도 첫 화면이 빨리 뜬다. 시크릿 모드 등 IndexedDB 미지원 환경에서는 일반 모드로 폴백.
+export const db = (() => {
+  try {
+    return initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
+  } catch {
+    return getFirestore(app);
+  }
+})();
 export const auth          = getAuth(app);
 export const provider      = new GoogleAuthProvider();
 export const secondaryAuth = getAuth(secondaryApp);

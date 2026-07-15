@@ -66,18 +66,12 @@ export function Provider({ children, loginUser, onLogout }) {
       if (data?.titleRule)      setTitleRule(data.titleRule);
       if (data?.typeKeywords)   setTypeKeywords(data.typeKeywords);
     });
-    const unsubLogs = onSnapshot(query(collection(companyRef, "activityLogs"), orderBy("time", "desc")), snap => {
-      setActivityLogs(snap.docs.map(d => ({ ...d.data(), id: d.id })));
-    });
     const unsubNotices = onSnapshot(collection(companyRef, "notices"), snap => {
       // 최신순 정렬 (date 내림차순)
       setNotices(snap.docs.map(d => ({ ...d.data(), id: d.id }))
         .sort((a,b) => (b.date||"").localeCompare(a.date||"")));
     });
-    const unsubLinks = onSnapshot(collection(companyRef, "links"), snap => {
-      setLinks(snap.docs.map(d => ({ ...d.data(), id: d.id }))
-        .sort((a,b) => (a.order ?? 0) - (b.order ?? 0)));
-    });
+    // activityLogs/links는 각자 전용 화면(활동 로그/외부 링크)에서만 쓰여서 지연 로딩 useEffect로 뺌 — 아래 currentScreen 선언부 뒤 참고
     const unsubCals = onSnapshot(collection(companyRef, "cals"), snap => {
       if (!snap.empty) setCals(snap.docs.filter(d => d.data().status !== "deleted").map(d => ({ ...d.data(), id: d.id })));
       setCalsLoaded(true);
@@ -95,15 +89,10 @@ export function Provider({ children, loginUser, onLogout }) {
     const unsubAttendance = onSnapshot(collection(companyRef, "attendance"), snap => {
       setAttendanceList(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     });
-    const unsubExtraPayments = onSnapshot(collection(companyRef, "extraPayments"), snap => {
-      setExtraPayments(snap.docs.map(d => ({ ...d.data(), id: d.id })));
-    });
-    const unsubSettlements = onSnapshot(collection(companyRef, "monthlySettlements"), snap => {
-      setMonthlySettlements(snap.docs.map(d => ({ ...d.data(), id: d.id })));
-    });
+    // extraPayments/monthlySettlements는 정산 화면에서만 쓰여서 지연 로딩 useEffect로 뺌 — 아래 currentScreen 선언부 뒤 참고
 
     return () => {
-      unsubEvents(); unsubUsers(); unsubConfig(); unsubLogs(); unsubNotices(); unsubLinks(); unsubCals(); unsubReports(); unsubCompanyDoc(); unsubSites(); unsubAssignments(); unsubAttendance(); unsubExtraPayments(); unsubSettlements();
+      unsubEvents(); unsubUsers(); unsubConfig(); unsubNotices(); unsubCals(); unsubReports(); unsubCompanyDoc(); unsubSites(); unsubAssignments(); unsubAttendance();
     };
   }, [loginUser.companyId]);
 
@@ -471,6 +460,36 @@ export function Provider({ children, loginUser, onLogout }) {
   const [extraPaymentModal, setExtraPaymentModal] = useState({ open: false, employeeId: null });
   const [siteDetailId, setSiteDetailId] = useState(null);
   const [extraCalFilterModal, setExtraCalFilterModal] = useState(false);
+
+  // ── 지연 로딩 리스너 — activityLogs/links/extraPayments/monthlySettlements는 각자 전용 화면에서만
+  // 쓰이는 게 확인돼서, 로그인 즉시 다 열지 않고 그 화면에 처음 들어갈 때만 붙인다. (notices/sites/
+  // assignments/attendance는 캘린더 헤더 배지·상세시트·필터 등 메인 화면에서도 쓰여서 그대로 즉시 로드)
+  const lazyStarted = useRef({});
+  const lazyUnsubs   = useRef({});
+  useEffect(() => {
+    const start = (key, ref, mapSnap) => {
+      if (lazyStarted.current[key]) return;
+      lazyStarted.current[key] = true;
+      lazyUnsubs.current[key] = onSnapshot(ref, mapSnap);
+    };
+    if (currentScreen === "activity_log") {
+      start("activityLogs", query(collection(companyRef, "activityLogs"), orderBy("time", "desc")), snap =>
+        setActivityLogs(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
+    }
+    if (currentScreen === "links") {
+      start("links", collection(companyRef, "links"), snap =>
+        setLinks(snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a,b) => (a.order ?? 0) - (b.order ?? 0))));
+    }
+    if (currentScreen === "reg_settlement") {
+      start("extraPayments", collection(companyRef, "extraPayments"), snap =>
+        setExtraPayments(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
+    }
+    if (currentScreen === "reg_my" || currentScreen === "reg_settlement") {
+      start("monthlySettlements", collection(companyRef, "monthlySettlements"), snap =>
+        setMonthlySettlements(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
+    }
+  }, [currentScreen]);
+  useEffect(() => () => { Object.values(lazyUnsubs.current).forEach(u => u && u()); }, []);
 
   const [currentUser, setCurrentUser] = useState(loginUser);
   useEffect(() => { setCurrentUser(loginUser); }, [loginUser]);
