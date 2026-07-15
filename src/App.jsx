@@ -52,7 +52,7 @@ import {
   buildLayout, TextBar, FullMonthCell, DotCell, useDates, ScheduleList, useSwipe,
   SlideTransition, ListTransition, ModeTransition, CalendarView, DetailSheet,
   LongPressMenu, DeleteConfirmPopup, BottomTabBar, SideDrawer, DateTimePicker,
-  EventModal, TopHeader, FloatingButtons, SearchModal, ANIM_CSS,
+  EventModal, TopHeader, FloatingButtons, SearchModal, ExtraCalFilterModal, ANIM_CSS,
 } from "./features/calendar/CalendarCore";
 import { FieldReportScreen } from "./features/field-report/FieldReportScreen";
 import { FaqScreen, ReportHistoryScreen } from "./features/support/SupportScreens";
@@ -241,6 +241,7 @@ function AppInner() {
       <DetailSheet/>
       <EventModal/>
       <SearchModal/>
+      <ExtraCalFilterModal/>
       <EmployeeFormModal/>
       <CompanySettingsModal/>
       <SiteFormModal/>

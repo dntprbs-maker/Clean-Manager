@@ -7,7 +7,7 @@ import {
   Calendar, AlignLeft, ChevronDown, ChevronLeft,
   ChevronRight, Menu, Settings, User, Edit3, Trash2,
   PieChart, Bell, History, ExternalLink,
-  CheckSquare, Download, Check
+  CheckSquare, Download, Check, Eye
 } from "lucide-react";
 
 import { db, functions, storage } from "../../firebase";
@@ -1173,7 +1173,7 @@ export function BottomTabBar() {
 
 // ── 사이드 드로어 (스와이프 열기/닫기 지원) ───────────────────────
 export function SideDrawer() {
-  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, onLogout, companyId, assignments } = useC();
+  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, onLogout, companyId, assignments, extraCalFilter, setExtraCalFilterModal } = useC();
   const [pwModal, setPwModal] = useState(false);
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -1399,6 +1399,17 @@ export function SideDrawer() {
             </button>
           )}
 
+          {/* 다른 일정 보기 - 관리팀 전용 로컬 필터(다른 팀 하나/다른 직원의 정기청소 배정 추가로 보기) */}
+          {(isSuperAdmin(currentUser) || isAdminStaff(currentUser)) && (
+            <button
+              onClick={() => { setExtraCalFilterModal(true); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <Eye size={20} className="text-purple-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">다른 일정 보기</span>
+              {extraCalFilter && <span className="w-2 h-2 rounded-full bg-purple-500 shrink-0" />}
+            </button>
+          )}
+
           {/* 공지사항 - 전체 */}
           <button
             onClick={() => { setCurrentScreen("notice"); setDrawer(false); }}
@@ -1489,6 +1500,81 @@ export function SideDrawer() {
         </div>
       </div>
     </>
+  );
+}
+
+// ── 다른 일정 보기 모달 (관리팀 전용 로컬 필터) ──────────────────────
+// 평소엔 내 팀 것만 보이다가, 다른 팀 하나 또는 다른 직원 한 명의 정기청소 배정을
+// 추가로 얹어보고 싶을 때 쓰는 선택창. Firestore에 저장하지 않는 로컬(브라우저) 전용 상태.
+export function ExtraCalFilterModal() {
+  const { extraCalFilterModal, setExtraCalFilterModal, extraCalFilter, setExtraCalFilter, cals, currentUser, assignments, users } = useC();
+  if (!extraCalFilterModal) return null;
+
+  const myTeams = myTeamNames(currentUser);
+  const otherTeams = cals.filter(c => c.isField !== false && !c.personal && !myTeams.includes(c.label));
+  const myUserId = currentUser.id || currentUser.uid;
+  const otherEmployeeIds = [...new Set(assignments.map(a => a.employeeId))].filter(id => id !== myUserId);
+
+  const statusLabel = !extraCalFilter
+    ? "지금은 내 것만 보는 중이에요"
+    : extraCalFilter.type === "team"
+      ? `"${extraCalFilter.label}" 팀 일정을 추가로 보는 중이에요`
+      : `"${extraCalFilter.name}"님의 정기청소 배정을 추가로 보는 중이에요`;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center px-6" onClick={()=>setExtraCalFilterModal(false)}>
+      <div className="bg-white rounded-3xl p-5 w-full max-w-sm shadow-2xl flex flex-col gap-3 max-h-[80vh]" onClick={e=>e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h2 className="font-extrabold text-lg text-gray-900">다른 일정 보기</h2>
+          <button onClick={()=>setExtraCalFilterModal(false)} className="p-1 -mr-1 text-gray-400 hover:text-gray-700"><X size={20}/></button>
+        </div>
+        <p className="text-xs text-gray-500 -mt-1">{statusLabel}</p>
+        {extraCalFilter && (
+          <button onClick={()=>setExtraCalFilter(null)}
+            className="w-full py-2.5 rounded-xl text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200">
+            해제하고 내 것만 보기
+          </button>
+        )}
+        <div className="overflow-y-auto flex flex-col gap-3 -mx-1 px-1">
+          {otherTeams.length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-gray-400 mb-1.5 px-1">다른 팀</p>
+              <div className="flex flex-col gap-1">
+                {otherTeams.map(c => (
+                  <button key={c.id}
+                    onClick={()=>{ setExtraCalFilter({type:"team", label:c.label}); setExtraCalFilterModal(false); }}
+                    className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium text-left ${extraCalFilter?.type==="team" && extraCalFilter.label===c.label ? "bg-purple-50 text-purple-700" : "hover:bg-gray-50 text-gray-700"}`}>
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{backgroundColor:c.color}}/>
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {otherEmployeeIds.length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-gray-400 mb-1.5 px-1">정기청소 담당 직원</p>
+              <div className="flex flex-col gap-1">
+                {otherEmployeeIds.map(id => {
+                  const u = users.find(u => u.id === id);
+                  if (!u) return null;
+                  return (
+                    <button key={id}
+                      onClick={()=>{ setExtraCalFilter({type:"employee", employeeId:id, name:u.name}); setExtraCalFilterModal(false); }}
+                      className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium text-left ${extraCalFilter?.type==="employee" && extraCalFilter.employeeId===id ? "bg-purple-50 text-purple-700" : "hover:bg-gray-50 text-gray-700"}`}>
+                      🧹 {u.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {otherTeams.length === 0 && otherEmployeeIds.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-6">추가로 볼 수 있는 팀/직원이 없어요</p>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2232,7 +2318,7 @@ export function EventModal() {
 
 // ── 상단 헤더 ─────────────────────────────────────────────────────
 export function TopHeader() {
-  const { current, setCurrent, setDrawer, sheetMode, setSheetMode, selDate, setSelDate, setSearchOpen, currentUser, onLogout } = useC();
+  const { current, setCurrent, setDrawer, sheetMode, setSheetMode, selDate, setSelDate, setSearchOpen, currentUser, onLogout, extraCalFilter, setExtraCalFilter } = useC();
   const y=current.getFullYear(), m=current.getMonth();
   const [picker,setPicker]=useState(false);
   const [companyPicker,setCompanyPicker]=useState(false);
@@ -2270,6 +2356,7 @@ export function TopHeader() {
   };
 
   return (
+    <>
     <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-100 relative">
       {/* 왼쪽: 회사명 or 뒤로가기 */}
       <div className="flex items-center gap-3">
@@ -2357,6 +2444,18 @@ export function TopHeader() {
         </div>
       )}
     </div>
+    {/* 관리팀 전용 로컬 필터가 켜져 있을 때 — 잊고 계속 켜두는 걸 방지하는 표시 겸 바로 해제 버튼 */}
+    {extraCalFilter && (
+      <div className="flex items-center justify-between px-4 py-1.5 bg-purple-50 border-b border-purple-100">
+        <span className="text-xs font-semibold text-purple-700">
+          + {extraCalFilter.type === "team" ? extraCalFilter.label : extraCalFilter.name} 보는 중
+        </span>
+        <button onClick={()=>setExtraCalFilter(null)} className="p-0.5 text-purple-400 hover:text-purple-700">
+          <X size={14}/>
+        </button>
+      </div>
+    )}
+    </>
   );
 }
 

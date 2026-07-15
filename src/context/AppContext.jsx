@@ -470,6 +470,7 @@ export function Provider({ children, loginUser, onLogout }) {
   const [assignmentModal, setAssignmentModal] = useState({ open: false, editId: null, presetSiteId: null });
   const [extraPaymentModal, setExtraPaymentModal] = useState({ open: false, employeeId: null });
   const [siteDetailId, setSiteDetailId] = useState(null);
+  const [extraCalFilterModal, setExtraCalFilterModal] = useState(false);
 
   const [currentUser, setCurrentUser] = useState(loginUser);
   useEffect(() => { setCurrentUser(loginUser); }, [loginUser]);
@@ -506,6 +507,20 @@ export function Provider({ children, loginUser, onLogout }) {
     [myUserId, currentUser.role]);
   const visibleCals = useMemo(() => cals.filter(isMine), [cals, isMine]);
 
+  // 관리팀 전용 로컬(브라우저 한정) 필터 — 평소엔 내 팀 것만 보다가, 필요할 때만 다른 팀
+  // 하나 또는 다른 직원 한 명의 정기청소 배정을 추가로 얹어 보고 싶을 때 씀. Firestore에
+  // 저장하지 않아 다른 사람 화면에는 전혀 영향 없음(readNotices와 동일한 localStorage 패턴).
+  const [extraCalFilter, setExtraCalFilterState] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(`extraCalFilter_${myUserId}`)) || null; } catch { return null; }
+  });
+  const setExtraCalFilter = useCallback((val) => {
+    setExtraCalFilterState(val);
+    try {
+      if (val) localStorage.setItem(`extraCalFilter_${myUserId}`, JSON.stringify(val));
+      else localStorage.removeItem(`extraCalFilter_${myUserId}`);
+    } catch {}
+  }, [myUserId]);
+
   // 나만의 캘린더는 사용자가 직접 만들 필요 없이 로그인 시 자동으로 하나씩 생성
   useEffect(() => {
     if (!calsLoaded || !myUserId) return;
@@ -528,15 +543,36 @@ export function Provider({ children, loginUser, onLogout }) {
     if (hiddenPersonalIds.size) evs = evs.filter(e => !hiddenPersonalIds.has(e.calId));
     if (!isSuperAdmin(currentUser)) {
       // 소속된 모든 팀(멤버십)의 캘린더를 합쳐서 표시 — 한 사람이 여러 팀 소속이면 그 팀들 전부.
-      // 소속 팀이 하나도 없으면(신규/미배정) 기존처럼 전체 표시.
       const myTeams = myTeamNames(currentUser);
-      if (myTeams.length) {
+      // 정기청소는 팀 이름이 "정기청소"인 사람만 팀 매칭에 걸리므로, 그 외 팀 소속 직원은
+      // 실제 배정이 있어도 여태 전부 안 보였음 — 팀 매칭과 별개로 본인 배정 건은 항상 통과.
+      const myAssignmentIds = new Set(
+        assignments.filter(a => a.employeeId === myUserId).map(a => a.id)
+      );
+      // 관리팀 전용 로컬 필터 — extraCalFilter가 있으면 그 팀/직원 것도 추가로 통과.
+      const extraAllows = (e) => {
+        if (!extraCalFilter) return false;
+        if (extraCalFilter.type === "team") {
+          return cals.find(c=>c.id===e.calId)?.label === extraCalFilter.label;
+        }
+        if (extraCalFilter.type === "employee") {
+          return e.source === "regular" && assignments.find(a=>a.id===e.assignmentId)?.employeeId === extraCalFilter.employeeId;
+        }
+        return false;
+      };
+      // 소속 팀·배정·추가필터가 하나도 없으면(신규/미배정) 기존처럼 전체 표시.
+      if (myTeams.length || myAssignmentIds.size || extraCalFilter) {
         const allowedCalIds = new Set(cals.filter(c => myTeams.includes(c.label)).map(c => c.id));
-        evs = evs.filter(e => allowedCalIds.has(e.calId) || cals.find(c=>c.id===e.calId)?.personal);
+        evs = evs.filter(e =>
+          allowedCalIds.has(e.calId) ||
+          cals.find(c=>c.id===e.calId)?.personal ||
+          (e.source === "regular" && myAssignmentIds.has(e.assignmentId)) ||
+          extraAllows(e)
+        );
       }
     }
     return expandRecurring(evs);
-  }, [events, checkedIds, cals, currentUser, isMine]);
+  }, [events, checkedIds, cals, currentUser, isMine, assignments, myUserId, extraCalFilter]);
 
   return (
     <Ctx.Provider value={{
@@ -571,6 +607,7 @@ export function Provider({ children, loginUser, onLogout }) {
       extraPayments,addExtraPayment,deleteExtraPayment,extraPaymentModal,setExtraPaymentModal,
       setEmployeeAllowance,
       monthlySettlements,confirmSettlement,
+      extraCalFilter,setExtraCalFilter,extraCalFilterModal,setExtraCalFilterModal,
       companyId: loginUser.companyId
     }}>
       {children}
@@ -643,6 +680,8 @@ export function DemoProvider({ children }) {
   const [assignmentModal, setAssignmentModal] = useState({ open: false, editId: null, presetSiteId: null });
   const [extraPaymentModal, setExtraPaymentModal] = useState({ open: false, employeeId: null });
   const [siteDetailId, setSiteDetailId] = useState(null);
+  const [extraCalFilterModal, setExtraCalFilterModal] = useState(false);
+  const [extraCalFilter, setExtraCalFilter] = useState(null);
   const [titleRule] = useState(["time","district","area"]);
   const [typeKeywords] = useState(["입주청소","정기청소","에어컨청소","특수청소","줄눈청소"]);
   const [linkCategories] = useState(["업무","지도","연락처","기타"]);
@@ -688,6 +727,7 @@ export function DemoProvider({ children }) {
       extraPayments: [], addExtraPayment: demoAlert, deleteExtraPayment: demoAlert, extraPaymentModal, setExtraPaymentModal,
       setEmployeeAllowance: demoAlert,
       monthlySettlements: [], confirmSettlement: demoAlert,
+      extraCalFilter, setExtraCalFilter, extraCalFilterModal, setExtraCalFilterModal,
       companyId: "demo",
     }}>
       {children}
