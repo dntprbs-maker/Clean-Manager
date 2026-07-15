@@ -2382,7 +2382,7 @@ export function TopHeader() {
           : <button onClick={()=>setDrawer(true)} className="p-1 -ml-1"><Menu size={22} className="text-gray-700"/></button>
         }
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white shadow-sm overflow-hidden"
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white shadow-sm overflow-hidden border border-gray-200"
             style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
             {(companyDoc?.logoUrl || currentUser?.companyLogoUrl)
               ? <img src={companyDoc?.logoUrl || currentUser.companyLogoUrl} alt="Logo" className="w-full h-full object-cover" />

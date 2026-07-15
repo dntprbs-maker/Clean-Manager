@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { ChevronDown, ChevronLeft, X } from "lucide-react";
 import { doc, updateDoc } from "firebase/firestore";
-import { db } from "../../firebase";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "../../firebase";
 import { fmt, diff, fmtTime } from "../../lib/dateTime";
 import { parseEventText, DEFAULT_TITLE_RULE, DEFAULT_TYPE_KEYWORDS, TITLE_TOKEN_LABELS } from "../../lib/eventTextParser";
 import { useC } from "../../context/AppContext";
@@ -903,6 +904,7 @@ export function CompanySettingsModal() {
   const [tab, setTab]             = useState("info");
   const [companyName, setCompanyName] = useState("");
   const [logoUrl, setLogoUrl]     = useState("");
+  const [logoUploading, setLogoUploading] = useState(false);
   const [loading, setLoading]     = useState(false);
   const [localRule, setLocalRule] = useState(DEFAULT_TITLE_RULE);
   const [localKw, setLocalKw]     = useState(DEFAULT_TYPE_KEYWORDS);
@@ -923,9 +925,24 @@ export function CompanySettingsModal() {
   if (!companySettingsModal) return null;
   const close = () => setCompanySettingsModal(false);
 
-  const handleLogoUpload = (e) => {
+  // 이미지를 Firestore에 base64로 직접 저장하면 문서 1MB 제한에 걸려 저장이 실패하므로,
+  // Storage에 올리고 짧은 다운로드 URL만 Firestore에 저장한다.
+  const handleLogoUpload = async (e) => {
     const file = e.target.files[0];
-    if (file) { const r = new FileReader(); r.onloadend = () => setLogoUrl(r.result); r.readAsDataURL(file); }
+    if (!file) return;
+    setLogoUploading(true);
+    try {
+      const path = `companies/${currentUser.companyId}/logo/${Date.now()}_${file.name}`;
+      const sRef = storageRef(storage, path);
+      await uploadBytes(sRef, file);
+      const url = await getDownloadURL(sRef);
+      setLogoUrl(url);
+    } catch (err) {
+      alert("로고 업로드 실패: " + err.message);
+    } finally {
+      setLogoUploading(false);
+      e.target.value = "";
+    }
   };
 
   const handleSaveInfo = async () => {
@@ -987,21 +1004,23 @@ export function CompanySettingsModal() {
         {/* ── 회사 정보 탭 ── */}
         {tab === "info" && (
           <div className="p-5 flex flex-col items-center">
-            <label className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl overflow-hidden cursor-pointer"
+            <label className={`w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-xl overflow-hidden border border-gray-200 ${logoUploading ? "cursor-wait opacity-60" : "cursor-pointer"}`}
               style={{background: logoUrl ? "#fff" : "linear-gradient(135deg,#1a56db,#2563eb)"}}>
-              {logoUrl ? <img src={logoUrl} alt="Logo" className="w-full h-full object-cover"/> : "🏢"}
-              <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload}/>
+              {logoUploading
+                ? <div className="w-6 h-6 rounded-full border-2 border-gray-300 border-t-blue-600 animate-spin"/>
+                : (logoUrl ? <img src={logoUrl} alt="Logo" className="w-full h-full object-cover"/> : "🏢")}
+              <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} disabled={logoUploading}/>
             </label>
-            <p className="text-xs text-gray-400 -mt-4 mb-6 text-center">로고 클릭하여 변경 (선택)</p>
+            <p className="text-xs text-gray-400 -mt-4 mb-6 text-center">{logoUploading ? "업로드 중..." : "로고 클릭하여 변경 (선택)"}</p>
             <div className="w-full mb-6">
               <label className="block text-xs font-bold text-gray-500 mb-1">회사명</label>
               <input value={companyName} onChange={e=>setCompanyName(e.target.value)}
                 className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm font-bold outline-none focus:border-blue-500"/>
             </div>
-            <button onClick={handleSaveInfo} disabled={loading||!companyName.trim()}
+            <button onClick={handleSaveInfo} disabled={loading||logoUploading||!companyName.trim()}
               className="w-full py-4 rounded-xl text-white font-bold"
               style={{background:companyName.trim()?"linear-gradient(135deg,#1a56db,#2563eb)":"#e5e7eb"}}>
-              {loading?"저장 중...":"저장하고 새로고침"}
+              {loading?"저장 중...":"저장"}
             </button>
           </div>
         )}
