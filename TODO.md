@@ -155,6 +155,15 @@
 
 ---
 
+## 📝 할 일 (2026-07-16 추가)
+
+- [x] ~~**회사 로고 업로드 용량 제한 문제 해결**~~ (2026-07-16) — 로고를 Firestore 문서에 base64로 직접 저장하다 1MB 제한을 초과해 저장 실패하던 문제. Firebase Storage에 올리고 다운로드 URL만 저장. 업로드 시 256px 리사이즈(수 MB → 수십 KB) + 1년 캐시 헤더 지정. 커밋: be6633c, 69ef179
+- [x] ~~**홈화면 바로가기 재접속 시 이전 버전 보이는 문제**~~ (2026-07-16) — bfcache 감지해 자동 새로고침 + no-cache 헤더 추가. 커밋: 1d7cc70, 13f6212
+- [x] ~~**회사명/로고 최신값 localStorage 동기화**~~ (2026-07-16) — companyDoc 스냅샷 시 currentUser 갱신으로 다음 접속부터 최신 캐시 반영
+- [x] ~~**로고 테두리 추가**~~ (2026-07-16) — 헤더·설정화면 로고 border 추가로 흰 배경 로고 경계 명확화
+
+---
+
 ## 📝 할 일 (2026-07-15 추가)
 
 - [x] ~~**GitHub Actions 워크플로 Vite 환경변수 누락 수정**~~ (2026-07-15) — 다인이벤트에서 같은 `firebase init hosting:github` 마법사로 생성된 워크플로를 점검하다 발견한 버그를 클린매니저에도 적용. `src/firebase.js`가 `import.meta.env.VITE_FIREBASE_*`를 참조하는데 `firebase-hosting-merge.yml`/`firebase-hosting-pull-request.yml`의 build 스텝에 `env:` 블록이 없어 CI 빌드 시 값이 전혀 주입되지 않던 문제. `VITE_FIREBASE_VAPID_KEY` 시크릿 누락분 등록 후 두 워크플로에 `env:` 블록 추가, main 배포 성공 및 번들에 올바른 설정값 포함 확인. (참고: 103번 줄의 "VAPID_KEY 추가" 항목은 시크릿만 등록되고 워크플로 env 블록이 빠져 있어 실제로는 미완료 상태였음 — 이번에 함께 해결)
