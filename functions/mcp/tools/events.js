@@ -118,6 +118,20 @@ export function registerEventTools(server, companyId) {
     }
   );
 
+  const PATCH_SHAPE = {
+    title: z.string().optional(),
+    start: z.string().optional(),
+    end: z.string().optional(),
+    allDay: z.boolean().optional(),
+    startTime: z.string().optional(),
+    endTime: z.string().optional(),
+    place: z.string().optional(),
+    contact: z.string().optional(),
+    description: z.string().optional(),
+    team: z.string().optional(),
+    ...REPEAT_FIELDS,
+  };
+
   server.registerTool(
     "update_event",
     {
@@ -125,19 +139,13 @@ export function registerEventTools(server, companyId) {
       description: "기존 일정을 부분 수정한다. patch에 넣은 필드만 바뀌고 나머지는 그대로 유지된다(전체 덮어쓰기 아님).",
       inputSchema: {
         eventId: z.string().describe("수정할 일정 id (list_events로 조회한 id)"),
-        patch: z.object({
-          title: z.string().optional(),
-          start: z.string().optional(),
-          end: z.string().optional(),
-          allDay: z.boolean().optional(),
-          startTime: z.string().optional(),
-          endTime: z.string().optional(),
-          place: z.string().optional(),
-          contact: z.string().optional(),
-          description: z.string().optional(),
-          team: z.string().optional(),
-          ...REPEAT_FIELDS,
-        }).describe("바꿀 필드만 담아서 전달"),
+        // 일부 MCP 클라이언트가 nested object 인자를 JSON 문자열로 감싸서 보내는 경우가
+        // 있어(패치 객체가 "{\"...\"}" 형태로 도착), 문자열로 오면 먼저 파싱해서 받아준다.
+        // 파싱 실패 시엔 원래 값을 그대로 넘겨 기존과 동일한 zod 에러 메시지가 나오게 한다.
+        patch: z.preprocess((val) => {
+          if (typeof val !== "string") return val;
+          try { return JSON.parse(val); } catch { return val; }
+        }, z.object(PATCH_SHAPE)).describe("바꿀 필드만 담아서 전달 (객체 또는 JSON 문자열 모두 허용)"),
       },
     },
     async ({ eventId, patch }) => {
