@@ -95,7 +95,7 @@ export async function listenForeground() {
     const title = d.title || payload.notification?.title || "클린메니져";
     const options = {
       body: d.body || payload.notification?.body || "",
-      icon: `${import.meta.env.BASE_URL}favicon.svg`,
+      icon: `${import.meta.env.BASE_URL}icon-192.png`,
       tag: d.eventId || undefined,
       data: d,
     };

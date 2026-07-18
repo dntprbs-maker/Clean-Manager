@@ -14,9 +14,12 @@ const isVercel = window.location.hostname.includes("vercel.app");
 const isPcClaudePreview = isVercel && window.location.hostname.includes("pc-claude");
 document.title = isLocal ? "클린메니져-로컬서버" : isPcClaudePreview ? "클린메니져-피씨클로드" : isVercel ? "클린메니져-개발" : "클린메니져";
 
+// 로컬/피씨클로드 미리보기는 구분하기 쉽게 색만 다른 임시 아이콘(SVG)을 쓰고,
+// 실제 운영(prod)은 index.html에 기본값으로 넣어둔 정식 로고(PNG)를 그대로 둔다.
 const faviconEl = document.querySelector('link[rel="icon"]');
-if (faviconEl) {
-  faviconEl.href = isLocal ? "/favicon-local.svg" : isPcClaudePreview ? "/favicon-preview.svg" : "/favicon.svg";
+if (faviconEl && (isLocal || isPcClaudePreview)) {
+  faviconEl.type = "image/svg+xml";
+  faviconEl.href = isLocal ? "/favicon-local.svg" : "/favicon-preview.svg";
 }
 
 // 홈 화면 바로가기(삼성 인터넷 등)로 재접속하면 브라우저가 새로고침 없이 이전에

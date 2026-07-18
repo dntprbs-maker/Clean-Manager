@@ -22,8 +22,8 @@ messaging.onBackgroundMessage(payload => {
   const title = d.title || "클린메니져";
   const options = {
     body: d.body || "",
-    icon: "/favicon.svg",
-    badge: "/favicon.svg",
+    icon: "/icon-192.png",
+    badge: "/favicon-32.png",
     tag: d.eventId || undefined,   // 같은 일정 알림은 하나로 합침
     data: d,
   };
