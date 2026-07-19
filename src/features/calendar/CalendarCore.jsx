@@ -25,6 +25,7 @@ import { parseEventText } from "../../lib/eventTextParser";
 import { isSuperAdmin, isAdminStaff, isLeaderOf, isMemberOf, myTeamNames, hasLeadershipSomewhere, teamsLabel } from "../../lib/membership";
 import { useC } from "../../context/AppContext";
 import { ReportStatusBadge } from "../../components/shared/ReportStatusBadge";
+import { MapLinkButton } from "../../components/shared/MapLinkButton";
 import { openLightbox } from "../../components/shared/PhotoLightbox";
 import { askRecurringScope } from "../../components/shared/RecurringScopeSheet";
 import { WheelPicker, RepeatToggleButton, RepeatPanel } from "../../components/shared/RepeatPicker";
@@ -953,9 +954,9 @@ export function DetailSheet() {
           {detEv.place && (
             <div className="flex items-start px-5 py-5 border-b border-gray-100 gap-4">
               <MapPin size={20} className="text-gray-400 shrink-0 mt-0.5"/>
-              <a href={`https://map.naver.com/v5/search/${encodeURIComponent(detEv.place)}`} target="_blank" rel="noopener noreferrer" className="flex-1 text-[15px] text-gray-800 hover:underline leading-relaxed">
+              <MapLinkButton place={detEv.place} className="flex-1 text-[15px] text-gray-800 hover:underline leading-relaxed text-left">
                 {detEv.place}
-              </a>
+              </MapLinkButton>
             </div>
           )}
 
@@ -2183,11 +2184,9 @@ export function EventModal() {
           <input value={form.place} onChange={e=>set("place",e.target.value)}
             placeholder="장소"
             className="flex-1 text-sm text-gray-800 outline-none placeholder-gray-300"/>
-          {form.place && (
-            <a href={`https://map.naver.com/v5/search/${encodeURIComponent(form.place)}`} target="_blank" rel="noopener noreferrer" className="shrink-0 px-2 py-1 bg-blue-50 rounded-full text-blue-500 text-xs font-bold transition-colors hover:bg-blue-100">
-              지도보기
-            </a>
-          )}
+          <MapLinkButton place={form.place} className="shrink-0 px-2 py-1 bg-blue-50 rounded-full text-blue-500 text-xs font-bold transition-colors hover:bg-blue-100">
+            지도보기
+          </MapLinkButton>
         </div>
 
         {/* 연락처 */}

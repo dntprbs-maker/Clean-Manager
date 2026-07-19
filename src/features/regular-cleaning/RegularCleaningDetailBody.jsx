@@ -2,6 +2,7 @@ import { Clock, MapPin, Check } from "lucide-react";
 import { useC } from "../../context/AppContext";
 import { WD, pd, fmtTime } from "../../lib/dateTime";
 import { assignmentOccursOn } from "../../lib/repeat";
+import { MapLinkButton } from "../../components/shared/MapLinkButton";
 
 // ── 정기청소 일정 상세 본문 (DetailSheet 헤더/애니메이션은 공유, 본문만 교체) ──
 export function RegularCleaningDetailBody({ detEv, cal }) {
@@ -30,8 +31,9 @@ export function RegularCleaningDetailBody({ detEv, cal }) {
       {site?.address && (
         <div className="flex items-start px-5 py-5 border-b border-gray-100 gap-4">
           <MapPin size={20} className="text-gray-400 shrink-0 mt-0.5"/>
-          <a href={`https://map.naver.com/v5/search/${encodeURIComponent(site.address)}`} target="_blank" rel="noopener noreferrer"
-            className="flex-1 text-[15px] text-gray-800 hover:underline leading-relaxed">{site.address}</a>
+          <MapLinkButton place={site.address} className="flex-1 text-[15px] text-gray-800 hover:underline leading-relaxed text-left">
+            {site.address}
+          </MapLinkButton>
         </div>
       )}
 
