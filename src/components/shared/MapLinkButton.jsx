@@ -12,9 +12,14 @@ export function MapLinkButton({ place, className, children }) {
   const [open, setOpen] = useState(false);
   if (!place) return null;
 
+  const openService = (url) => {
+    setOpen(false);
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
   return (
-    <span className="relative inline-block">
-      <button type="button" onClick={() => setOpen(o => !o)} className={className}>
+    <span className={`relative inline-block ${className || ""}`}>
+      <button type="button" onClick={() => setOpen(o => !o)} className="w-full text-left">
         {children}
       </button>
       {open && (
@@ -22,11 +27,13 @@ export function MapLinkButton({ place, className, children }) {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full mt-1 bg-white rounded-xl shadow-xl border border-gray-100 z-50 min-w-[110px] py-1 overflow-hidden">
             {MAP_SERVICES.map(s => (
-              <a key={s.label} href={s.url(place)} target="_blank" rel="noopener noreferrer"
-                onClick={() => setOpen(false)}
-                className="block px-3 py-2 text-sm text-gray-700 text-left hover:bg-gray-50 whitespace-nowrap">
+              // 모바일에서 target="_blank" 앵커는 터치 제스처(길게 누르기 등)에 브라우저가 자체
+              // 반응해 의도치 않게 즉시 이동하는 경우가 있어, 실제 이동은 버튼 클릭 핸들러에서
+              // window.open으로 명시적으로 처리한다(팀 관리 메뉴 등 다른 드롭다운과 동일 패턴).
+              <button key={s.label} type="button" onClick={() => openService(s.url(place))}
+                className="block w-full px-3 py-2 text-sm text-gray-700 text-left hover:bg-gray-50 whitespace-nowrap">
                 {s.label}
-              </a>
+              </button>
             ))}
           </div>
         </>
