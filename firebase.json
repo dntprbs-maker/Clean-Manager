@@ -12,36 +12,59 @@
       ]
     }
   ],
-  "hosting": {
-    "public": "dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      { "source": "/mcp", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-      { "source": "/mcp/**", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-      { "source": "/authorize", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-      { "source": "/token", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-      { "source": "/register", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-      { "source": "/revoke", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-      { "source": "/oauth/**", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-      { "source": "/.well-known/**", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ],
-    "headers": [
-      {
-        "source": "/index.html",
-        "headers": [
-          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
-        ]
-      }
-    ]
-  },
+  "hosting": [
+    {
+      "target": "main",
+      "public": "dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        { "source": "/mcp", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
+        { "source": "/mcp/**", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
+        { "source": "/authorize", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
+        { "source": "/token", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
+        { "source": "/register", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
+        { "source": "/revoke", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
+        { "source": "/oauth/**", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
+        { "source": "/.well-known/**", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ],
+      "headers": [
+        {
+          "source": "/index.html",
+          "headers": [
+            { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+          ]
+        }
+      ]
+    },
+    {
+      "target": "attendance",
+      "public": "attendance/dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        { "source": "**", "destination": "/index.html" }
+      ],
+      "headers": [
+        {
+          "source": "/index.html",
+          "headers": [
+            { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+          ]
+        }
+      ]
+    }
+  ],
   "emulators": {
     "functions": { "port": 5001 },
     "firestore": { "port": 8080 },
