@@ -179,7 +179,7 @@ function AppInner() {
 
   return (
     <div className={`flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none${isDemo?" pt-9":""}`}
-      style={{height:"100dvh"}}>
+      style={{height:"100svh", touchAction:"manipulation"}}>
       <style>{ANIM_CSS}</style>
       <TopHeader/>
       {needsSetup && <SetupCompanyModal />}
