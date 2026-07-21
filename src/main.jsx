@@ -29,6 +29,13 @@ window.addEventListener("pageshow", (e) => {
   if (e.persisted) window.location.reload();
 });
 
+// 핀치줌 전역 차단 — viewport user-scalable=no와 CSS touch-action은 삼성 인터넷 등
+// 일부 모바일 브라우저가 무시해서, 두 손가락 터치 무브를 직접 preventDefault로 막는다.
+// 예외: 사진 확대보기(라이트박스)는 핀치줌이 정상 기능이므로 그 안에서 시작된 터치는 통과.
+document.addEventListener("touchmove", (e) => {
+  if (e.touches.length > 1 && !e.target.closest?.("[data-allow-pinch]")) e.preventDefault();
+}, { passive: false });
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     {isSuperAdmin ? <SuperAdmin /> : <App />}

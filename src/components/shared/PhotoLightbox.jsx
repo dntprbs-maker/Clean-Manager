@@ -47,7 +47,7 @@ export function PhotoLightbox() {
           </button>
         </>
       )}
-      <div className="w-full h-full overflow-auto" style={{ touchAction: "pinch-zoom" }}
+      <div className="w-full h-full overflow-auto" style={{ touchAction: "pinch-zoom" }} data-allow-pinch
         onClick={e => e.stopPropagation()} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         <div className="min-w-full min-h-full flex items-center justify-center p-4">
           <img src={list[index]} alt="" style={{ touchAction: "pinch-zoom", maxWidth: "100%", maxHeight: "100dvh" }} className="object-contain"/>
