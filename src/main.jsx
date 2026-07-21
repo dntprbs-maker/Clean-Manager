@@ -30,11 +30,15 @@ window.addEventListener("pageshow", (e) => {
 });
 
 // 핀치줌 전역 차단 — viewport user-scalable=no와 CSS touch-action은 삼성 인터넷 등
-// 일부 모바일 브라우저가 무시해서, 두 손가락 터치 무브를 직접 preventDefault로 막는다.
+// 일부 모바일 브라우저가 무시해서, 두 손가락 터치를 직접 preventDefault로 막는다.
+// 브라우저가 핀치를 확대 제스처로 확정하는 건 두 번째 손가락이 닿는 touchstart 시점이라
+// touchmove만 막아선 화면에 따라 안 먹혀서, touchstart부터 capture 단계에서 차단한다.
 // 예외: 사진 확대보기(라이트박스)는 핀치줌이 정상 기능이므로 그 안에서 시작된 터치는 통과.
-document.addEventListener("touchmove", (e) => {
+const blockPinch = (e) => {
   if (e.touches.length > 1 && !e.target.closest?.("[data-allow-pinch]")) e.preventDefault();
-}, { passive: false });
+};
+document.addEventListener("touchstart", blockPinch, { passive: false, capture: true });
+document.addEventListener("touchmove", blockPinch, { passive: false, capture: true });
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
