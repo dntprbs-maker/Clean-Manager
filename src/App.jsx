@@ -77,76 +77,65 @@ function AppInner() {
   const needsSetup = !isDemo && !currentUser?.companyName;
   const [showNotifyPrompt, setShowNotifyPrompt] = useState(false);
   const [notifyRequesting, setNotifyRequesting] = useState(false);
-  // 뒤로가기로 앱을 나가려 할 때 보여줄 확인 화면 — window.confirm()은 popstate
-  // 핸들러(직접 클릭이 아닌 컨텍스트)에서 호출하면 모바일 브라우저가 조용히
-  // 무시하는 경우가 많아(showNotifyPrompt와 같은 이유) 실제 UI로 직접 그린다.
-  const [showExitConfirm, setShowExitConfirm] = useState(false);
-  const reallyExitingRef = useRef(false);
-
-  // ⚠️ 임시 디버그용 — popstate(뒤로가기)가 실제로 페이지에 도달하는지 화면에서
-  // 눈으로 확인하기 위한 표시. 원인 확인되면 제거할 것.
-  const [backDebugLog, setBackDebugLog] = useState([]);
-  const logBackDebug = (msg) => {
-    const line = `${new Date().toLocaleTimeString("ko-KR",{hour12:false})} ${msg}`;
-    setBackDebugLog(prev => [line, ...prev].slice(0, 8));
-  };
-
-  // 안드로이드 뒤로가기 처리 — 열려있는 팝업/모달이 있으면 그것부터 하나씩 닫고,
-  // 아무것도 열려있지 않을 때만 종료 확인을 띄운다.
+  // 안드로이드 뒤로가기 처리 — 열려있는 팝업/모달이 있으면 그것부터 하나씩 닫는다.
   // (배열 순서 = 우선순위. 더 안쪽/위에 뜨는 것부터 검사해서 그것만 닫는다)
   // 일정 추가/수정 모달은 X버튼과 동일하게, 수정 중인 내용이 있으면 저장 확인부터
   // 묻는 tryClose(eventModalGuardRef)를 거친다.
+  //
+  // "기본화면(캘린더)에서 뒤로가기 시 종료 확인창"은 시도했다가 포기함(2026-07-22) —
+  // popstate 핸들러 "안에서" pushState로 히스토리를 되채워 뒤로가기를 못 나가게 막는
+  // 방식은 크롬 계열 브라우저가 back-button 남용(가두기) 방지 로직으로 무력화한다는 걸
+  // 실기기 테스트로 확인함(히스토리 길이가 재적립 없이 계속 줄어들다 바닥에서 그냥 탭이
+  // 닫혀버림). 웹에서는 안정적으로 구현 불가 — 나중에 네이티브 앱 전환 시 재검토.
   const backLayers = [
-    { name: "showExitConfirm", open: showExitConfirm, close: () => setShowExitConfirm(false) },
-    { name: "fieldReportEv", open: !!fieldReportEv, close: () => setFieldReportEv(null) },
-    { name: "detEv",         open: !!detEv,         close: () => setDetEv(null) },
-    { name: "modal",         open: modal.open,      close: () => (eventModalGuardRef?.current || closeModal)() },
-    { name: "showNotifyPrompt", open: showNotifyPrompt, close: () => setShowNotifyPrompt(false) },
-    { name: "empModal",           open: empModal.open,           close: () => setEmpModal({ open: false, editId: null }) },
-    { name: "companySettingsModal", open: companySettingsModal,    close: () => setCompanySettingsModal(false) },
-    { name: "siteModal",          open: siteModal.open,          close: () => setSiteModal({ open: false, editId: null }) },
-    { name: "assignmentModal",    open: assignmentModal.open,    close: () => setAssignmentModal({ open: false, editId: null, presetSiteId: null }) },
-    { name: "extraPaymentModal",  open: extraPaymentModal.open,  close: () => setExtraPaymentModal({ open: false, employeeId: null }) },
-    { name: "searchOpen", open: searchOpen, close: () => setSearchOpen(false) },
-    { name: "drawer",      open: drawer,      close: () => setDrawer(false) },
-    { name: "currentScreen", open: currentScreen !== "calendar", close: () => setCurrentScreen("calendar") },
+    { open: !!fieldReportEv, close: () => setFieldReportEv(null) },
+    { open: !!detEv,         close: () => setDetEv(null) },
+    { open: modal.open,      close: () => (eventModalGuardRef?.current || closeModal)() },
+    { open: showNotifyPrompt, close: () => setShowNotifyPrompt(false) },
+    { open: empModal.open,           close: () => setEmpModal({ open: false, editId: null }) },
+    { open: companySettingsModal,    close: () => setCompanySettingsModal(false) },
+    { open: siteModal.open,          close: () => setSiteModal({ open: false, editId: null }) },
+    { open: assignmentModal.open,    close: () => setAssignmentModal({ open: false, editId: null, presetSiteId: null }) },
+    { open: extraPaymentModal.open,  close: () => setExtraPaymentModal({ open: false, employeeId: null }) },
+    { open: searchOpen, close: () => setSearchOpen(false) },
+    { open: drawer,      close: () => setDrawer(false) },
+    { open: currentScreen !== "calendar", close: () => setCurrentScreen("calendar") },
   ];
+  const openCount = backLayers.filter(l => l.open).length;
+  const prevOpenCountRef = useRef(0);
+  const isPopRef = useRef(false); // 방금 감소가 실제 뒤로가기(popstate)로 인한 것인지
+  const skipNextPopRef = useRef(0); // 코드로 예약해둔 back() 중 아직 안 온 popstate 개수
 
-  // 히스토리는 항상 "바닥 + 가드 1칸"만 유지한다. (예전엔 팝업이 열릴 때마다 한 칸씩
-  // 쌓았는데, X버튼으로 닫으면 그 칸이 안 지워져 찌꺼기가 쌓이고, 종료 확인창은
-  // 두 칸씩 중복 적립돼 뒤로가기를 아무리 눌러도 종료가 안 되는 버그가 있었음.
-  // 이제 popstate가 올 때마다 가드 한 칸을 즉시 복구하는 단순한 구조로 변경.)
-  const guardPushedRef = useRef(false);
+  // 열린 레이어 수가 늘어날 때마다 늘어난 만큼 히스토리를 쌓는다(중첩 팝업도 각자 한 단계씩
+  // 차지). 이건 popstate 핸들러 밖에서, 사용자의 일반 조작(버튼 클릭 등)에 반응해 쌓는
+  // 정상적인 pushState라 브라우저의 남용 방지 로직에 걸리지 않는다.
+  //
+  // X버튼/저장 등 뒤로가기가 아닌 방식으로 레이어가 닫히면(diff < 0), 그만큼 쌓아뒀던
+  // 히스토리가 안 지워진 채로 남아 찌꺼기가 쌓인다 — 여기서 그만큼 back()으로 직접
+  // 되감아 장부를 맞춘다. 이때 발생하는 popstate는 "레이어 닫기"를 또 실행하면 안 되므로
+  // skipNextPopRef로 개수를 세어 건너뛴다(진짜 뒤로가기로 인한 감소는 isPopRef로 구분).
   useEffect(() => {
-    if (guardPushedRef.current) return;
-    guardPushedRef.current = true;
-    window.history.pushState({ __guard: true }, "");
-    logBackDebug(`마운트, 가드 push (len=${window.history.length})`); // ⚠️ 임시 디버그
-  }, []);
+    if (isPopRef.current) { isPopRef.current = false; prevOpenCountRef.current = openCount; return; }
+    const diff = openCount - prevOpenCountRef.current;
+    if (diff > 0) {
+      for (let i = 0; i < diff; i++) window.history.pushState({}, "");
+    } else if (diff < 0) {
+      skipNextPopRef.current += -diff;
+      for (let i = 0; i < -diff; i++) window.history.back();
+    }
+    prevOpenCountRef.current = openCount;
+  });
 
   useEffect(() => {
     const onPopState = () => {
-      logBackDebug(`popstate 수신 (exiting=${reallyExitingRef.current}, len=${window.history.length})`); // ⚠️ 임시 디버그
-      if (reallyExitingRef.current) { window.history.back(); return; } // "종료" 확정 — 바닥까지 마저 나감
-      window.history.pushState({ __guard: true }, ""); // 소비된 가드 즉시 복구 (히스토리는 항상 1칸 유지)
+      if (skipNextPopRef.current > 0) { skipNextPopRef.current -= 1; return; } // 코드가 예약한 되감기 — 무시
       const top = backLayers.find(l => l.open);
-      if (top) { logBackDebug(`레이어 닫음: ${top.name}`); top.close(); return; } // ⚠️ 임시 디버그
-      // 열려있는 게 아무것도 없다 = 앱을 나가려는 뒤로가기 → 확인 화면부터 보여줌
-      logBackDebug(`열린 레이어 없음 → 종료확인 표시`); // ⚠️ 임시 디버그
-      setShowExitConfirm(true);
+      if (top) { isPopRef.current = true; top.close(); }
+      // 아무 레이어도 없으면 그냥 뒤로가기가 진행되도록 둔다(앱/탭 종료).
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   });
-
-  const handleConfirmExit = () => {
-    reallyExitingRef.current = true;
-    setShowExitConfirm(false);
-    window.history.back(); // 가드 소비 → popstate에서 한 번 더 back → 앱 밖으로
-    // 브라우저/설치형(PWA) 환경에 따라 히스토리 바닥이라 실제로 못 나가는 경우가 있는데,
-    // 그때 플래그가 켜진 채 남으면 이후 종료 확인창이 영영 안 뜨므로 잠시 후 원복한다.
-    setTimeout(() => { reallyExitingRef.current = false; }, 1500);
-  };
 
   // FCM 푸시 — 포그라운드 수신 핸들러 + 이미 허용된 경우 토큰 갱신, 꺼져있으면 확인창으로 켜기 유도 (데모 제외)
   const notifyCheckedRef = useRef(false);
@@ -189,33 +178,8 @@ function AppInner() {
     <div className={`flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none${isDemo?" pt-9":""}`}
       style={{height:"100svh", touchAction:"pan-x pan-y"}}>
       <style>{ANIM_CSS}</style>
-      {/* ⚠️ 임시 디버그 오버레이 — 뒤로가기 popstate 수신 여부 눈으로 확인용. 원인 확인되면 제거할 것. */}
-      <div className="absolute top-0 left-0 right-0 z-[999] bg-red-600/90 text-white text-[10px] leading-tight p-1.5 pointer-events-none font-mono"
-        style={{ maxHeight: "38vh", overflow: "hidden" }}>
-        <div className="font-bold">[뒤로가기 디버그]</div>
-        {backDebugLog.length === 0 && <div>대기 중 — 뒤로가기를 눌러보세요</div>}
-        {backDebugLog.map((l, i) => <div key={i}>{l}</div>)}
-      </div>
       <TopHeader/>
       {needsSetup && <SetupCompanyModal />}
-      {showExitConfirm && (
-        <div className="absolute inset-0 bg-black/40 z-[110] flex items-center justify-center px-6">
-          <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl">
-            <p className="text-base font-bold text-gray-900 mb-5">앱을 종료하시겠습니까?</p>
-            <div className="flex gap-2">
-              <button onClick={() => setShowExitConfirm(false)}
-                className="flex-1 py-3 rounded-xl text-sm font-bold text-gray-500 bg-gray-100">
-                취소
-              </button>
-              <button onClick={handleConfirmExit}
-                className="flex-1 py-3 rounded-xl text-sm font-bold text-white"
-                style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
-                종료
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       {showNotifyPrompt && (
         <div className="absolute inset-0 bg-black/40 z-[110] flex items-center justify-center px-6">
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl">
