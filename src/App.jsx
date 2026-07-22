@@ -83,25 +83,33 @@ function AppInner() {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const reallyExitingRef = useRef(false);
 
+  // ⚠️ 임시 디버그용 — popstate(뒤로가기)가 실제로 페이지에 도달하는지 화면에서
+  // 눈으로 확인하기 위한 표시. 원인 확인되면 제거할 것.
+  const [backDebugLog, setBackDebugLog] = useState([]);
+  const logBackDebug = (msg) => {
+    const line = `${new Date().toLocaleTimeString("ko-KR",{hour12:false})} ${msg}`;
+    setBackDebugLog(prev => [line, ...prev].slice(0, 8));
+  };
+
   // 안드로이드 뒤로가기 처리 — 열려있는 팝업/모달이 있으면 그것부터 하나씩 닫고,
   // 아무것도 열려있지 않을 때만 종료 확인을 띄운다.
   // (배열 순서 = 우선순위. 더 안쪽/위에 뜨는 것부터 검사해서 그것만 닫는다)
   // 일정 추가/수정 모달은 X버튼과 동일하게, 수정 중인 내용이 있으면 저장 확인부터
   // 묻는 tryClose(eventModalGuardRef)를 거친다.
   const backLayers = [
-    { open: showExitConfirm, close: () => setShowExitConfirm(false) },
-    { open: !!fieldReportEv, close: () => setFieldReportEv(null) },
-    { open: !!detEv,         close: () => setDetEv(null) },
-    { open: modal.open,      close: () => (eventModalGuardRef?.current || closeModal)() },
-    { open: showNotifyPrompt, close: () => setShowNotifyPrompt(false) },
-    { open: empModal.open,           close: () => setEmpModal({ open: false, editId: null }) },
-    { open: companySettingsModal,    close: () => setCompanySettingsModal(false) },
-    { open: siteModal.open,          close: () => setSiteModal({ open: false, editId: null }) },
-    { open: assignmentModal.open,    close: () => setAssignmentModal({ open: false, editId: null, presetSiteId: null }) },
-    { open: extraPaymentModal.open,  close: () => setExtraPaymentModal({ open: false, employeeId: null }) },
-    { open: searchOpen, close: () => setSearchOpen(false) },
-    { open: drawer,      close: () => setDrawer(false) },
-    { open: currentScreen !== "calendar", close: () => setCurrentScreen("calendar") },
+    { name: "showExitConfirm", open: showExitConfirm, close: () => setShowExitConfirm(false) },
+    { name: "fieldReportEv", open: !!fieldReportEv, close: () => setFieldReportEv(null) },
+    { name: "detEv",         open: !!detEv,         close: () => setDetEv(null) },
+    { name: "modal",         open: modal.open,      close: () => (eventModalGuardRef?.current || closeModal)() },
+    { name: "showNotifyPrompt", open: showNotifyPrompt, close: () => setShowNotifyPrompt(false) },
+    { name: "empModal",           open: empModal.open,           close: () => setEmpModal({ open: false, editId: null }) },
+    { name: "companySettingsModal", open: companySettingsModal,    close: () => setCompanySettingsModal(false) },
+    { name: "siteModal",          open: siteModal.open,          close: () => setSiteModal({ open: false, editId: null }) },
+    { name: "assignmentModal",    open: assignmentModal.open,    close: () => setAssignmentModal({ open: false, editId: null, presetSiteId: null }) },
+    { name: "extraPaymentModal",  open: extraPaymentModal.open,  close: () => setExtraPaymentModal({ open: false, employeeId: null }) },
+    { name: "searchOpen", open: searchOpen, close: () => setSearchOpen(false) },
+    { name: "drawer",      open: drawer,      close: () => setDrawer(false) },
+    { name: "currentScreen", open: currentScreen !== "calendar", close: () => setCurrentScreen("calendar") },
   ];
 
   // 히스토리는 항상 "바닥 + 가드 1칸"만 유지한다. (예전엔 팝업이 열릴 때마다 한 칸씩
@@ -113,15 +121,18 @@ function AppInner() {
     if (guardPushedRef.current) return;
     guardPushedRef.current = true;
     window.history.pushState({ __guard: true }, "");
+    logBackDebug(`마운트, 가드 push (len=${window.history.length})`); // ⚠️ 임시 디버그
   }, []);
 
   useEffect(() => {
     const onPopState = () => {
+      logBackDebug(`popstate 수신 (exiting=${reallyExitingRef.current}, len=${window.history.length})`); // ⚠️ 임시 디버그
       if (reallyExitingRef.current) { window.history.back(); return; } // "종료" 확정 — 바닥까지 마저 나감
       window.history.pushState({ __guard: true }, ""); // 소비된 가드 즉시 복구 (히스토리는 항상 1칸 유지)
       const top = backLayers.find(l => l.open);
-      if (top) { top.close(); return; }
+      if (top) { logBackDebug(`레이어 닫음: ${top.name}`); top.close(); return; } // ⚠️ 임시 디버그
       // 열려있는 게 아무것도 없다 = 앱을 나가려는 뒤로가기 → 확인 화면부터 보여줌
+      logBackDebug(`열린 레이어 없음 → 종료확인 표시`); // ⚠️ 임시 디버그
       setShowExitConfirm(true);
     };
     window.addEventListener("popstate", onPopState);
@@ -178,6 +189,13 @@ function AppInner() {
     <div className={`flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none${isDemo?" pt-9":""}`}
       style={{height:"100svh", touchAction:"pan-x pan-y"}}>
       <style>{ANIM_CSS}</style>
+      {/* ⚠️ 임시 디버그 오버레이 — 뒤로가기 popstate 수신 여부 눈으로 확인용. 원인 확인되면 제거할 것. */}
+      <div className="absolute top-0 left-0 right-0 z-[999] bg-red-600/90 text-white text-[10px] leading-tight p-1.5 pointer-events-none font-mono"
+        style={{ maxHeight: "38vh", overflow: "hidden" }}>
+        <div className="font-bold">[뒤로가기 디버그]</div>
+        {backDebugLog.length === 0 && <div>대기 중 — 뒤로가기를 눌러보세요</div>}
+        {backDebugLog.map((l, i) => <div key={i}>{l}</div>)}
+      </div>
       <TopHeader/>
       {needsSetup && <SetupCompanyModal />}
       {showExitConfirm && (
