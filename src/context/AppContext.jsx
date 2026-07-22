@@ -151,6 +151,10 @@ export function Provider({ children, loginUser, onLogout }) {
     return updateDoc(doc(companyRef, "reports", id), patch);
   }, [companyRef]);
 
+  // 일정 추가/수정 모달(EventModal)의 "저장 안 한 변경 확인" 닫기 함수(tryClose)를 담는 ref.
+  // 안드로이드 뒤로가기(App.jsx backLayers)가 X버튼과 똑같이 이 함수를 거쳐 닫게 하기 위함.
+  const eventModalGuardRef = useRef(null);
+
   // ── 현장 사진 백그라운드 업로드 (IndexedDB 대기열 기반) ──
   // 사진은 먼저 pendingUploads(IndexedDB)에 저장해두고 여기서 하나씩 실제 업로드한다.
   // 화면이 닫히거나 탭이 강제 종료돼도 큐는 브라우저에 남아있으므로,
@@ -649,6 +653,7 @@ export function Provider({ children, loginUser, onLogout }) {
       setEmployeeAllowance,
       monthlySettlements,confirmSettlement,
       extraCalFilter,setExtraCalFilter,extraCalFilterModal,setExtraCalFilterModal,
+      eventModalGuardRef,
       companyId: loginUser.companyId
     }}>
       {children}
@@ -704,6 +709,7 @@ const DEMO_CALS = [
 
 export function DemoProvider({ children }) {
   const noop = () => {};
+  const demoGuardRef = useRef(null);
   const demoAlert = () => alert("데모 모드에서는 변경할 수 없습니다.");
   const [currentScreen, setCurrentScreen] = useState("calendar");
   const [modal, setModal] = useState({open:false,date:null,editId:null});
@@ -769,6 +775,7 @@ export function DemoProvider({ children }) {
       setEmployeeAllowance: demoAlert,
       monthlySettlements: [], confirmSettlement: demoAlert,
       extraCalFilter, setExtraCalFilter, extraCalFilterModal, setExtraCalFilterModal,
+      eventModalGuardRef: demoGuardRef,
       companyId: "demo",
     }}>
       {children}

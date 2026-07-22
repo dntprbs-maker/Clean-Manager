@@ -72,6 +72,7 @@ function AppInner() {
     companySettingsModal, setCompanySettingsModal,
     siteModal, setSiteModal, assignmentModal, setAssignmentModal,
     extraPaymentModal, setExtraPaymentModal,
+    eventModalGuardRef,
   } = useC();
   const needsSetup = !isDemo && !currentUser?.companyName;
   const [showNotifyPrompt, setShowNotifyPrompt] = useState(false);
@@ -83,13 +84,15 @@ function AppInner() {
   const reallyExitingRef = useRef(false);
 
   // 안드로이드 뒤로가기 처리 — 열려있는 팝업/모달이 있으면 그것부터 하나씩 닫고,
-  // 아무것도 열려있지 않을 때만 화면을 캘린더로 되돌린다.
+  // 아무것도 열려있지 않을 때만 종료 확인을 띄운다.
   // (배열 순서 = 우선순위. 더 안쪽/위에 뜨는 것부터 검사해서 그것만 닫는다)
+  // 일정 추가/수정 모달은 X버튼과 동일하게, 수정 중인 내용이 있으면 저장 확인부터
+  // 묻는 tryClose(eventModalGuardRef)를 거친다.
   const backLayers = [
     { open: showExitConfirm, close: () => setShowExitConfirm(false) },
     { open: !!fieldReportEv, close: () => setFieldReportEv(null) },
     { open: !!detEv,         close: () => setDetEv(null) },
-    { open: modal.open,      close: closeModal },
+    { open: modal.open,      close: () => (eventModalGuardRef?.current || closeModal)() },
     { open: showNotifyPrompt, close: () => setShowNotifyPrompt(false) },
     { open: empModal.open,           close: () => setEmpModal({ open: false, editId: null }) },
     { open: companySettingsModal,    close: () => setCompanySettingsModal(false) },
@@ -100,20 +103,11 @@ function AppInner() {
     { open: drawer,      close: () => setDrawer(false) },
     { open: currentScreen !== "calendar", close: () => setCurrentScreen("calendar") },
   ];
-  const openCount = backLayers.filter(l => l.open).length;
-  const prevOpenCountRef = useRef(0);
-  const isPopRef = useRef(false);
 
-  // 열린 레이어 수가 늘어날 때마다 늘어난 만큼 히스토리를 쌓는다 (중첩된 팝업도 각자 한 단계씩 차지)
-  useEffect(() => {
-    if (isPopRef.current) { isPopRef.current = false; prevOpenCountRef.current = openCount; return; }
-    const diff = openCount - prevOpenCountRef.current;
-    if (diff > 0) { for (let i = 0; i < diff; i++) window.history.pushState({}, ""); }
-    prevOpenCountRef.current = openCount;
-  });
-
-  // 캘린더 화면(맨 아래, 아무 팝업도 없는 상태)에서 뒤로가기를 눌러도 바로 앱이
-  // 꺼지지 않도록, 시작할 때 히스토리에 "바닥" 상태를 하나 깔아둔다.
+  // 히스토리는 항상 "바닥 + 가드 1칸"만 유지한다. (예전엔 팝업이 열릴 때마다 한 칸씩
+  // 쌓았는데, X버튼으로 닫으면 그 칸이 안 지워져 찌꺼기가 쌓이고, 종료 확인창은
+  // 두 칸씩 중복 적립돼 뒤로가기를 아무리 눌러도 종료가 안 되는 버그가 있었음.
+  // 이제 popstate가 올 때마다 가드 한 칸을 즉시 복구하는 단순한 구조로 변경.)
   const guardPushedRef = useRef(false);
   useEffect(() => {
     if (guardPushedRef.current) return;
@@ -123,12 +117,12 @@ function AppInner() {
 
   useEffect(() => {
     const onPopState = () => {
+      if (reallyExitingRef.current) { window.history.back(); return; } // "종료" 확정 — 바닥까지 마저 나감
+      window.history.pushState({ __guard: true }, ""); // 소비된 가드 즉시 복구 (히스토리는 항상 1칸 유지)
       const top = backLayers.find(l => l.open);
-      if (top) { isPopRef.current = true; top.close(); return; }
-      if (reallyExitingRef.current) return; // 확인 화면에서 "종료"를 눌러 나가는 중 — 더 이상 개입 안 함
+      if (top) { top.close(); return; }
       // 열려있는 게 아무것도 없다 = 앱을 나가려는 뒤로가기 → 확인 화면부터 보여줌
       setShowExitConfirm(true);
-      window.history.pushState({ __guard: true }, "");
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -137,7 +131,10 @@ function AppInner() {
   const handleConfirmExit = () => {
     reallyExitingRef.current = true;
     setShowExitConfirm(false);
-    window.history.back();
+    window.history.back(); // 가드 소비 → popstate에서 한 번 더 back → 앱 밖으로
+    // 브라우저/설치형(PWA) 환경에 따라 히스토리 바닥이라 실제로 못 나가는 경우가 있는데,
+    // 그때 플래그가 켜진 채 남으면 이후 종료 확인창이 영영 안 뜨므로 잠시 후 원복한다.
+    setTimeout(() => { reallyExitingRef.current = false; }, 1500);
   };
 
   // FCM 푸시 — 포그라운드 수신 핸들러 + 이미 허용된 경우 토큰 갱신, 꺼져있으면 확인창으로 켜기 유도 (데모 제외)

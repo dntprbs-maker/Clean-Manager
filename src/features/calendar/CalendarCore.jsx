@@ -1807,7 +1807,7 @@ export function DateTimePicker({ form, set, errs, lockRepeat }) {
 }
 
 export function EventModal() {
-  const { modal, closeModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, teams, titleRule, typeKeywords, companyId, reports, companyDoc, currentUser, setFieldReportEv } = useC();
+  const { modal, closeModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, teams, titleRule, typeKeywords, companyId, reports, companyDoc, currentUser, setFieldReportEv, eventModalGuardRef } = useC();
   const { open, date, editId, scope, instanceEv } = modal;
   // 반복일정의 "이 일정만/이후 전체" 수정은 클릭한 회차(instanceEv)의 값으로 폼을 채운다.
   const editEv = editId ? ((scope && scope!=="all" && instanceEv) ? instanceEv : events.find(e=>e.id===editId)) : null;
@@ -1830,6 +1830,12 @@ export function EventModal() {
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
   const isDirty=()=>origForm.current && JSON.stringify(form)!==JSON.stringify(origForm.current);
   const tryClose=()=>{ if(editId&&isDirty()) setExitConfirm(true); else closeModal(); };
+
+  // 안드로이드 뒤로가기도 X버튼과 동일하게 tryClose(저장 확인)를 거치도록 등록.
+  // tryClose가 최신 form을 클로저로 물고 있어 매 렌더마다 갱신하고, 닫히면 비운다.
+  useEffect(() => {
+    if (eventModalGuardRef) eventModalGuardRef.current = open ? tryClose : null;
+  });
 
   // 담당팀 배정 드롭다운 목록 — 개인 캘린더(본인 것만)는 항상 최상단, 나머지 팀은
   // "팀" 탭에서 드래그로 정한 teams 배열 순서를 그대로 따른다(cals 컬렉션 자체엔 순서가 없음).
