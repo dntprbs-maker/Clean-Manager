@@ -1,6 +1,7 @@
 // Clean-Manager Cloud Functions — 일정 등록/수정/삭제 시 담당 팀원에게 푸시 알림
 import { onDocumentCreated, onDocumentUpdated, onDocumentDeleted } from "firebase-functions/v2/firestore";
 import { onCall, HttpsError, onRequest } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 import { getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
@@ -133,6 +134,67 @@ export const sendEventDeleteNotification = onDocumentDeleted(
   async (event) => {
     if (!event.data) return;
     await notifyTeam(event.params.companyId, event.params.eventId, event.data.data(), "deleted");
+  }
+);
+
+// KST(Asia/Seoul) 기준 오늘 날짜(YYYY-MM-DD). Cloud Functions 런타임은 로컬 타임존이
+// UTC라 new Date().getDate()를 그냥 쓰면 새벽 시간대(KST 0~9시)에 날짜가 하루 밀린다.
+// UTC 기준 getter만 써서(런타임 타임존 설정과 무관하게) KST로 보정해 계산한다.
+function todayKST() {
+  const kst = new Date(Date.now() + 9 * 3600 * 1000);
+  return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, "0")}-${String(kst.getUTCDate()).padStart(2, "0")}`;
+}
+
+// ── 매일 아침 "오늘 일정" 요약 알림 (시험 운영) ───────────────────────
+// 지금은 회사별 최고관리자(사장)에게만 보내고, 오늘 일정이 하나도 없으면 안 보낸다.
+// 잘 되는지 보고 나중에 팀 전체 발송/시간대 등을 검토하기로 함.
+export const dailyScheduleDigest = onSchedule(
+  { region: REGION, schedule: "0 8 * * *", timeZone: "Asia/Seoul" },
+  async () => {
+    const today = todayKST();
+    const companiesSnap = await db.collection("companies").get();
+
+    for (const companyDoc of companiesSnap.docs) {
+      const companyId = companyDoc.id;
+      if (companyDoc.data()?.status === "deleted") continue;
+
+      try {
+        const eventsSnap = await db.collection(`companies/${companyId}/events`).get();
+        const events = eventsSnap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((e) => e.status !== "deleted");
+        const todays = expandRecurringForFeed(events).filter(
+          (e) => e.start <= today && (e.end || e.start) >= today
+        );
+        if (todays.length === 0) continue; // 오늘 일정 없음 — 알림 안 보냄
+
+        const usersSnap = await db.collection(`companies/${companyId}/users`).get();
+        const tokens = [];
+        usersSnap.forEach((d) => {
+          const u = d.data();
+          if (u.status === "deleted" || u.role !== "최고관리자") return; // 시험 운영: 사장만
+          (u.fcmTokens || []).forEach((t) => tokens.push(t));
+        });
+        if (tokens.length === 0) continue;
+
+        const sorted = [...todays].sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
+        const lines = sorted.slice(0, 5).map((e) => {
+          const time = e.allDay ? "종일" : e.startTime ? fmtTime(e.startTime) : "";
+          return `${time ? time + " " : ""}${e.title || "제목 없음"}`;
+        });
+        if (sorted.length > 5) lines.push(`외 ${sorted.length - 5}건`);
+
+        const uniqueTokens = [...new Set(tokens)];
+        const resp = await getMessaging().sendEachForMulticast({
+          tokens: uniqueTokens,
+          data: { title: `오늘 일정 ${todays.length}건`, body: lines.join("\n"), companyId, type: "daily_digest" },
+          webpush: { fcmOptions: { link: "/" } },
+        });
+        console.log(`[dailyScheduleDigest] ${companyId}: 발송 ${resp.successCount}/${uniqueTokens.length}`);
+      } catch (e) {
+        console.error(`[dailyScheduleDigest] ${companyId} 오류:`, e);
+      }
+    }
   }
 );
 
