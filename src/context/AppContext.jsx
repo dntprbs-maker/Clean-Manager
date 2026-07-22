@@ -6,7 +6,7 @@ import {
 import { db, storage } from "../firebase";
 import {
   collection, doc, setDoc, updateDoc, onSnapshot,
-  query, orderBy, deleteDoc, arrayUnion,
+  query, orderBy, where, getDocs, deleteDoc, arrayUnion,
 } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getPendingPhotosByReport, getAllPendingPhotos, deletePendingPhoto } from "../pendingUploads";
@@ -211,9 +211,20 @@ export function Provider({ children, loginUser, onLogout }) {
     setDoc(doc(companyRef, "sites", s.id), s, { merge: true });
     addLog("수정", `'${s.name}' 현장 정보를 수정했습니다.`);
   }, [companyRef, addLog]);
-  const deleteSite = useCallback(id => {
+  const deleteSite = useCallback(async id => {
     const target = sites.find(s => s.id === id);
-    deleteDoc(doc(companyRef, "sites", id));
+    // 현장만 지우고 배정을 안 지우면, 배정에 연결된 캘린더 반복일정이 종료일 없이 계속
+    // 미래로 생성돼 캘린더에서 안 사라지는 버그가 있었음(호출부 UI가 배정을 먼저 지워주는 걸
+    // 전제로 했었는데, 상태 동기화 타이밍에 따라 누락될 수 있어 여기서 직접 최신 상태를
+    // Firestore에서 다시 조회해 확실하게 정리한다).
+    const assignSnap = await getDocs(query(collection(companyRef, "assignments"), where("siteId", "==", id)));
+    const yesterday = add(fmt(new Date()), -1);
+    await Promise.all(assignSnap.docs.map(async d => {
+      const a = d.data();
+      if (a.eventId) await setDoc(doc(companyRef, "events", a.eventId), { repeatUntil: yesterday }, { merge: true });
+      await deleteDoc(d.ref);
+    }));
+    await deleteDoc(doc(companyRef, "sites", id));
     if (target) addLog("삭제", `'${target.name}' 현장을 삭제했습니다.`);
   }, [companyRef, sites, addLog]);
 
