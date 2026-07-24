@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Edit3, Trash2, Plus, Link2, MoreVertical, ChevronRight } from "lucide-react";
+import { X, Edit3, Trash2, Link2, MoreVertical, IdCard, User, Phone, Users } from "lucide-react";
 import { collection, doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../../firebase";
 import { useC } from "../../context/AppContext";
@@ -9,7 +9,7 @@ import { isSuperAdmin, isMemberOf, teamRole, getMemberships, teamsLabel } from "
 
 // ── 직원/팀 관리 화면 — 상단 탭으로 "직원"과 "팀"을 전환 ──────────────────────────
 export function EmployeeListScreen() {
-  const { users, setEmpModal, teams, setCurrentScreen } = useC();
+  const { users, teams, setCurrentScreen } = useC();
   const [tab, setTab] = useState("employees"); // "employees" | "teams"
   const teamCount = teams.filter(t => t !== "사장").length;
 
@@ -17,63 +17,218 @@ export function EmployeeListScreen() {
     <div className="flex-1 bg-gray-50 flex flex-col relative overflow-hidden">
       {/* 헤더 */}
       <div className="bg-white px-4 py-3 border-b border-gray-100 flex items-center justify-between z-10 shrink-0">
-        <h2 className="text-xl font-bold text-gray-900">직원 관리</h2>
+        <h2 className="text-xl font-bold text-gray-900">직원/팀 관리</h2>
         <button onClick={() => setCurrentScreen("calendar")} className="p-1.5 rounded-full hover:bg-gray-100">
           <X size={20} className="text-gray-500"/>
         </button>
       </div>
 
       {/* 탭 */}
-      <div className="bg-white flex border-b border-gray-100 shrink-0">
+      <div className="bg-white flex gap-2 px-4 py-2.5 border-b border-gray-100 shrink-0">
         <button onClick={() => setTab("employees")}
-          className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${tab==="employees" ? "text-blue-600 border-blue-600" : "text-gray-400 border-transparent"}`}>
+          className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all border-2 ${
+            tab==="employees"
+              ? "bg-blue-100 text-blue-800 border-blue-600 shadow-sm"
+              : "bg-gray-100 text-gray-400 border-transparent hover:bg-gray-200"
+          }`}>
           직원 <span className="font-normal text-xs">{users.length}명</span>
         </button>
         <button onClick={() => setTab("teams")}
-          className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${tab==="teams" ? "text-blue-600 border-blue-600" : "text-gray-400 border-transparent"}`}>
+          className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all border-2 ${
+            tab==="teams"
+              ? "bg-amber-100 text-amber-800 border-amber-600 shadow-sm"
+              : "bg-gray-100 text-gray-400 border-transparent hover:bg-gray-200"
+          }`}>
           팀 <span className="font-normal text-xs">{teamCount}개</span>
         </button>
       </div>
 
       {tab === "employees" ? <EmployeeTab/> : <TeamTab/>}
-
-      {/* FAB 추가 버튼 — 직원 탭에서만, 팀 탭은 자체 "+ 팀 추가" 버튼 사용 */}
-      {tab === "employees" && (
-        <button onClick={() => setEmpModal({open:true, editId:null})} className="absolute bottom-6 right-6 w-14 h-14 bg-gray-900 rounded-full flex items-center justify-center shadow-lg shadow-gray-400/50 hover:bg-black transition-transform active:scale-95 z-10">
-          <Plus size={28} className="text-white" />
-        </button>
-      )}
     </div>
   );
 }
 
-// ── 직원 탭 (팀 구분 없이 이름순 목록, 소속 팀은 이름 옆에 작게 표시) ──────
+// ── 직원 탭 (팀 구분 없이 목록, 순서 변경 가능) ──────
 function EmployeeTab() {
-  const { users, setEmpModal } = useC();
+  const { users, setEmpModal, companyId } = useC();
+  const [viewUser, setViewUser] = useState(null);
+  const [reorderMode, setReorderMode] = useState(false);
+  const [dragIdx, setDragIdx] = useState(null);
+  const [overIdx, setOverIdx] = useState(null);
+  const touchDragIdx = useRef(null);
+  const itemRefs = useRef([]);
 
-  const sorted = [...users].sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko"));
+  // order 필드가 있으면 그 순서대로, 없으면 이름순.
+  const hasOrder = users.some(u => u.order != null);
+  const sorted = [...users].sort((a, b) => {
+    if (hasOrder) return (a.order ?? 9999) - (b.order ?? 9999);
+    return (a.name || "").localeCompare(b.name || "", "ko");
+  });
+
+  // 가장 긴 이름 길이에 맞춰 이름 배지 폭을 통일한다.
+  const maxNameLen = users.reduce((m, u) => Math.max(m, (u.name || "").length), 0);
+  const nameWidth = `${maxNameLen + 2.5}em`; // 좌우 패딩 여유 포함
+
+  // 새 순서를 order 필드로 두 컬렉션에 저장.
+  const persistOrder = (arr) => {
+    arr.forEach((u, i) => {
+      setDoc(doc(db, "companies", companyId, "users", u.id), { order: i }, { merge: true });
+      setDoc(doc(db, "staffs", u.id), { order: i }, { merge: true });
+    });
+  };
+
+  const move = (idx, dir) => {
+    const target = idx + dir;
+    if (target < 0 || target >= sorted.length) return;
+    const arr = [...sorted];
+    [arr[idx], arr[target]] = [arr[target], arr[idx]];
+    persistOrder(arr);
+  };
+
+  // ── HTML5 드래그 (데스크톱) ──
+  const onDragOver = (e, i) => { e.preventDefault(); setOverIdx(i); };
+  const onDrop = (e, i) => {
+    e.preventDefault();
+    if (dragIdx === null || dragIdx === i) { setDragIdx(null); setOverIdx(null); return; }
+    const arr = [...sorted];
+    const [moved] = arr.splice(dragIdx, 1);
+    arr.splice(i, 0, moved);
+    persistOrder(arr);
+    setDragIdx(null); setOverIdx(null);
+  };
+
+  // ── 터치 드래그 (모바일) ──
+  const onTouchStart = (i) => { touchDragIdx.current = i; setDragIdx(i); };
+  const onTouchMove = (e) => {
+    if (touchDragIdx.current === null) return;
+    const y = e.touches[0].clientY;
+    const overI = itemRefs.current.findIndex(el => {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return y >= r.top && y <= r.bottom;
+    });
+    if (overI >= 0) setOverIdx(overI);
+  };
+  const onTouchEnd = () => {
+    const from = touchDragIdx.current, to = overIdx;
+    if (from !== null && to !== null && from !== to) {
+      const arr = [...sorted];
+      const [moved] = arr.splice(from, 1);
+      arr.splice(to, 0, moved);
+      persistOrder(arr);
+    }
+    touchDragIdx.current = null; setDragIdx(null); setOverIdx(null);
+  };
 
   return (
     <div className="flex-1 overflow-y-auto pb-24">
+      {/* 상단 바: 순서 변경 토글 + 직원 추가 */}
+      <div className="px-4 pt-4 flex items-center justify-between">
+        <button onClick={() => setReorderMode(v => !v)}
+          className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-colors ${
+            reorderMode ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-500 border-gray-200"
+          }`}>
+          {reorderMode ? "순서 변경 완료" : "≡ 순서 변경"}
+        </button>
+        <button onClick={() => setEmpModal({open:true, editId:null})}
+          className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition-colors shrink-0 ml-2">
+          + 직원 추가
+        </button>
+      </div>
+
       {sorted.length === 0 ? (
         <p className="text-xs text-gray-400 py-8 text-center">등록된 직원이 없습니다.</p>
       ) : (
-        <div className="bg-gray-50 px-4 py-2 space-y-2">
-          {sorted.map(u => (
-            <button key={u.id} onClick={() => setEmpModal({open:true, editId:u.id})}
-              className="w-full bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between text-left active:bg-gray-50 transition-colors">
-              <div>
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span className="font-bold text-gray-900 text-sm">{u.name}</span>
-                  <span className="text-[11px] px-2 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">
-                    {isSuperAdmin(u) ? "최고관리자" : teamsLabel(u)}
-                  </span>
-                </div>
-                <div className="text-xs text-gray-400">📞 {fmtPhone(u.phone)}</div>
+        <div className="bg-gray-50 px-4 py-2 space-y-1">
+          {sorted.map((u, i) => (
+            <div
+              key={u.id}
+              ref={el => itemRefs.current[i] = el}
+              draggable={reorderMode}
+              onDragStart={() => setDragIdx(i)}
+              onDragOver={e => onDragOver(e, i)}
+              onDrop={e => onDrop(e, i)}
+              onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}
+              onClick={() => { if (!reorderMode) setViewUser(u); }}
+              className={`w-full bg-white px-3 py-1 rounded-xl shadow-sm border flex items-center justify-between text-left transition-all cursor-pointer
+                ${overIdx === i && dragIdx !== i ? "border-blue-400 bg-blue-50 scale-[1.02]" : "border-gray-100"}
+                ${dragIdx === i ? "opacity-40" : "opacity-100"}
+                ${reorderMode ? "" : "active:bg-gray-50"}`}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                {reorderMode && (
+                  <div
+                    className="flex flex-col items-center cursor-grab active:cursor-grabbing px-1 select-none touch-none"
+                    onTouchStart={() => onTouchStart(i)}
+                    onTouchMove={onTouchMove}
+                    onTouchEnd={onTouchEnd}
+                  >
+                    <button onClick={e => { e.stopPropagation(); move(i, -1); }} disabled={i === 0}
+                      className="text-gray-300 hover:text-gray-600 disabled:opacity-20 text-[10px] leading-none">▲</button>
+                    <span className="text-gray-300 text-sm leading-none select-none">≡</span>
+                    <button onClick={e => { e.stopPropagation(); move(i, 1); }} disabled={i === sorted.length - 1}
+                      className="text-gray-300 hover:text-gray-600 disabled:opacity-20 text-[10px] leading-none">▼</button>
+                  </div>
+                )}
+                <span style={{ width: nameWidth }} className="font-bold text-blue-700 text-sm shrink-0 bg-blue-50 rounded-lg px-2.5 py-1 whitespace-nowrap text-center">{u.name}</span>
+                <span className="text-sm font-medium text-green-700 shrink-0 bg-green-50 rounded-lg px-3 py-1 tabular-nums whitespace-nowrap">📞 {fmtPhone(u.phone)}</span>
               </div>
-              <ChevronRight size={16} className="text-gray-300 shrink-0"/>
-            </button>
+              {!reorderMode && (
+                <span
+                  role="button"
+                  onClick={(e) => { e.stopPropagation(); setEmpModal({open:true, editId:u.id}); }}
+                  className="shrink-0 text-xs font-medium text-blue-600 px-2.5 py-1 rounded-lg hover:bg-blue-50 active:bg-blue-100"
+                >
+                  수정
+                </span>
+              )}
+            </div>
           ))}
+        </div>
+      )}
+
+      {/* 직원 상세 보기 — 이름/전화번호/소속팀만 읽기 전용으로 표시 */}
+      {viewUser && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-6" onClick={() => setViewUser(null)}>
+          <div className="bg-white rounded-3xl p-5 w-full max-w-xs" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center shrink-0">
+                  <IdCard size={18} className="text-blue-600"/>
+                </div>
+                <h3 className="font-bold text-gray-900 text-lg">직원 정보</h3>
+              </div>
+              <button onClick={() => setViewUser(null)} className="p-1 rounded-full hover:bg-gray-100">
+                <X size={20} className="text-gray-500"/>
+              </button>
+            </div>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center gap-3 bg-blue-50 rounded-2xl px-3 py-3">
+                <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                  <User size={17} className="text-blue-600"/>
+                </div>
+                <span className="text-blue-600 font-medium w-16 shrink-0">이름</span>
+                <span className="w-px self-stretch bg-gray-200 shrink-0"/>
+                <span className="font-bold text-gray-900">{viewUser.name}</span>
+              </div>
+              <div className="flex items-center gap-3 bg-green-50 rounded-2xl px-3 py-3">
+                <div className="w-9 h-9 rounded-full bg-green-100 flex items-center justify-center shrink-0">
+                  <Phone size={17} className="text-green-600"/>
+                </div>
+                <span className="text-green-600 font-medium w-16 shrink-0">전화번호</span>
+                <span className="w-px self-stretch bg-gray-200 shrink-0"/>
+                <span className="font-bold text-gray-900">{fmtPhone(viewUser.phone)}</span>
+              </div>
+              <div className="flex items-center gap-3 bg-purple-50 rounded-2xl px-3 py-3">
+                <div className="w-9 h-9 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
+                  <Users size={17} className="text-purple-600"/>
+                </div>
+                <span className="text-purple-600 font-medium w-16 shrink-0">소속팀</span>
+                <span className="w-px self-stretch bg-gray-200 shrink-0"/>
+                <span className="font-bold text-gray-900">{isSuperAdmin(viewUser) ? "최고관리자" : teamsLabel(viewUser)}</span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -307,6 +462,10 @@ function TeamTab() {
 
   const visibleTeams = teams.filter(t => t !== "사장");
 
+  // 가장 긴 팀명 길이에 맞춰 팀명 배지 폭을 통일한다(인원수 배지 열 정렬).
+  const maxTeamLen = visibleTeams.reduce((m, t) => Math.max(m, (t || "").length), 0);
+  const teamNameWidth = `${maxTeamLen + 2.5}em`;
+
   const handleAdd = () => {
     const name = newTeam.trim();
     if (!name) return;
@@ -490,7 +649,7 @@ function TeamTab() {
       </div>
 
       {/* 팀 목록 — 기본은 이름+인원만, 나머지 기능은 ⋮ 메뉴 안에 */}
-      <div className="p-4 flex flex-col gap-3">
+      <div className="p-4 flex flex-col gap-1.5">
         {visibleTeams.map((t, i) => {
           const members = users.filter(u => isMemberOf(u, t));
           const cal = cals.find(c => c.label === t || c.name === t);
@@ -509,7 +668,7 @@ function TeamTab() {
               onDragOver={e => onDragOver(e, i)}
               onDrop={e => onDrop(e, i)}
               onDragEnd={onDragEnd}
-              className="flex items-center gap-2 p-3"
+              className="flex items-center gap-2 px-3 py-1.5"
             >
             {reorderMode ? (
               <>
@@ -538,7 +697,7 @@ function TeamTab() {
             ) : (
               <>
                 {/* 팀 컬러 표시 (변경은 ⋮ 메뉴에서) */}
-                {cal && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: cal.color }}/>}
+                {cal && <span className="w-5 h-5 rounded-full shrink-0" style={{ background: cal.color }}/>}
 
                 {/* 팀명 (탭하면 구성원 시트) */}
                 {editIdx === i ? (
@@ -550,14 +709,14 @@ function TeamTab() {
                     className="flex-1 border-b-2 border-blue-500 outline-none text-sm font-bold text-gray-800 bg-transparent px-1"
                   />
                 ) : (
-                  <button onClick={() => setMemberOpenIdx(memberOpenIdx === i ? null : i)} className="flex-1 flex items-center gap-1.5 text-left">
-                    <span className="font-bold text-gray-800 text-sm">{t}</span>
-                    <span className="text-[11px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{members.length}명</span>
+                  <button onClick={() => setMemberOpenIdx(memberOpenIdx === i ? null : i)} className="flex-1 flex items-center gap-2 text-left min-w-0">
+                    <span style={{ width: teamNameWidth }} className="font-bold text-amber-700 text-sm shrink-0 bg-amber-50 rounded-lg px-2.5 py-1 whitespace-nowrap text-left">{t}</span>
+                    <span className="text-xs font-medium text-cyan-700 shrink-0 bg-cyan-50 rounded-lg px-2.5 py-1 whitespace-nowrap">👥 {members.length}명</span>
                     {cal && cal.isField !== false && (
-                      <span className="text-[10px] text-blue-600 border border-blue-200 bg-blue-50 rounded-full px-1.5 py-0.5">현장팀</span>
+                      <span className="text-[10px] text-blue-600 border border-blue-200 bg-blue-50 rounded-full px-1.5 py-0.5 shrink-0">현장팀</span>
                     )}
                     {!cal && (
-                      <span className="text-[10px] font-bold text-red-500 border border-dashed border-red-300 bg-red-50 rounded-full px-1.5 py-0.5">캘린더 없음</span>
+                      <span className="text-[10px] font-bold text-red-500 border border-dashed border-red-300 bg-red-50 rounded-full px-1.5 py-0.5 shrink-0">캘린더 없음</span>
                     )}
                   </button>
                 )}

@@ -1373,7 +1373,7 @@ export function SideDrawer() {
               onClick={() => { setCurrentScreen("employees"); setDrawer(false); }}
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
               <User size={20} className="text-blue-500" />
-              <span className="text-sm font-medium text-gray-700 flex-1 text-left">직원 관리</span>
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">직원/팀 관리</span>
             </button>
           )}
           {/* 정기청소 근무관리 - 최고관리자이거나, 본인 앞으로 배정된 현장이 하나라도 있으면 노출 (팀 구성과 무관) */}
