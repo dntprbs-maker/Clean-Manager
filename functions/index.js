@@ -240,16 +240,6 @@ export const dailyScheduleDigest = onSchedule(
   }
 );
 
-// ⚠️ 임시 테스트용 — 원하는 날짜로 즉시 실행해보는 수동 트리거. 확인 끝나면 제거할 것.
-// 사용법: GET .../testDailyDigest?key=cm-digest-test-2607&date=YYYY-MM-DD
-export const testDailyDigest = onRequest({ region: REGION }, async (req, res) => {
-  if (req.query.key !== "cm-digest-test-2607") { res.status(403).send("forbidden"); return; }
-  const dateStr = req.query.date || todayKST();
-  const titlePrefix = dateStr === todayKST() ? "오늘" : "내일";
-  const log = await runDailyDigest(dateStr, titlePrefix);
-  res.status(200).json({ date: dateStr, log });
-});
-
 // ── AI 일정 추출 (Gemini) ────────────────────────────────────────
 // 카카오톡 상담 대화 / 메모지 사진에서 일정 정보(제목·날짜·시간·장소·연락처)를 추출
 const TODAY_HINT = () => new Date().toISOString().slice(0, 10);
