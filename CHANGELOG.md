@@ -5,6 +5,66 @@
 
 ---
 
+## [정리 이관] TODO.md 정리 시 이관된 완료 항목 (2026-07-23 정리)
+
+### 팀별 일정 확인 / 알림 기능 확인
+- [x] 팀별 일정 기능 확인 — 완료: 2026-07-12
+- [x] 알림 기능 확인 (일정 수정 시 어떤 필드가 바뀌어도 알림 가도록 수정) — 완료: 2026-07-12
+- [x] 현장 완료 보고 화면 버튼 플로팅화 (STEP1/STEP2 하단 고정) — 완료: 2026-07-10
+
+### 🔥 Firebase 연동 완성
+- [x] Firebase 프로젝트 연동 확인 (Firestore 실시간 동기화, 일정/공지/링크 저장)
+- [x] Firebase Auth 실제 연결 (직원 전화번호 로그인, 관리자 아이디/비번 로그인, localStorage 세션 유지)
+
+### 🏢 SaaS 멀티테넌시 구조
+- [x] 회원가입 플로우 (회사명 입력 필수, 로고 업로드)
+- [x] Firestore 멀티테넌시 구조 (companies/{companyId} 하위 분리, companyId 기반 격리)
+- [x] 앱 내 회사 브랜딩 (헤더 로고/이름, 직원 이름+역할 표시)
+
+### 📌 기능 완성 (3순위)
+- [x] 현장 완료 보고 (사진 업로드, Firestore 저장)
+- [x] 실시간 전 직원 동기화 (onSnapshot)
+- [x] 사진 스토리지 (Firebase Storage 연동)
+- [x] 알림 구현 — FCM 푸시 알림 완료 (아래 FCM 섹션 참고)
+
+### 🎨 화면 구현 현황 (초기 구축)
+- [x] 현장 완료 보고, 대시보드, 공지사항, 최근 변경 로그, 외부 링크, 직원 관리, 로그인 — 전 화면 Firestore 연동 완료
+
+### 🆕 신규 구현 완료 (2026-06)
+- [x] 소프트 삭제 시스템(status: deleted/deletedBy)
+- [x] 슈퍼어드민 — 삭제목록 탭, 복구 기능, 중복전화번호 탭
+- [x] 회사 삭제 시 관리자/직원 연동 비활성화 및 복구
+- [x] 데모 모드(#demo)
+- [x] 일정 첨부사진 (Storage 업로드, 목록/상세 썸네일)
+- [x] 다중 소속 직원 (로그인 시 회사 선택, 앱 내 전환)
+- [x] 신규 가입 초기 팀 4개/캘린더 3개로 축소
+- [x] 일정 추가 모달 autoFocus 제거 (스크롤 버그 수정)
+
+### 🔔 FCM 푸시 알림 (전체 완료)
+**클라이언트**: 알림 권한+FCM 토큰 발급, 직원 문서 fcmTokens 배열 저장(다기기), 백그라운드 서비스워커, 포그라운드 수신, 사이드드로어 알림 켜기 버튼, 첫 로그인 알림 동의 화면, VAPID 키 발급+.env 등록
+**서버 (Cloud Functions, asia-northeast3)**: sendEventNotification(등록 알림), sendEventUpdateNotification(핵심필드 변경 시), sendEventDeleteNotification(취소 알림), 무효 토큰 자동 정리, 미배정 일정은 사장/관리팀 알림
+**검증 완료**: 백그라운드/포그라운드 모두 수신 확인 (모바일 포함)
+- [x] GitHub Secrets에 VITE_FIREBASE_VAPID_KEY 추가
+- [x] Vercel 환경변수 VITE_FIREBASE_VAPID_KEY 등록
+- VAPID 키: `BG2GEiG-Snv3Hhp9u14vRN4Tvnk7vMFdsSSDciFf0i_4wjhyrYPOiEbsylOg_RzDfHZVqRwk-F0zk3K5ROyFYOc`
+- 알림 켜기는 기기·브라우저마다 한 번씩 필요 (FCM 토큰이 기기 단위)
+
+### 🖼️ 청소 전/후 사진 갤러리
+- [x] 현장 완료 보고 사진 첨부 (Storage 업로드)
+- [x] 완료 보고 내역 상세 사진 확인 (라이트박스 확대)
+- [x] 목록/갤러리 전환 토글, 3열 그리드, 라이트박스 연속 넘기기
+
+### 🗓️ 네이버 캘린더 동기화 (반자동)
+- [x] 네이버는 실시간 자동 동기화용 iCal 구독 링크 미제공 확인 — 완전 자동화 불가로 결론
+- [x] .ics 재업로드 시 진짜 동기화처럼 동작하도록 개선 (UID 기준 갱신, 사라진 일정 자동 소프트 삭제)
+- [x] 드로어 메뉴 라벨 "캘린더 가져오기" → "🔄 캘린더 동기화"로 변경
+
+### 🚀 배포 (Vercel → Firebase Hosting 통일)
+- [x] Firebase Hosting 배포 (clean-manager-60bc9.web.app)
+- [x] GitHub Actions로 Firebase 자동배포 설정 (main 푸시 시 자동 빌드+배포)
+
+---
+
 ## [v1.2.0] - 2026-06-19 (현재)
 ### ✨ 신규 기능 (Features)
 - **팀 관리(추가/삭제) 기능 구현**
