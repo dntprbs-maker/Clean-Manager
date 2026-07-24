@@ -53,11 +53,23 @@ async function notifyTeam(companyId, eventId, ev, action) {
     const u = d.data();
     if (u.status === "deleted") return;
     const isTeamMember = teamName && isMemberOfTeam(u, teamName);
-    const isManager = !teamName && (u.role === "최고관리자" || isMemberOfTeam(u, "관리팀"));
+    const isManager = !teamName && isMemberOfTeam(u, "관리팀");
     if (isTeamMember || isManager) {
       (u.fcmTokens || []).forEach((t) => targets.push({ token: t, userRef: d.ref }));
     }
   });
+
+  // 최고관리자(사장)는 companies/{id}/users가 아니라 별도 admins 컬렉션에 저장돼 있어
+  // 위 루프에서 안 잡힌다 — 담당팀 미배정 일정일 때만 별도로 추가.
+  // (예전엔 이 부분이 없어서 사장 계정 토큰이 존재해도 알림 대상에서 항상 빠졌음)
+  if (!teamName) {
+    const adminsSnap = await db.collection("admins").where("companyId", "==", companyId).get();
+    adminsSnap.forEach((d) => {
+      const a = d.data();
+      if (a.status === "deleted") return;
+      (a.fcmTokens || []).forEach((t) => targets.push({ token: t, userRef: d.ref }));
+    });
+  }
 
   if (targets.length === 0) {
     console.log(`[알림:${action}] 대상 토큰 없음 (team=${teamName || "미지정"})`);
@@ -146,57 +158,75 @@ function todayKST() {
 }
 
 // ── 매일 아침 "오늘 일정" 요약 알림 (시험 운영) ───────────────────────
-// 지금은 회사별 최고관리자(사장)에게만 보내고, 오늘 일정이 하나도 없으면 안 보낸다.
+// 지금은 회사별 최고관리자(사장)에게만 보내고, 그 날 일정이 하나도 없으면 안 보낸다.
+// 팀 필터 없이 그 날의 전체 일정을 다 모아서 보낸다(사장은 전체를 봐야 하므로).
 // 잘 되는지 보고 나중에 팀 전체 발송/시간대 등을 검토하기로 함.
+async function runDailyDigest(dateStr, titlePrefix) {
+  const companiesSnap = await db.collection("companies").get();
+  const log = [];
+
+  for (const companyDoc of companiesSnap.docs) {
+    const companyId = companyDoc.id;
+    if (companyDoc.data()?.status === "deleted") continue;
+
+    try {
+      const eventsSnap = await db.collection(`companies/${companyId}/events`).get();
+      const events = eventsSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((e) => e.status !== "deleted");
+      const todays = expandRecurringForFeed(events).filter(
+        (e) => e.start <= dateStr && (e.end || e.start) >= dateStr
+      );
+      if (todays.length === 0) { log.push(`${companyId}: 그 날 일정 없음 — 안 보냄`); continue; }
+
+      // 최고관리자(사장)는 companies/{id}/users가 아니라 별도 admins 컬렉션에 저장돼 있다.
+      const adminsSnap = await db.collection("admins").where("companyId", "==", companyId).get();
+      const tokens = [];
+      adminsSnap.forEach((d) => {
+        const a = d.data();
+        if (a.status === "deleted") return; // 시험 운영: 사장만
+        (a.fcmTokens || []).forEach((t) => tokens.push(t));
+      });
+      if (tokens.length === 0) { log.push(`${companyId}: 사장 토큰 없음(일정 ${todays.length}건인데 못 보냄)`); continue; }
+
+      const sorted = [...todays].sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
+      const lines = sorted.map((e) => {
+        const time = e.allDay ? "종일" : e.startTime ? fmtTime(e.startTime) : "";
+        const team = e.team ? `[${e.team}] ` : "";
+        return `${time ? time + " " : ""}${team}${e.title || "제목 없음"}`;
+      });
+
+      const uniqueTokens = [...new Set(tokens)];
+      const resp = await getMessaging().sendEachForMulticast({
+        tokens: uniqueTokens,
+        data: { title: `${titlePrefix} 일정 ${todays.length}건`, body: lines.join("\n"), companyId, type: "daily_digest" },
+        webpush: { fcmOptions: { link: "/" } },
+      });
+      log.push(`${companyId}: 발송 ${resp.successCount}/${uniqueTokens.length} (일정 ${todays.length}건)`);
+    } catch (e) {
+      log.push(`${companyId}: 오류 ${e?.message || e}`);
+    }
+  }
+  return log;
+}
+
 export const dailyScheduleDigest = onSchedule(
   { region: REGION, schedule: "0 8 * * *", timeZone: "Asia/Seoul" },
   async () => {
-    const today = todayKST();
-    const companiesSnap = await db.collection("companies").get();
-
-    for (const companyDoc of companiesSnap.docs) {
-      const companyId = companyDoc.id;
-      if (companyDoc.data()?.status === "deleted") continue;
-
-      try {
-        const eventsSnap = await db.collection(`companies/${companyId}/events`).get();
-        const events = eventsSnap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((e) => e.status !== "deleted");
-        const todays = expandRecurringForFeed(events).filter(
-          (e) => e.start <= today && (e.end || e.start) >= today
-        );
-        if (todays.length === 0) continue; // 오늘 일정 없음 — 알림 안 보냄
-
-        const usersSnap = await db.collection(`companies/${companyId}/users`).get();
-        const tokens = [];
-        usersSnap.forEach((d) => {
-          const u = d.data();
-          if (u.status === "deleted" || u.role !== "최고관리자") return; // 시험 운영: 사장만
-          (u.fcmTokens || []).forEach((t) => tokens.push(t));
-        });
-        if (tokens.length === 0) continue;
-
-        const sorted = [...todays].sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
-        const lines = sorted.slice(0, 5).map((e) => {
-          const time = e.allDay ? "종일" : e.startTime ? fmtTime(e.startTime) : "";
-          return `${time ? time + " " : ""}${e.title || "제목 없음"}`;
-        });
-        if (sorted.length > 5) lines.push(`외 ${sorted.length - 5}건`);
-
-        const uniqueTokens = [...new Set(tokens)];
-        const resp = await getMessaging().sendEachForMulticast({
-          tokens: uniqueTokens,
-          data: { title: `오늘 일정 ${todays.length}건`, body: lines.join("\n"), companyId, type: "daily_digest" },
-          webpush: { fcmOptions: { link: "/" } },
-        });
-        console.log(`[dailyScheduleDigest] ${companyId}: 발송 ${resp.successCount}/${uniqueTokens.length}`);
-      } catch (e) {
-        console.error(`[dailyScheduleDigest] ${companyId} 오류:`, e);
-      }
-    }
+    const log = await runDailyDigest(todayKST(), "오늘");
+    console.log(`[dailyScheduleDigest] ${log.join(" | ")}`);
   }
 );
+
+// ⚠️ 임시 테스트용 — 원하는 날짜로 즉시 실행해보는 수동 트리거. 확인 끝나면 제거할 것.
+// 사용법: GET .../testDailyDigest?key=cm-digest-test-2607&date=YYYY-MM-DD
+export const testDailyDigest = onRequest({ region: REGION }, async (req, res) => {
+  if (req.query.key !== "cm-digest-test-2607") { res.status(403).send("forbidden"); return; }
+  const dateStr = req.query.date || todayKST();
+  const titlePrefix = dateStr === todayKST() ? "오늘" : "내일";
+  const log = await runDailyDigest(dateStr, titlePrefix);
+  res.status(200).json({ date: dateStr, log });
+});
 
 // ── AI 일정 추출 (Gemini) ────────────────────────────────────────
 // 카카오톡 상담 대화 / 메모지 사진에서 일정 정보(제목·날짜·시간·장소·연락처)를 추출

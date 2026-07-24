@@ -6,6 +6,11 @@ import { db, fcmVapidKey, getMessagingIfSupported } from "./firebase";
 // 이 기기 토큰을 "현재 로그인한 사람" 소유로 이전
 // (다른 직원 문서에서 이 토큰 제거 → 현재 사용자에게만 등록)
 // 한 기기 = 마지막 로그인한 사람만 알림 받음
+//
+// 최고관리자(사장)는 직원(companies/{id}/users, staffs)과 저장되는 컬렉션이 달라서
+// 별도의 admins 컬렉션에도 등록해줘야 한다 — 예전엔 이걸 안 해서 사장 계정이 "알림
+// 켜기"를 눌러도 토큰이 저장될 자리가 없어 조용히 유실되고(실패가 catch로 무시됨),
+// 사장은 사실상 어떤 알림도 못 받는 상태였음(2026-07-24 확인).
 async function claimToken(user, token) {
   // 1) 같은 회사의 다른 직원 문서에서 이 토큰 제거
   try {
@@ -23,11 +28,23 @@ async function claimToken(user, token) {
       d.id === user.uid ? null : updateDoc(d.ref, { fcmTokens: arrayRemove(token) }).catch(()=>{})
     ));
   } catch { /* 무시 */ }
-  // 3) 현재 로그인한 직원에게 등록 (관리자는 user 문서가 없어 실패해도 무시 → 알림 안 받음)
-  await Promise.all([
+  // 2b) admins 컬렉션에서도 다른 관리자 문서에서 제거 (최고관리자가 여러 명일 수 있음)
+  try {
+    const aq = query(collection(db, "admins"), where("fcmTokens", "array-contains", token));
+    const asnap = await getDocs(aq);
+    await Promise.all(asnap.docs.map(d =>
+      d.id === user.uid ? null : updateDoc(d.ref, { fcmTokens: arrayRemove(token) }).catch(()=>{})
+    ));
+  } catch { /* 무시 */ }
+  // 3) 현재 로그인한 사람에게 등록 — 직원은 users/staffs, 최고관리자는 admins에도 등록
+  const writes = [
     updateDoc(doc(db, "companies", user.companyId, "users", user.uid), { fcmTokens: arrayUnion(token) }).catch(()=>{}),
     updateDoc(doc(db, "staffs", user.uid), { fcmTokens: arrayUnion(token) }).catch(()=>{}),
-  ]);
+  ];
+  if (user.role === "최고관리자") {
+    writes.push(updateDoc(doc(db, "admins", user.uid), { fcmTokens: arrayUnion(token) }).catch(()=>{}));
+  }
+  await Promise.all(writes);
 }
 
 // 알림 권한 요청 → 토큰 발급 → 현재 사용자 소유로 이전
@@ -81,6 +98,10 @@ export async function disablePush(user) {
     const sq = query(collection(db, "staffs"), where("fcmTokens", "array-contains", token));
     const ssnap = await getDocs(sq);
     await Promise.all(ssnap.docs.map(d => updateDoc(d.ref, { fcmTokens: arrayRemove(token) }).catch(()=>{})));
+
+    const aq = query(collection(db, "admins"), where("fcmTokens", "array-contains", token));
+    const asnap = await getDocs(aq);
+    await Promise.all(asnap.docs.map(d => updateDoc(d.ref, { fcmTokens: arrayRemove(token) }).catch(()=>{})));
   } catch (e) { console.warn("[FCM] 로그아웃 토큰 제거 실패:", e); }
 }
 
