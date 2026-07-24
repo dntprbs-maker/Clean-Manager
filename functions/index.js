@@ -192,10 +192,15 @@ async function runDailyDigest(dateStr, titlePrefix) {
     if (companyDoc.data()?.status === "deleted") continue;
 
     try {
-      const eventsSnap = await db.collection(`companies/${companyId}/events`).get();
+      const [eventsSnap, calsSnap] = await Promise.all([
+        db.collection(`companies/${companyId}/events`).get(),
+        db.collection(`companies/${companyId}/cals`).get(),
+      ]);
+      // 직원 개인 캘린더(personal: true)는 회사 업무 요약에 안 어울려서 제외한다.
+      const personalCalIds = new Set(calsSnap.docs.filter((d) => d.data().personal).map((d) => d.id));
       const events = eventsSnap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((e) => e.status !== "deleted");
+        .filter((e) => e.status !== "deleted" && !personalCalIds.has(e.calId));
       const todays = expandRecurringForFeed(events).filter(
         (e) => e.start <= dateStr && (e.end || e.start) >= dateStr
       );
