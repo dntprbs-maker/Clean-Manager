@@ -32,6 +32,28 @@ function isMemberOfTeam(u, team) {
   return getMemberships(u).some((m) => m.team === team);
 }
 
+// admins 컬렉션은 로그인 정보(아이디/비번)가 담겨있어 클라이언트 직접 쓰기가
+// Firestore 규칙으로 막혀있다(그래서 클라이언트에서 바로 fcmTokens를 갱신하려던
+// 시도가 매번 조용히 실패했음 — try/catch로 삼켜져서 앱에서는 "켜짐"으로만 보임).
+// 서버(Admin SDK, 규칙 우회)를 거쳐서만 토큰을 등록/해제하도록 분리.
+export const syncAdminPushToken = onCall({ region: REGION }, async (request) => {
+  const { uid, token, action } = request.data || {};
+  if (!uid || !token) throw new HttpsError("invalid-argument", "uid/token이 필요합니다.");
+
+  if (action === "remove") {
+    await db.doc(`admins/${uid}`).update({ fcmTokens: FieldValue.arrayRemove(token) }).catch(() => {});
+    return { ok: true };
+  }
+
+  // 이 토큰이 다른 관리자 문서에 남아있으면 정리(한 기기 = 마지막 로그인한 사람만 알림)
+  const dupSnap = await db.collection("admins").where("fcmTokens", "array-contains", token).get();
+  await Promise.all(dupSnap.docs.map((d) =>
+    d.id === uid ? null : d.ref.update({ fcmTokens: FieldValue.arrayRemove(token) }).catch(() => {})
+  ));
+  await db.doc(`admins/${uid}`).update({ fcmTokens: FieldValue.arrayUnion(token) }).catch(() => {});
+  return { ok: true };
+});
+
 // 공통: 특정 일정(ev)에 대해 담당 팀원에게 알림 발송
 // action: "created" | "updated" | "deleted"
 async function notifyTeam(companyId, eventId, ev, action) {

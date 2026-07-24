@@ -1,17 +1,23 @@
 // FCM 클라이언트 헬퍼 — 알림 권한 요청 + 토큰 발급 + Firestore 저장
 import { getToken, onMessage } from "firebase/messaging";
 import { doc, updateDoc, arrayUnion, arrayRemove, collection, query, where, getDocs } from "firebase/firestore";
-import { db, fcmVapidKey, getMessagingIfSupported } from "./firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions, fcmVapidKey, getMessagingIfSupported } from "./firebase";
+
+// admins 컬렉션(사장 계정, 로그인정보 포함)은 클라이언트 직접 쓰기가 Firestore 규칙으로
+// 막혀있어서, 예전에 클라이언트에서 바로 fcmTokens를 갱신하려던 시도가 매번 조용히
+// 실패했음(try/catch로 삼켜져 앱엔 "켜짐"으로만 보임 — 2026-07-24 확인). 서버(Admin SDK,
+// 규칙 우회)를 거치는 syncAdminPushToken 콜러블 함수로만 등록/해제한다.
+const callSyncAdminPushToken = httpsCallable(functions, "syncAdminPushToken");
 
 // 이 기기 토큰을 "현재 로그인한 사람" 소유로 이전
 // (다른 직원 문서에서 이 토큰 제거 → 현재 사용자에게만 등록)
 // 한 기기 = 마지막 로그인한 사람만 알림 받음
-//
-// 최고관리자(사장)는 직원(companies/{id}/users, staffs)과 저장되는 컬렉션이 달라서
-// 별도의 admins 컬렉션에도 등록해줘야 한다 — 예전엔 이걸 안 해서 사장 계정이 "알림
-// 켜기"를 눌러도 토큰이 저장될 자리가 없어 조용히 유실되고(실패가 catch로 무시됨),
-// 사장은 사실상 어떤 알림도 못 받는 상태였음(2026-07-24 확인).
 async function claimToken(user, token) {
+  if (user.role === "최고관리자") {
+    await callSyncAdminPushToken({ uid: user.uid, token, action: "add" }).catch(() => {});
+    return;
+  }
   // 1) 같은 회사의 다른 직원 문서에서 이 토큰 제거
   try {
     const q = query(collection(db, "companies", user.companyId, "users"), where("fcmTokens", "array-contains", token));
@@ -28,23 +34,11 @@ async function claimToken(user, token) {
       d.id === user.uid ? null : updateDoc(d.ref, { fcmTokens: arrayRemove(token) }).catch(()=>{})
     ));
   } catch { /* 무시 */ }
-  // 2b) admins 컬렉션에서도 다른 관리자 문서에서 제거 (최고관리자가 여러 명일 수 있음)
-  try {
-    const aq = query(collection(db, "admins"), where("fcmTokens", "array-contains", token));
-    const asnap = await getDocs(aq);
-    await Promise.all(asnap.docs.map(d =>
-      d.id === user.uid ? null : updateDoc(d.ref, { fcmTokens: arrayRemove(token) }).catch(()=>{})
-    ));
-  } catch { /* 무시 */ }
-  // 3) 현재 로그인한 사람에게 등록 — 직원은 users/staffs, 최고관리자는 admins에도 등록
-  const writes = [
+  // 3) 현재 로그인한 직원에게 등록
+  await Promise.all([
     updateDoc(doc(db, "companies", user.companyId, "users", user.uid), { fcmTokens: arrayUnion(token) }).catch(()=>{}),
     updateDoc(doc(db, "staffs", user.uid), { fcmTokens: arrayUnion(token) }).catch(()=>{}),
-  ];
-  if (user.role === "최고관리자") {
-    writes.push(updateDoc(doc(db, "admins", user.uid), { fcmTokens: arrayUnion(token) }).catch(()=>{}));
-  }
-  await Promise.all(writes);
+  ]);
 }
 
 // 알림 권한 요청 → 토큰 발급 → 현재 사용자 소유로 이전
@@ -99,9 +93,9 @@ export async function disablePush(user) {
     const ssnap = await getDocs(sq);
     await Promise.all(ssnap.docs.map(d => updateDoc(d.ref, { fcmTokens: arrayRemove(token) }).catch(()=>{})));
 
-    const aq = query(collection(db, "admins"), where("fcmTokens", "array-contains", token));
-    const asnap = await getDocs(aq);
-    await Promise.all(asnap.docs.map(d => updateDoc(d.ref, { fcmTokens: arrayRemove(token) }).catch(()=>{})));
+    if (user?.role === "최고관리자") {
+      await callSyncAdminPushToken({ uid: user.uid, token, action: "remove" }).catch(() => {});
+    }
   } catch (e) { console.warn("[FCM] 로그아웃 토큰 제거 실패:", e); }
 }
 
