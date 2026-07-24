@@ -341,6 +341,10 @@ function TeamTab() {
     if (teams.includes(name)) { alert("이미 존재하는 팀입니다."); return; }
     saveTeams(teams.map(t => t === oldName ? name : t));
     reassignTeam(oldName, name);
+    // 캘린더는 팀 이름 문자열로 매칭되는 구조라, 이름만 바꾸고 캘린더는 안 건드리면
+    // 예전 이름의 캘린더가 고아로 남아 계속 보임 — 매칭되는 캘린더도 같이 새 이름으로 갱신.
+    cals.filter(c => c.label === oldName || c.name === oldName)
+      .forEach(c => updateCal({ ...c, label: name, name }));
     setEditIdx(null);
   };
 

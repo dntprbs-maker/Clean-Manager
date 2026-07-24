@@ -119,15 +119,17 @@ export function registerTeamTools(server, companyId) {
     },
     async ({ name }) => {
       const { ref, teams } = await getConfig(companyId);
-      if (!teams.includes(name)) return err(`팀 "${name}"을 찾을 수 없습니다.`);
+      const cals = await findCalsByTeamName(companyId, name);
+      // teams 배열엔 없는데 캘린더만 남아있는 "고아" 상태도 있을 수 있음(예: 팀 이름 변경 시
+      // 예전엔 캘린더를 안 갱신해서 옛 이름 캘린더가 남던 버그) — teams에 없어도 매칭되는
+      // 캘린더가 있으면 정리는 진행한다. 팀도 캘린더도 둘 다 없을 때만 오류.
+      if (!teams.includes(name) && cals.length === 0) return err(`팀 "${name}"을 찾을 수 없습니다.`);
 
       const changed = await updateAllMembers(companyId, name, (memberships) =>
         memberships.filter((m) => m.team !== name)
       );
 
       await ref.set({ teams: teams.filter((t) => t !== name) }, { merge: true });
-
-      const cals = await findCalsByTeamName(companyId, name);
       const batch = getDb().batch();
       cals.forEach((d) => batch.delete(d.ref));
       await batch.commit();
