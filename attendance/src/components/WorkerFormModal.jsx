@@ -24,7 +24,7 @@ export default function WorkerFormModal({ worker, onClose }) {
   };
 
   return (
-    <Modal title={isEdit ? '직원 수정' : '직원 추가'} onClose={onClose}>
+    <Modal title={isEdit ? '용역자 수정' : '용역자 추가'} onClose={onClose}>
       <form onSubmit={handleSubmit} className="p-4 space-y-3">
         <div>
           <label className="text-xs text-gray-500">이름</label>

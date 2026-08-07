@@ -44,10 +44,10 @@ export default function SiteFormModal({ site, onClose }) {
           <textarea className="border rounded px-2 py-2 w-full" rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
         </div>
         <div>
-          <label className="text-xs text-gray-500 block mb-1">배치할 직원</label>
+          <label className="text-xs text-gray-500 block mb-1">배치할 용역자</label>
           <input
             className="border rounded px-2 py-2 w-full mb-1 text-sm"
-            placeholder="직원 검색"
+            placeholder="용역자 검색"
             value={workerSearch}
             onChange={(e) => setWorkerSearch(e.target.value)}
           />
@@ -58,7 +58,7 @@ export default function SiteFormModal({ site, onClose }) {
                 {w.name}
               </label>
             ))}
-            {workers.length === 0 && <div className="px-3 py-2 text-sm text-gray-400">등록된 직원이 없습니다.</div>}
+            {workers.length === 0 && <div className="px-3 py-2 text-sm text-gray-400">등록된 용역자가 없습니다.</div>}
             {workers.length > 0 && workers.filter((w) => w.name.includes(workerSearch.trim())).length === 0 && (
               <div className="px-3 py-2 text-sm text-gray-400">검색 결과가 없습니다.</div>
             )}

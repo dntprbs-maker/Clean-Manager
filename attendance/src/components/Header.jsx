@@ -1,30 +1,32 @@
 import { useState } from 'react';
 import { fmtPhone } from '../lib/phone';
 
-export default function Header({ user, items, activeKey, onLogout }) {
+export default function Header({ user, items, activeKey, onLogout, theme = 'light' }) {
   const [open, setOpen] = useState(false);
+  const dark = theme === 'blue';
 
   return (
-    <div className="sticky top-0 z-10 bg-white border-b">
-      <div className="flex items-center gap-3 px-4 py-3">
+    <div className={`sticky top-0 z-10 h-16 ${dark ? 'bg-transparent' : 'bg-white border-b'}`}>
+      <div className="h-16 flex items-center gap-3 px-4">
         <button
           onClick={() => setOpen((v) => !v)}
           aria-label="메뉴"
-          className="w-9 h-9 flex flex-col items-center justify-center gap-1 shrink-0 -ml-1"
+          className={`w-10 h-10 flex flex-col items-center justify-center gap-1 shrink-0 -ml-1 rounded-lg ${dark ? 'active:bg-black/5' : 'active:bg-slate-100'}`}
         >
-          <span className="block w-5 h-0.5 bg-gray-700" />
-          <span className="block w-5 h-0.5 bg-gray-700" />
-          <span className="block w-5 h-0.5 bg-gray-700" />
+          <span className={`block w-[17px] h-[2.5px] rounded-full ${dark ? 'bg-[#0c2a4d]' : 'bg-slate-700'}`} />
+          <span className={`block w-[17px] h-[2.5px] rounded-full ${dark ? 'bg-[#0c2a4d]' : 'bg-slate-700'}`} />
+          <span className={`block w-[17px] h-[2.5px] rounded-full ${dark ? 'bg-[#0c2a4d]' : 'bg-slate-700'}`} />
         </button>
-        <div className="font-semibold">
-          {user.name} <span className="text-gray-400 font-normal">({fmtPhone(user.id)})</span>
+        <div>
+          <span className={dark ? 'text-[#0c2a4d] text-[15px] font-semibold tracking-[-0.3px]' : 'font-bold text-slate-800'}>{user.name}</span>{' '}
+          <span className={dark ? 'text-[#0c2a4d] text-[15px] font-semibold tracking-[-0.3px]' : 'text-xs font-normal text-slate-400'}>({fmtPhone(user.id)})</span>
         </div>
       </div>
 
       {open && (
         <>
           <div className="fixed inset-0 z-30 bg-black/20" onClick={() => setOpen(false)} />
-          <div className="absolute left-2 top-full mt-1 z-40 w-52 bg-white rounded-lg shadow-lg border overflow-hidden">
+          <div className="absolute left-2 top-full mt-1 z-40 w-52 bg-white rounded-2xl shadow-lg border overflow-hidden">
             {items.map((item) => (
               <button
                 key={item.key}

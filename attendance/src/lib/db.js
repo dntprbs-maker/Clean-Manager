@@ -84,13 +84,12 @@ export function subscribeWorkLogsForMonth(yearMonth, cb) {
   );
 }
 
-// 오늘자 근무기록(출근~퇴근) 하나를 구독 — 없으면 근무전, clockOut 없으면 근무중, 있으면 근무완료.
-export function subscribeTodayLog(workerId, date, cb) {
+// 오늘자 작업기록을 전부 구독 — 하루에 여러 현장을 오갈 수 있어 배열로 내려준다(현장별로 독립된 기록).
+export function subscribeTodayLogs(workerId, date, cb) {
   return onSnapshot(
     query(workLogsCol, where('workerId', '==', workerId), where('date', '==', date)),
     (snap) => {
-      const d = snap.docs.find((doc) => !doc.data().deleted);
-      cb(d ? { id: d.id, ...d.data() } : null);
+      cb(snap.docs.filter((doc) => !doc.data().deleted).map((doc) => ({ id: doc.id, ...doc.data() })));
     }
   );
 }

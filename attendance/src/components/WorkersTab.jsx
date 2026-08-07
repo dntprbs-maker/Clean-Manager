@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { User, Plus } from 'lucide-react';
 import { subscribeWorkers, updateWorker, deleteWorker, payInfoOf } from '../lib/db';
 import { formatWon, PAY_TYPE_LABEL } from '../lib/format';
 import { fmtPhone } from '../lib/phone';
@@ -20,38 +21,68 @@ export default function WorkersTab() {
   };
 
   return (
-    <div className="p-4">
-      <h2 className="text-lg font-semibold mb-1">직원 관리</h2>
-      <p className="text-xs text-gray-400 mb-3">여기 등록한 전화번호가 곧 로그인 아이디입니다. 직원이 처음 로그인할 때 본인이 비밀번호를 설정해요.</p>
+    <div className="bg-[#E8F0FA] min-h-full pb-6">
+      <div className="px-5 pt-6 pb-2">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-800">용역자 관리</h1>
+            <p className="text-sm text-slate-500 mt-0.5">용역자 등록 및 관리</p>
+          </div>
+          <div className="px-3 py-1.5 bg-white rounded-full text-xs flex items-center shadow-sm shrink-0">
+            <span className="w-2 h-2 bg-emerald-500 rounded-full mr-1.5" />
+            <span className="text-emerald-600 text-xs font-medium">총 {workers.length}명</span>
+          </div>
+        </div>
 
-      <button onClick={openCreate} className="mb-4 bg-gray-800 text-white rounded px-4 py-2 text-sm">
-        직원 추가
-      </button>
+        <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+          등록된 용역자의 정보를 확인하고, 로그인 설정을 관리할 수 있습니다.
+        </p>
 
-      <div className="space-y-2">
-        {workers.map((w) => {
-          const { type, rate } = payInfoOf(w);
-          return (
-            <div key={w.id} className={`flex items-center justify-between border rounded-lg p-3 bg-white ${!w.active ? 'opacity-50' : ''}`}>
-              <div>
-                <div className="font-medium">{w.name} <span className="text-sm text-gray-500">{fmtPhone(w.phone)}</span></div>
-                <div className="text-sm text-gray-500">{PAY_TYPE_LABEL[type]} {formatWon(rate)} {w.note && `· ${w.note}`}</div>
-                <div className="text-xs text-gray-400">{w.pw ? '로그인 설정됨' : '아직 로그인 안 함(첫 로그인 대기)'}</div>
+        <button onClick={openCreate}
+          className="w-full bg-[#2563EB] hover:bg-[#1D4ED8] transition-colors text-white font-semibold py-[13px] px-6 rounded-[14px] text-[15px] shadow-sm flex items-center justify-center gap-x-2">
+          <Plus className="w-4 h-4" strokeWidth={2.5} />
+          <span>용역자 추가</span>
+        </button>
+      </div>
+
+      <div className="mx-4">
+        <div className="bg-white rounded-[22px] shadow-[0_4px_12px_rgba(0,0,0,0.05)] px-1 py-1">
+          {workers.map((w, i) => {
+            const { type, rate } = payInfoOf(w);
+            return (
+              <div key={w.id} className={`px-5 py-[18px] flex items-start gap-3 ${i < workers.length - 1 ? 'border-b border-[#F1F5F9]' : ''} ${!w.active ? 'opacity-50' : ''}`}>
+                <span className="w-9 h-9 bg-[#2563EB] rounded-full shrink-0 flex items-center justify-center">
+                  <User className="w-4.5 h-4.5 text-white" fill="currentColor" strokeWidth={0} />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-[15.5px] text-slate-800">{w.name}</div>
+                  <div className="text-slate-500 text-[13.5px] mt-px">{fmtPhone(w.phone)}</div>
+                  <div className="mt-2">
+                    <div className="text-sm text-slate-600">{PAY_TYPE_LABEL[type]} {formatWon(rate)} {w.note && `· ${w.note}`}</div>
+                    <div className={`mt-1 text-xs font-medium ${w.pw ? 'text-emerald-600' : 'text-slate-400'}`}>
+                      {w.pw ? '로그인 설정됨' : '아직 로그인 안 함'}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1 text-xs mt-1 shrink-0">
+                  <button onClick={() => openEdit(w)} className="text-[#2563EB] px-2 py-[1px] font-medium hover:bg-blue-50 rounded">수정</button>
+                  <button onClick={() => updateWorker(w.id, { active: !w.active })} className="text-amber-600 px-2 py-[1px] font-medium hover:bg-amber-50 rounded">
+                    {w.active ? '비활성화' : '활성화'}
+                  </button>
+                  <button onClick={() => handleDelete(w)} className="text-red-500 px-2 py-[1px] font-medium hover:bg-red-50 rounded">삭제</button>
+                </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button className="text-sm text-gray-500 border rounded px-2 py-1" onClick={() => openEdit(w)}>수정</button>
-                <button
-                  className="text-sm text-gray-500 border rounded px-2 py-1"
-                  onClick={() => updateWorker(w.id, { active: !w.active })}
-                >
-                  {w.active ? '비활성화' : '활성화'}
-                </button>
-                <button className="text-sm text-red-500 border rounded px-2 py-1" onClick={() => handleDelete(w)}>삭제</button>
-              </div>
-            </div>
-          );
-        })}
-        {workers.length === 0 && <div className="text-gray-400 text-sm">등록된 직원이 없습니다.</div>}
+            );
+          })}
+          {workers.length === 0 && <div className="text-gray-400 text-sm px-5 py-6">등록된 용역자가 없습니다.</div>}
+        </div>
+      </div>
+
+      <div className="px-5 mt-4">
+        <div className="text-[11px] text-slate-400 px-1">
+          • 로그인 설정은 용역자가 앱에서 직접 진행할 수 있습니다.<br />
+          • 비활성화된 용역자는 로그인할 수 없습니다.
+        </div>
       </div>
 
       {formOpen && <WorkerFormModal worker={editingWorker} onClose={closeForm} />}

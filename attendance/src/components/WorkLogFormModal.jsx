@@ -29,7 +29,7 @@ export default function WorkLogFormModal({ log, onClose }) {
     setError('');
     const worker = workers.find((w) => w.id === workerId);
     if (!worker || !date || !clockInTime) {
-      setError('용역자, 근무일, 출근시각은 필수입니다.');
+      setError('용역자, 청소일, 출근시각은 필수입니다.');
       return;
     }
     const site = sites.find((s) => s.id === siteId);
@@ -48,11 +48,11 @@ export default function WorkLogFormModal({ log, onClose }) {
   };
 
   return (
-    <Modal title={isEdit ? '근무기록 수정' : '근무기록 추가'} onClose={onClose}>
+    <Modal title={isEdit ? '청소기록 수정' : '청소기록 추가'} onClose={onClose}>
       <form onSubmit={handleSubmit} className="p-4 space-y-3">
         <input
           className="border rounded px-2 py-2 w-full text-sm"
-          placeholder="직원 검색"
+          placeholder="용역자 검색"
           value={workerSearch}
           onChange={(e) => setWorkerSearch(e.target.value)}
         />
@@ -65,7 +65,7 @@ export default function WorkLogFormModal({ log, onClose }) {
           {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <div>
-          <label className="text-xs text-gray-500">근무일</label>
+          <label className="text-xs text-gray-500">청소일</label>
           <input type="date" className="border rounded px-2 py-2 w-full" value={date} onChange={(e) => setDate(e.target.value)} />
         </div>
         <div>
@@ -73,7 +73,7 @@ export default function WorkLogFormModal({ log, onClose }) {
           <input type="time" className="border rounded px-2 py-2 w-full" value={clockInTime} onChange={(e) => setClockInTime(e.target.value)} />
         </div>
         <div>
-          <label className="text-xs text-gray-500">퇴근시각 (비워두면 근무중)</label>
+          <label className="text-xs text-gray-500">퇴근시각 (비워두면 청소중)</label>
           <input type="time" className="border rounded px-2 py-2 w-full" value={clockOutTime} onChange={(e) => setClockOutTime(e.target.value)} />
         </div>
         {error && <p className="text-sm text-red-500">{error}</p>}

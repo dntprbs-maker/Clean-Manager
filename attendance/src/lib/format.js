@@ -21,10 +21,12 @@ export function currentWorkDay() {
   return `${y}-${m}-${day}`;
 }
 
-// "2026년 7월 17일 (금)" 형식
+// "2026년 7월 17일 (금요일)" 형식
 export function formatDateLong(dateStr) {
   const d = new Date(`${dateStr}T00:00:00`);
-  return d.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
+  const datePart = d.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
+  const weekday = d.toLocaleDateString('ko-KR', { weekday: 'long' });
+  return `${datePart} (${weekday})`;
 }
 
 // Firestore Timestamp → "7월 17일 오후 2:30" 형식
@@ -36,6 +38,25 @@ export function formatDateTime(ts) {
   return `${date} ${time}`;
 }
 
+// Firestore Timestamp → "08:40" (24시간제, 시각만)
+export function formatTimeOnly(ts) {
+  if (!ts?.toDate) return '';
+  return ts.toDate().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+// Firestore Timestamp → "오전 9:00" (날짜 없이 시각만, 오전/오후 표기)
+export function formatTimeAmPm(ts) {
+  if (!ts?.toDate) return '';
+  return ts.toDate().toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
+}
+
+// 소수 시간(2.5) → "2시간 30분"
+export function formatHoursMinutes(hours) {
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  return m > 0 ? `${h}시간 ${m}분` : `${h}시간`;
+}
+
 export const STATUS_LABEL = {
   draft: '집계됨',
   managerConfirmed: '매니저 확정',
@@ -44,9 +65,9 @@ export const STATUS_LABEL = {
 };
 
 export const WORK_STATUS_LABEL = {
-  before: '근무전',
-  working: '근무중',
-  done: '근무완료',
+  before: '작업 준비',
+  working: '작업 진행중',
+  done: '작업 완료',
 };
 
 export const PAY_TYPE_LABEL = {

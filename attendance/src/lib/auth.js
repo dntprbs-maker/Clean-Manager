@@ -1,6 +1,7 @@
 import { db } from '../firebase';
 import { collection, doc, addDoc, getDoc, getDocs, updateDoc, query, where } from 'firebase/firestore';
 import { onlyDigits } from './phone';
+import { isDevMode } from './devMode';
 
 const STORAGE_KEY = 'attendanceLoginUser';
 const accountsCol = collection(db, 'attendance_accounts');
@@ -81,4 +82,33 @@ export async function registerFirstAdmin({ id, pw, name }) {
   const account = { id: id.trim(), pw, name: name.trim(), role: '최고관리자', active: true };
   const ref = await addDoc(accountsCol, account);
   return { ...account, uid: ref.id };
+}
+
+// -------------------------------------------------
+// DEV LOGIN
+// UI 테스트용 기능
+// 운영모드에서는 반드시 비활성화
+// -------------------------------------------------
+// isDevMode()가 false면(운영 배포) 무조건 예외를 던져 절대 우회 로그인이
+// 일어나지 않도록 함수 내부에서도 다시 한번 막는다(호출부의 분기 실수에 대한 방어).
+
+// 전화번호만으로 직원(용역자) 정보를 조회해 비밀번호 검사 없이 로그인 처리.
+export async function devLoginWorkerByPhone(id) {
+  if (!isDevMode()) throw new Error('개발모드가 아닙니다.');
+  const phone = onlyDigits(id);
+  const snap = await getDocs(query(workersCol, where('phone', '==', phone)));
+  const found = snap.docs.find((d) => d.data().active !== false);
+  if (!found) throw new Error('등록되지 않은 용역자입니다.');
+  const data = found.data();
+  return { name: data.name, id: phone, role: '용역자', workerId: found.id };
+}
+
+// 아이디만으로 매니저/최고관리자 계정을 조회해 비밀번호 검사 없이 로그인 처리.
+export async function devLoginAccountById(id) {
+  if (!isDevMode()) throw new Error('개발모드가 아닙니다.');
+  const snap = await getDocs(query(accountsCol, where('id', '==', id.trim())));
+  const found = snap.docs[0];
+  if (!found) throw new Error('등록되지 않은 계정입니다.');
+  const data = found.data();
+  return { ...data, uid: found.id };
 }
