@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# 환경변수/비밀키 (API 키 등 절대 커밋 금지)
+.env
+.env.*
+!.env.example
+
 # Firebase local cache / agent-skills (firebase-tools 부가기능, 이 프로젝트와 무관)
 .firebase/
 .agents/
