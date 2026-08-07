@@ -174,8 +174,11 @@ function AppInner() {
     if (!r.ok) alert("알림을 켜는 데 실패했어요: " + r.reason);
   };
 
+  // 앱 루트에는 select-none을 걸지 않는다 — 읽기 전용 화면에서도 주소·연락처·메모를
+  // 선택해 복사할 수 있어야 하기 때문(index.css의 "텍스트 선택 정책" 주석 참고).
+  // 스와이프 제스처가 걸린 영역에만 개별적으로 select-none을 붙인다.
   return (
-    <div className={`flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative select-none${isDemo?" pt-9":""}`}
+    <div className={`flex flex-col overflow-hidden bg-white max-w-sm mx-auto relative${isDemo?" pt-9":""}`}
       style={{height:"100svh", touchAction:"pan-x pan-y"}}>
       <style>{ANIM_CSS}</style>
       <TopHeader/>

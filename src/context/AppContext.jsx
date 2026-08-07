@@ -455,7 +455,9 @@ export function Provider({ children, loginUser, onLogout }) {
   }, [companyRef]);
 
   // UI 상태
-  const [modal,setModal]       = useState({open:false,date:null,editId:null,scope:"all",instanceEv:null});
+  // copyFrom: 기존 일정을 복사해 새 일정으로 등록할 때의 원본 일정.
+  // editId가 없으므로 저장은 addEvent(신규)로 흘러가고, 폼 초기값만 원본에서 가져온다.
+  const [modal,setModal]       = useState({open:false,date:null,editId:null,scope:"all",instanceEv:null,copyFrom:null});
   const [current,setCurrent]   = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -539,8 +541,10 @@ export function Provider({ children, loginUser, onLogout }) {
     try { localStorage.setItem("loginUser", JSON.stringify(updated)); } catch {}
   }, [companyDoc, currentUser]);
 
-  const openModal   = useCallback((date=null,editId=null,scope="all",instanceEv=null)=>setModal({open:true,date,editId,scope,instanceEv}),[]);
-  const closeModal  = useCallback(()=>setModal({open:false,date:null,editId:null,scope:"all",instanceEv:null}),[]);
+  const openModal   = useCallback((date=null,editId=null,scope="all",instanceEv=null)=>setModal({open:true,date,editId,scope,instanceEv,copyFrom:null}),[]);
+  // 일정 복사 — 원본 내용을 채운 "새 일정" 폼을 연다(editId 없음 → 저장 시 addEvent)
+  const openCopyModal = useCallback((ev)=>setModal({open:true,date:null,editId:null,scope:"all",instanceEv:null,copyFrom:ev}),[]);
+  const closeModal  = useCallback(()=>setModal({open:false,date:null,editId:null,scope:"all",instanceEv:null,copyFrom:null}),[]);
 
   const checkedIds     = useMemo(()=>new Set(cals.filter(c=>c.checked).map(c=>c.id)),[cals]);
 
@@ -624,7 +628,7 @@ export function Provider({ children, loginUser, onLogout }) {
       events,visibleEvents,addEvent,updateEvent,deleteEvent,updateEventScoped,deleteEventScoped,updateLeaderComment,
       fieldReportEv,setFieldReportEv,
       cals,visibleCals,toggleCal,updateCal,deleteCal,
-      modal,openModal,closeModal,
+      modal,openModal,openCopyModal,closeModal,
       current,setCurrent,
       selDate,setSelDate,
       detEv,setDetEv,
@@ -712,7 +716,7 @@ export function DemoProvider({ children }) {
   const demoGuardRef = useRef(null);
   const demoAlert = () => alert("데모 모드에서는 변경할 수 없습니다.");
   const [currentScreen, setCurrentScreen] = useState("calendar");
-  const [modal, setModal] = useState({open:false,date:null,editId:null});
+  const [modal, setModal] = useState({open:false,date:null,editId:null,copyFrom:null});
   const [sheetMode, setSheetMode] = useState(1);
   const [drawer, setDrawer] = useState(false);
   const [selDate, setSelDate] = useState(today);
@@ -732,8 +736,9 @@ export function DemoProvider({ children }) {
   const [titleRule] = useState(["time","district","area"]);
   const [typeKeywords] = useState(["입주청소","정기청소","에어컨청소","특수청소","줄눈청소"]);
   const [linkCategories] = useState(["업무","지도","연락처","기타"]);
-  const openModal  = (date=null,editId=null) => setModal({open:true,date,editId});
-  const closeModal = () => setModal({open:false,date:null,editId:null});
+  const openModal  = (date=null,editId=null) => setModal({open:true,date,editId,copyFrom:null});
+  const openCopyModal = (ev) => setModal({open:true,date:null,editId:null,copyFrom:ev});
+  const closeModal = () => setModal({open:false,date:null,editId:null,copyFrom:null});
   const visibleEvents = DEMO_EVENTS.filter(e => DEMO_CALS.filter(c=>c.checked).map(c=>c.id).includes(e.calId));
   return (
     <Ctx.Provider value={{
@@ -756,7 +761,7 @@ export function DemoProvider({ children }) {
       updateEventScoped: demoAlert, deleteEventScoped: demoAlert,
       addNotice: demoAlert, updateNotice: demoAlert, deleteNotice: demoAlert,
       addLog: noop, addReport: demoAlert, updateReport: noop,
-      modal, openModal, closeModal,
+      modal, openModal, openCopyModal, closeModal,
       current, setCurrent,
       selDate, setSelDate,
       sheetMode, setSheetMode,

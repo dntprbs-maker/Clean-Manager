@@ -47,7 +47,8 @@ export function PhotoLightbox() {
           </button>
         </>
       )}
-      <div className="w-full h-full overflow-auto" style={{ touchAction: "pinch-zoom" }} data-allow-pinch
+      {/* select-none: 좌우 스와이프로 사진 넘길 때 텍스트 블록 지정 방지 */}
+      <div className="w-full h-full overflow-auto select-none" style={{ touchAction: "pinch-zoom" }} data-allow-pinch
         onClick={e => e.stopPropagation()} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         <div className="min-w-full min-h-full flex items-center justify-center p-4">
           <img src={list[index]} alt="" style={{ touchAction: "pinch-zoom", maxWidth: "100%", maxHeight: "100dvh" }} className="object-contain"/>

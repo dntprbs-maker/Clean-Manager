@@ -5,7 +5,7 @@ import {
 import {
   Search, Plus, X, MapPin, RotateCcw, Clock,
   Calendar, AlignLeft, ChevronDown, ChevronLeft,
-  ChevronRight, Menu, Settings, User, Edit3, Trash2,
+  ChevronRight, Menu, Settings, User, Edit3, Trash2, Copy,
   PieChart, Bell, History, ExternalLink,
   CheckSquare, Download, Check, Eye
 } from "lucide-react";
@@ -704,7 +704,8 @@ export function CalendarView() {
       {sheetMode === 0 && (
         <div
           key="mode0"
-          className="flex-1 overflow-y-auto bg-white"
+          // select-none: 월 이동 스와이프 도중 날짜·일정 텍스트가 블록 지정되는 것 방지
+          className="flex-1 overflow-y-auto bg-white select-none"
           style={{animation:"slideInFromTop 0.28s cubic-bezier(0.25,0.46,0.45,0.94) both", touchAction:"none"}}
           {...gridSwipe}>
           {/* 요일 헤더 */}
@@ -740,7 +741,8 @@ export function CalendarView() {
           style={{animation:"slideInFromBottom 0.28s cubic-bezier(0.25,0.46,0.45,0.94) both"}}
           className="flex flex-col flex-1 overflow-hidden">
           {/* 도트 그리드 */}
-          <div className="bg-white border-b border-gray-100 shrink-0" style={{touchAction:"none"}} {...gridSwipe}>
+          {/* select-none: 월 이동 스와이프 + 상하 모드전환 드래그 중 텍스트 블록 지정 방지 */}
+          <div className="bg-white border-b border-gray-100 shrink-0 select-none" style={{touchAction:"none"}} {...gridSwipe}>
             <div className="grid grid-cols-7 pt-0.5">
               {WD.map((w,i) => (
                 <div key={w} className={`text-center text-[11px] font-semibold py-0.5
@@ -793,8 +795,8 @@ export function CalendarView() {
             </div>
           </div>
 
-          {/* 시간표 — 좌우 날짜 스와이프 */}
-          <div className="flex flex-col flex-1 overflow-hidden" {...listSwipe}>
+          {/* 시간표 — 좌우 날짜 스와이프 (select-none: 스와이프 중 텍스트 블록 지정 방지) */}
+          <div className="flex flex-col flex-1 overflow-hidden select-none" {...listSwipe}>
             <ListTransition direction={listDir} listKey={listKey}>
               <ScheduleList selDate={selDate}/>
             </ListTransition>
@@ -805,7 +807,8 @@ export function CalendarView() {
       {/* ══ MODE 2: 시간표 전용 ════════════════════════════════════ */}
       {sheetMode === 2 && (
         <div
-          className="flex flex-col flex-1 overflow-hidden"
+          // select-none: 좌우 날짜 스와이프 도중 텍스트가 블록 지정되는 것 방지
+          className="flex flex-col flex-1 overflow-hidden select-none"
           style={{animation:"slideInFromBottom 0.28s cubic-bezier(0.25,0.46,0.45,0.94) both"}}
           {...listSwipe}>
           <ListTransition direction={listDir} listKey={listKey}>
@@ -819,7 +822,7 @@ export function CalendarView() {
 
 // ── 이벤트 상세 Bottom Sheet ──────────────────────────────────────
 export function DetailSheet() {
-  const { detEv, setDetEv, deleteEvent, deleteEventScoped, openModal, setFieldReportEv, currentUser, cals, updateLeaderComment, reports } = useC();
+  const { detEv, setDetEv, deleteEvent, deleteEventScoped, openModal, openCopyModal, setFieldReportEv, currentUser, cals, updateLeaderComment, reports } = useC();
   const [vis,setVis]=useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [savedComment, setSavedComment] = useState("");
@@ -872,6 +875,9 @@ export function DetailSheet() {
       close(); setTimeout(()=>openModal(null, detEv.id), 300);
     }
   };
+  // 복사 — 반복 일정이어도 "이 일정만/이후 전체"를 물을 필요가 없다.
+  // 어차피 반복 설정을 뺀 단발 일정 하나를 새로 만드는 것이라 클릭한 회차 내용만 가져오면 된다.
+  const handleCopy = () => { close(); setTimeout(()=>openCopyModal(detEv), 300); };
   const handleDelete = async () => {
     if (detEv._recurring) {
       const scope = await askRecurringScope(detEv, "delete");
@@ -902,6 +908,8 @@ export function DetailSheet() {
           <span className="text-base font-bold text-gray-800">일정</span>
           <div className="flex gap-1">
             {canEditEvent && !isRegular && <>
+              <button onClick={handleCopy} title="이 일정을 복사해 새 일정 만들기"
+                className="p-2 rounded-full hover:bg-gray-100"><Copy size={19} className="text-gray-600"/></button>
               <button onClick={handleEdit}
                 className="p-2 rounded-full hover:bg-gray-100"><Edit3 size={19} className="text-gray-600"/></button>
               <button onClick={handleDelete}
@@ -950,23 +958,30 @@ export function DetailSheet() {
             </div>
           )}
 
-          {/* 장소 */}
+          {/* 장소 — 주소 텍스트는 길게 눌러 선택·복사할 수 있도록 일반 텍스트로 두고,
+              '지도보기'는 옆의 별도 버튼으로 분리했다. 주소가 버튼 안에 들어있으면
+              길게 눌러도 브라우저가 선택 대신 버튼 동작으로 처리해버림(수정 화면과 같은 형태). */}
           {detEv.place && (
             <div className="flex items-start px-5 py-5 border-b border-gray-100 gap-4">
               <MapPin size={20} className="text-gray-400 shrink-0 mt-0.5"/>
-              <MapLinkButton place={detEv.place} className="flex-1 text-[15px] text-gray-800 hover:underline leading-relaxed text-left">
-                {detEv.place}
+              <span className="flex-1 text-[15px] text-gray-800 leading-relaxed">{detEv.place}</span>
+              <MapLinkButton place={detEv.place} className="shrink-0 mt-0.5 px-2 py-1 bg-blue-50 rounded-full text-blue-500 text-xs font-bold transition-colors hover:bg-blue-100">
+                지도보기
               </MapLinkButton>
             </div>
           )}
 
-          {/* 연락처 */}
+          {/* 연락처 — 장소와 같은 이유로 번호는 선택 가능한 텍스트, '전화걸기'는 별도 버튼 */}
           {detEv.contact && (
             <div className="flex items-start px-5 py-5 border-b border-gray-100 gap-4">
               <span className="text-gray-400 shrink-0 text-lg">📞</span>
-              <a href={`tel:${detEv.contact.replace(/[^0-9]/g, '')}`} className="flex-1 text-[15px] text-green-600 font-bold hover:underline">
-                {detEv.contact}
-              </a>
+              <span className="flex-1 text-[15px] text-green-600 font-bold leading-relaxed">{detEv.contact}</span>
+              {detEv.contact.replace(/[^0-9]/g, '').length >= 9 && (
+                <a href={`tel:${detEv.contact.replace(/[^0-9]/g, '')}`}
+                  className="shrink-0 mt-0.5 px-2 py-1 bg-green-50 rounded-full text-green-600 text-xs font-bold transition-colors hover:bg-green-100">
+                  전화걸기
+                </a>
+              )}
             </div>
           )}
 
@@ -1315,10 +1330,10 @@ export function SideDrawer() {
         />
       )}
 
-      {/* 드로어 패널 */}
+      {/* 드로어 패널 (select-none: 밀어서 닫기 드래그 중 메뉴 텍스트 블록 지정 방지) */}
       <div
         ref={panelRef}
-        className="absolute top-0 left-0 h-full bg-white z-50 shadow-2xl flex flex-col"
+        className="absolute top-0 left-0 h-full bg-white z-50 shadow-2xl flex flex-col select-none"
         style={{
           width: DRAWER_W,
           transform: `translateX(-${DRAWER_W}px)`,
@@ -1591,6 +1606,33 @@ const blank=date=>({title:"",description:"",contact:"",team:"",start:date||fmt(n
   repeatYearlyType:"date",repeatYearlyMonth:null,repeatYearlyDay:null,repeatYearlyOrdinal:1,repeatYearlyWeekday:null,
   repeatUntil:"",photos:[]});
 
+// 일정 복사 — 새 일정으로 다시 등록할 값만 원본에서 가져오고 나머지는 blank()의 기본값으로 둔다.
+// 일부러 안 가져오는 것들:
+//   · id/_id/_recurring 등 식별자 — 새 문서로 발급돼야 함
+//   · 반복 설정 — 복사본까지 반복이면 의도치 않게 대량 생성됨(필요하면 폼에서 다시 지정)
+//   · photos — 원본 일정의 증빙이고, URL을 공유하면 원본 삭제 시 복사본 사진도 깨짐
+//   · leaderComment / 완료보고 — 그날 현장에서 남긴 기록이라 새 일정에 따라가면 안 됨
+//   · source/siteId — 정기청소 자동생성 표식. 복사본은 일반 일정이어야 함
+// 날짜는 원본 그대로 둔다(반복 일정을 복사하면 클릭한 회차 날짜 기준).
+const copyOf = ev => {
+  const start = ev._origDate || ev.start;
+  return {
+    ...blank(start),
+    title:       ev.title       || "",
+    description: ev.description || "",
+    contact:     ev.contact     || "",
+    team:        ev.team        || "",
+    place:       ev.place       || "",
+    url:         ev.url         || "",
+    calId:       ev.calId       || "",
+    start,
+    end:         ev.end && ev.end >= start ? ev.end : start,
+    allDay:      !!ev.allDay,
+    startTime:   ev.startTime   || "09:00",
+    endTime:     ev.endTime     || "10:00",
+  };
+};
+
 // ── 날짜/시간 피커 (네이버 앱 스타일 — 인라인 드럼롤) ──────────────
 export function DateTimePicker({ form, set, errs, lockRepeat }) {
   const [activePicker, setActivePicker] = useState(null); // null | "start" | "end"
@@ -1807,8 +1849,9 @@ export function DateTimePicker({ form, set, errs, lockRepeat }) {
 }
 
 export function EventModal() {
-  const { modal, closeModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, teams, titleRule, typeKeywords, companyId, reports, companyDoc, currentUser, setFieldReportEv, eventModalGuardRef } = useC();
-  const { open, date, editId, scope, instanceEv } = modal;
+  const { modal, closeModal, openCopyModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, teams, titleRule, typeKeywords, companyId, reports, companyDoc, currentUser, setFieldReportEv, eventModalGuardRef } = useC();
+  const { open, date, editId, scope, instanceEv, copyFrom } = modal;
+  const isCopy = !editId && !!copyFrom;
   // 반복일정의 "이 일정만/이후 전체" 수정은 클릭한 회차(instanceEv)의 값으로 폼을 채운다.
   const editEv = editId ? ((scope && scope!=="all" && instanceEv) ? instanceEv : events.find(e=>e.id===editId)) : null;
   const [form,setForm]=useState(blank(date));
@@ -1851,7 +1894,8 @@ export function EventModal() {
 
   useEffect(()=>{
     if(open){
-      const initForm = editEv?{...editEv}:blank(date);
+      // 복사본은 원본 값으로 채우되 editId가 없어 저장 시 새 일정으로 등록된다
+      const initForm = editEv ? {...editEv} : isCopy ? copyOf(copyFrom) : blank(date);
       setForm(initForm);
       origForm.current = editEv ? {...editEv} : null;
       setExitConfirm(false);
@@ -1862,12 +1906,13 @@ export function EventModal() {
       setImgFile(null);
       setImgPreview(null);
       setCalDropOpen(false);
-      setStep(editEv ? "form" : "paste");
+      // 복사는 이미 채워진 폼을 바로 손보는 흐름이라 입력방법 선택(paste) 단계를 건너뛴다
+      setStep(editEv || isCopy ? "form" : "paste");
       setTimeout(()=>setAnim(true),10);
       setTimeout(()=>tRef.current?.focus(),150);
     }
     else setAnim(false);
-  },[open,editId]);
+  },[open,editId,copyFrom?.id]);
 
 
   const validate=()=>{
@@ -1881,6 +1926,16 @@ export function EventModal() {
   const [uploading, setUploading] = useState(false);
   const submit = async () => {
     if (!validate()) return;
+    // 복사본은 원본 날짜 그대로 열리므로, 날짜를 안 바꾸고 저장하면 같은 날 같은 일정이
+    // 두 개 생긴다. 진짜 그럴 의도인지 저장 직전에 한 번만 확인한다.
+    if (isCopy) {
+      const dup = events.some(e =>
+        e.start === form.start &&
+        e.calId === form.calId &&
+        (e.title || "").trim() === form.title.trim());
+      if (dup && !window.confirm(
+        `${form.start}에 '${form.title.trim()}' 일정이 이미 있습니다.\n같은 날짜에 하나 더 등록할까요?`)) return;
+    }
     setUploading(true);
     try {
       // base64(새 사진)는 Storage에 업로드, URL(기존)은 그대로 유지
@@ -2112,11 +2167,20 @@ export function EventModal() {
       {/* 헤더 + 담당팀 드롭다운 */}
       <div className="flex flex-col px-4 pt-3 pb-0 border-b border-gray-100">
         <div className="flex items-center justify-between mb-1">
-          <button onClick={()=>editId ? tryClose() : setStep("paste")}>
-            {editId ? <X size={22} className="text-gray-600"/> : <ChevronLeft size={22} className="text-gray-600"/>}
+          {/* 복사본은 되돌아갈 입력방법 선택 단계가 없으므로 수정과 같이 X(닫기)로 둔다 */}
+          <button onClick={()=>(editId || isCopy) ? tryClose() : setStep("paste")}>
+            {(editId || isCopy) ? <X size={22} className="text-gray-600"/> : <ChevronLeft size={22} className="text-gray-600"/>}
           </button>
-          <h2 className="font-bold text-base">{editId?"일정 수정":"일정 추가"}</h2>
+          <h2 className="font-bold text-base">{editId ? "일정 수정" : isCopy ? "일정 복사" : "일정 추가"}</h2>
           <div className="flex items-center gap-3">
+            {/* 복사 — 지금 보고 있는 일정 내용을 그대로 담은 새 일정 폼으로 갈아탄다.
+                수정하던 내용이 아니라 저장된 원본(editEv)을 기준으로 복사한다. */}
+            {editId && editEv && (
+              <button onClick={()=>{ if(isDirty() && !window.confirm("수정 중인 내용은 저장되지 않습니다.\n저장된 내용으로 복사할까요?")) return; openCopyModal(editEv); }}
+                className="text-gray-500 font-bold text-base">
+                복사
+              </button>
+            )}
             {editId && (
               <button onClick={()=>{ if(window.confirm("이 일정을 삭제하시겠습니까?")){ deleteEvent(editId); closeModal(); } }}
                 className="text-red-500 font-bold text-base">

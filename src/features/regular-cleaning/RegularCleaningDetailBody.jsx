@@ -28,11 +28,14 @@ export function RegularCleaningDetailBody({ detEv, cal }) {
         <span className="text-[15px] text-gray-800">{detEv.start} ({WD[weekday]})</span>
       </div>
 
+      {/* 주소는 길게 눌러 선택·복사할 수 있게 일반 텍스트로 두고, 지도보기는 별도 버튼으로 분리
+          (일반 일정 상세 DetailSheet와 동일한 형태) */}
       {site?.address && (
         <div className="flex items-start px-5 py-5 border-b border-gray-100 gap-4">
           <MapPin size={20} className="text-gray-400 shrink-0 mt-0.5"/>
-          <MapLinkButton place={site.address} className="flex-1 text-[15px] text-gray-800 hover:underline leading-relaxed text-left">
-            {site.address}
+          <span className="flex-1 text-[15px] text-gray-800 leading-relaxed">{site.address}</span>
+          <MapLinkButton place={site.address} className="shrink-0 mt-0.5 px-2 py-1 bg-blue-50 rounded-full text-blue-500 text-xs font-bold transition-colors hover:bg-blue-100">
+            지도보기
           </MapLinkButton>
         </div>
       )}

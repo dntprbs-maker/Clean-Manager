@@ -9,8 +9,13 @@ html, body {
   /* 모바일 브라우저의 화면 당겨서 새로고침(Pull-to-Refresh) 완벽 차단 */
   overscroll-behavior-y: none;
   overscroll-behavior-x: none;
-  
-  /* 스와이프 도중 텍스트가 블록 지정되는 현상 방지 */
-  -webkit-user-select: none;
-  user-select: none;
 }
+
+/* 텍스트 선택 정책
+   예전엔 여기(html, body)에 user-select:none을 걸어 앱 전체의 선택을 막았다.
+   스와이프 도중 텍스트가 블록 지정되는 현상은 막혔지만, 팀장·팀원처럼 내용을
+   수정할 수 없는 사용자가 주소·연락처·메모를 복사조차 못 하는 문제가 있었다.
+   그래서 기본값을 "선택 가능"으로 되돌리고, 대신 제스처가 걸린 영역
+   (캘린더 그리드·일정 리스트 스와이프, 사이드 드로어, 사진 라이트박스,
+   순서변경 드래그 핸들 등)에만 Tailwind `select-none`을 직접 붙인다.
+   → 새로 만드는 화면에서도 좌우/상하 스와이프를 붙일 땐 select-none을 같이 붙일 것. */
