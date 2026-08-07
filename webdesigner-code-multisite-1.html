@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>파트너 앱 홈</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&amp;display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        
+        .app-container {
+            width: 420px;
+            margin: 0 auto;
+            box-shadow: 0 0 0 12px #e5e7eb,
+                        0 0 0 16px #d1d5db;
+            overflow: hidden;
+        }
+
+        .site-card {
+            transition: all 0.2s ease;
+        }
+
+        .progress-card {
+            border-left: 6px solid #2563EB;
+        }
+
+        .time-box {
+            background-color: #F0F4F9;
+        }
+
+        .nav-active {
+            color: #2563EB;
+            font-weight: 600;
+        }
+
+        .section-title {
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .card-shadow {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06),
+                        0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .header-icon {
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+        }
+    </style>
+</head>
+<body class="bg-[#E6ECF5] py-4">
+    <!-- 모바일 420px 프레임 -->
+    <div class="app-container mx-auto bg-[#EBF0F9] w-[420px] min-h-[780px] overflow-hidden">
+        
+        <!-- 상태바 -->
+        <div class="bg-[#EBF0F9] px-5 pt-3 pb-1 flex items-center justify-between text-[13px]">
+            <div class="font-semibold">9:41</div>
+            <div class="flex items-center gap-1.5">
+                <span class="text-xs">3gf</span>
+                <!-- 신호 및 배터리 아이콘 -->
+                <div class="flex items-center">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M17 4h-4V2H11v2H7c-1.1 0-2 .9-2 2v15c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2z"/>
+                    </svg>
+                </div>
+                <div class="flex items-center px-1">
+                    <div class="w-7 h-3.5 border border-black rounded-sm relative">
+                        <div class="absolute right-[-1.5px] top-1/2 -translate-y-1/2 w-1 h-2 bg-black rounded-r-sm"></div>
+                        <div class="absolute top-px left-px right-1 bottom-px bg-black rounded-sm"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 상단 헤더 -->
+        <div class="px-5 pt-2 pb-3 bg-[#EBF0F9]">
+            <div class="flex items-center justify-between">
+                
+                <!-- 왼쪽 캘린더 버튼 -->
+                <div class="w-11 h-11 bg-white rounded-2xl flex items-center justify-center header-icon">
+                    <div class="w-6 h-6 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" stroke-width="2.25" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                        </svg>
+                    </div>
+                </div>
+                
+                <!-- 중앙 타이틀 -->
+                <div class="text-center">
+                    <div class="font-extrabold text-[20px] tracking-[-0.4px] text-[#1F2937]">오늘 작업 현장</div>
+                    <div class="text-[13.5px] text-[#64748B] font-medium mt-[-1px]">2026년 7월 25일 (토)</div>
+                </div>
+                
+                <!-- 오른쪽 알림 버튼 -->
+                <div class="relative w-11 h-11 bg-white rounded-2xl flex items-center justify-center header-icon">
+                    <svg class="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" stroke-width="2.25" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 00-9.33-5.205M18 8v.5M12 21.5a3 3 0 01-3-3"/>
+                    </svg>
+                    <div class="absolute top-[10px] right-[10px] w-[7.5px] h-[7.5px] bg-red-500 rounded-full ring-2 ring-white"></div>
+                </div>
+                
+            </div>
+        </div>
+
+        <!-- 안내 문구 -->
+        <div class="px-5 pt-1 pb-3">
+            <div class="flex items-center text-[#5B7BD8]">
+                <div class="flex items-center">
+                    <span class="text-base">✦</span>
+                    <span class="ml-1.5 text-[13.5px] font-medium tracking-[-0.1px]">
+                        오늘도 안전하고 깨끗한 하루 되세요!
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 카드 1: 진행중 -->
+        <div class="px-4 mb-3">
+            <div class="bg-white rounded-[22px] card-shadow progress-card overflow-hidden">
+                <div class="px-5 pt-5 pb-4">
+                    <!-- 상단 -->
+                    <div class="flex justify-between items-start">
+                        <div class="flex gap-x-2.5">
+                            <!-- 위치 아이콘 -->
+                            <div class="w-9 h-9 bg-[#EBF0FE] rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <svg class="w-[17px] h-[17px] text-[#2563EB]" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314-11.314z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                </svg>
+                            </div>
+                            
+                            <div>
+                                <div class="flex items-center">
+                                    <span class="font-extrabold text-[16.5px] tracking-[-0.2px]">은평 롯데캐슬</span>
+                                </div>
+                                <div class="text-xs text-[#64748B] -mt-px">서울 은평구 진관2로 15</div>
+                            </div>
+                        </div>
+                        
+                        <!-- 진행중 배지 -->
+                        <div class="flex items-center px-3 py-[3px] bg-[#EFF3FF] rounded-[20px]">
+                            <div class="w-[5.5px] h-[5.5px] bg-[#2563EB] rounded-full mr-1"></div>
+                            <span class="text-[#2563EB] font-semibold text-xs tracking-[-0.1px]">작업 진행중</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 시간 정보 -->
+                    <div class="mt-[14px] px-4 py-[11px] bg-[#F4F6FA] rounded-[15px]">
+                        <div class="flex justify-between items-center">
+                            <!-- 시작 -->
+                            <div class="flex items-center">
+                                <div class="w-4 h-4 mr-2 text-[#2563EB]">
+                                    <svg fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 01-18 0 9 9 0 0118 0z"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <span class="block text-[11px] text-[#64748B] font-medium leading-none">작업 시작</span>
+                                    <span class="font-extrabold text-[#2563EB] text-[19.5px] leading-none tracking-tighter">08:40</span>
+                                </div>
+                            </div>
+                            
+                            <div class="h-5 w-px bg-gray-300"></div>
+                            
+                            <!-- 완료 -->
+                            <div class="flex items-center">
+                                <div class="w-4 h-4 mr-2 text-[#94A3B8]">
+                                    <svg fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 01-18 0 9 9 0 0118 0z"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <span class="block text-[11px] text-[#64748B] font-medium leading-none">작업 완료</span>
+                                    <span class="font-extrabold text-gray-400 tracking-tight">- : -</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 완료 버튼 -->
+                    <button 
+                        class="mt-3.5 w-full flex items-center justify-center py-[10px] bg-[#2563EB] hover:bg-[#1E40AF] active:bg-[#1E40AF] transition-colors rounded-[22px]">
+                        <div class="flex items-center">
+                            <span class="text-white text-[15px] font-semibold px-1">☐</span>
+                            <span class="text-white text-[14.8px] font-semibold">작업 완료하기</span>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 카드 2: 대기 상태 (1) -->
+        <div class="px-4 mb-3">
+            <div class="bg-white rounded-[22px] card-shadow">
+                <div class="px-5 pt-4.5 pb-4">
+                    <div class="flex justify-between items-start">
+                        <div class="flex gap-x-2.5">
+                            <div class="w-9 h-9 bg-[#F3F4F6] rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <svg class="w-[17px] h-[17px] text-[#6B7280]" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314-11.314z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                </svg>
+                            </div>
+                            
+                            <div>
+                                <div class="flex items-center">
+                                    <span class="font-extrabold text-[16.5px] tracking-[-0.2px]">마포 자이</span>
+                                </div>
+                                <div class="text-xs text-[#64748B]">서울 마포구 마포대로 123</div>
+                            </div>
+                        </div>
+                        
+                        <div class="px-[9px] py-[1px] rounded-full bg-[#F2F3F5]">
+                            <span class="text-[11.5px] px-1 font-medium text-[#6B7280]">작업 준비</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 정보 문구 -->
+                    <div class="mt-[11px] flex items-center gap-2 px-3 py-[6.5px] bg-[#F4F6FA] rounded-[14px]">
+                        <div>
+                            <span class="text-xs font-medium text-[#64748B]">
+                                ● 아직 작업을 시작하지 않았어요.
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <!-- 시작 버튼 -->
+                    <button 
+                        class="mt-3 w-full flex items-center justify-center py-[9.5px] border border-[#2563EB] rounded-[24px] bg-white hover:bg-[#F8FAFC]">
+                        <div class="flex items-center justify-center">
+                            <span class="text-[#2563EB] text-[15.5px] font-semibold">▶</span>
+                            <span class="ml-1 text-[#2563EB] text-[14.5px] font-semibold">작업 시작하기</span>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 카드 3: 대기 상태 (2) -->
+        <div class="px-4 mb-3">
+            <div class="bg-white rounded-[22px] card-shadow">
+                <div class="px-5 pt-4.5 pb-4">
+                    <div class="flex justify-between items-start">
+                        <div class="flex gap-x-2.5">
+                            <div class="w-9 h-9 bg-[#F3F4F6] rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <svg class="w-[17px] h-[17px] text-[#6B7280]" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314-11.314z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                </svg>
+                            </div>
+                            
+                            <div>
+                                <div class="flex items-center">
+                                    <span class="font-extrabold text-[16.5px] tracking-[-0.2px]">강남 센트럴</span>
+                                </div>
+                                <div class="text-xs text-[#64748B]">서울 강남구 테헤란로 321</div>
+                            </div>
+                        </div>
+                        
+                        <div class="px-[9px] py-[1px] rounded-full bg-[#F2F3F5]">
+                            <span class="text-[11.5px] px-1 font-medium text-[#6B7280]">작업 준비</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 정보 문구 -->
+                    <div class="mt-[11px] flex items-center gap-2 px-3 py-[6.5px] bg-[#F4F6FA] rounded-[14px]">
+                        <div>
+                            <span class="text-xs font-medium text-[#64748B]">
+                                ● 아직 작업을 시작하지 않았어요.
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <!-- 시작 버튼 -->
+                    <button 
+                        class="mt-3 w-full flex items-center justify-center py-[9.5px] border border-[#2563EB] rounded-[24px] bg-white hover:bg-[#F8FAFC]">
+                        <div class="flex items-center justify-center">
+                            <span class="text-[#2563EB] text-[15.5px] font-semibold">▶</span>
+                            <span class="ml-1 text-[#2563EB] text-[14.5px] font-semibold">작업 시작하기</span>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 누적 작업시간 카드 -->
+        <div class="px-4">
+            <div class="bg-white rounded-[22px] px-4 py-3.5 card-shadow flex items-center gap-x-3">
+                <div class="w-[35px] h-[35px] bg-[#23C160] flex items-center justify-center rounded-full flex-shrink-0">
+                    <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 01-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                </div>
+                
+                <div class="flex-1 pr-1">
+                    <div class="font-semibold text-xs text-gray-600">오늘 누적 작업시간</div>
+                </div>
+                
+                <div>
+                    <span class="font-extrabold text-[#23C160] text-[17px]">2시간 30분</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 하단 네비게이션 -->
+        <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-[420px] px-2 bg-[#EBF0F9]">
+            <div class="h-16 bg-white mx-0.5 rounded-t-3xl flex items-center justify-around shadow-[0_-1px_4px_rgba(0,0,0,0.04)]">
+                <!-- 홈 -->
+                <div class="flex flex-col items-center">
+                    <div class="w-6 h-6 text-[#2563EB]">
+                        <svg fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M10.843 3.258a2.362 2.362 0 013.314 0l7.586 7.586a2 2 0 01.707 1.414V20.5a1.5 1.5 0 01-1.5 1.5H4.55a1.5 1.5 0 01-1.5-1.5V12.258a2 2 0 01.707-1.414l7.086-7.586z"/>
+                            <path fill="currentColor" d="M12 13.5a.75.75 0 00-.75-.75h-4a.75.75 0 00-.75.75v5.25a.75.75 0 00.75.75H12a.75.75 0 00.75-.75V13.5zm5.25 0a.75.75 0 00-.75-.75h-1.5a.75.75 0 00-.75.75v5.25a.75.75 0 00.75.75h2.25a.75.75 0 00.75-.75V13.5z"/>
+                        </svg>
+                    </div>
+                    <span class="text-[10px] text-[#2563EB] font-extrabold mt-[-1px]">홈</span>
+                </div>
+                
+                <!-- 내기록 -->
+                <div class="flex flex-col items-center">
+                    <div class="w-6 h-6 text-[#64748B]">
+                        <svg fill="none" stroke="currentColor" stroke-width="2.25" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 2H6a1 1 0 01-1-1V5a1 1 0 011-1h12a1 1 0 011 1v10a1 1 0 01-1 1z"/>
+                        </svg>
+                    </div>
+                    <span class="text-[10px] text-[#64748B] mt-[-1px]">내기록</span>
+                </div>
+                
+                <!-- 통계 -->
+                <div class="flex flex-col items-center">
+                    <div class="w-6 h-6 text-[#64748B]">
+                        <svg fill="none" stroke="currentColor" stroke-width="2.25" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 13l4-4 3.27 3.273L21 5"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M21 7v9a2 2 0 01-2 2H5"/>
+                        </svg>
+                    </div>
+                    <span class="text-[10px] text-[#64748B] mt-[-1px]">통계</span>
+                </div>
+                
+                <!-- 내정보 -->
+                <div class="flex flex-col items-center">
+                    <div class="w-6 h-6 text-[#64748B]">
+                        <svg fill="none" stroke="currentColor" stroke-width="2.25" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 20.25a8.25 8.25 0 0115 0"/>
+                        </svg>
+                    </div>
+                    <span class="text-[10px] text-[#64748B] mt-[-1px]">내정보</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

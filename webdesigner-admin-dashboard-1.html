@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>관리자 대시보드</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Noto+Sans+KR:wght@400;500;700&amp;display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        
+        .card {
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            transition: transform 0.2s ease;
+        }
+        
+        .stat-value {
+            line-height: 1.1;
+            letter-spacing: -0.5px;
+        }
+        
+        .icon-badge {
+            box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3);
+        }
+    </style>
+</head>
+<body class="bg-[#E8F4FF] flex items-center justify-center min-h-screen">
+    <div class="w-[420px] min-h-screen bg-[#E8F4FF] mx-auto overflow-hidden">
+        <!-- 상단 제목 -->
+        <div class="px-5 pt-8 pb-2">
+            <h1 class="text-2xl font-bold text-[#1e3a8a]">대시보드 (2026-07)</h1>
+        </div>
+        
+        <!-- 2x2 통계 그리드 -->
+        <div class="px-5 pb-8">
+            <div class="grid grid-cols-2 gap-3">
+                
+                <!-- 1. 활동중인 용역자 -->
+                <div class="bg-white rounded-[22px] card p-4">
+                    <div class="flex items-start gap-3">
+                        <div class="w-9 h-9 bg-[#2563EB] rounded-full flex items-center justify-center flex-shrink-0 icon-badge">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-[18px] h-[18px] text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 01-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs text-gray-500 font-medium">활동중인 용역자</div>
+                            <div class="stat-value text-[26px] font-bold text-gray-900 mt-0.5">13명</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 2. 대표 승인 대기 -->
+                <div class="bg-white rounded-[22px] card p-4">
+                    <div class="flex items-start gap-3">
+                        <div class="w-9 h-9 bg-[#2563EB] rounded-full flex items-center justify-center flex-shrink-0 icon-badge">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-[18px] h-[18px] text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 01-9 9 9 9 0 01-9-9 9 9 0 019-9 9 9 0 019 9z" />
+                            </svg>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs text-gray-500 font-medium">대표 승인 대기</div>
+                            <div class="stat-value text-[26px] font-bold text-gray-900 mt-0.5">0건</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 3. 지급 예정액 -->
+                <div class="bg-white rounded-[22px] card p-4">
+                    <div class="flex items-start gap-3">
+                        <div class="w-9 h-9 bg-[#2563EB] rounded-full flex items-center justify-center flex-shrink-0 icon-badge">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-[19px] h-[19px] text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
+                            </svg>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs text-gray-500 font-medium">지급 예정액</div>
+                            <div class="stat-value text-[26px] font-bold text-gray-900 mt-0.5">0원</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 4. 2026-07 지급완료액 -->
+                <div class="bg-white rounded-[22px] card p-4">
+                    <div class="flex items-start gap-3">
+                        <div class="w-9 h-9 bg-[#2563EB] rounded-full flex items-center justify-center flex-shrink-0 icon-badge">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-[18px] h-[18px] text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 17l-4-4" />
+                            </svg>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs text-gray-500 font-medium">2026-07 지급완료액</div>
+                            <div class="stat-value text-[26px] font-bold text-gray-900 mt-0.5">0원</div>
+                        </div>
+                    </div>
+                </div>
+                
+            </div>
+        </div>
+    </div>
+</body>
+</html>

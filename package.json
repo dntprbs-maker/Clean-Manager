@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "webdesigner": "node call-webdesigner.mjs"
   },
   "dependencies": {
     "firebase": "^12.15.0",

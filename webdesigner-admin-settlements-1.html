@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>관리자 정산</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600&amp;display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', -apple-system, sans-serif;
+        }
+        
+        .app-container {
+            max-width: 420px;
+            margin: 0 auto;
+            box-shadow: 0 0 0 1px #e5e7eb;
+        }
+        
+        .card {
+            border-radius: 22px;
+            box-shadow: 0 4px 12px -2px rgb(0 0 0 / 0.06), 0 2px 6px -2px rgb(0 0 0 / 0.04);
+        }
+        
+        .status-badge {
+            font-size: 12px;
+            padding: 3.5px 12px;
+            border-radius: 9999px;
+            font-weight: 500;
+        }
+        
+        .section-title {
+            font-size: 22px;
+            font-weight: 600;
+        }
+        
+        .payment-amount {
+            font-size: 22px;
+            font-weight: 700;
+            line-height: 1;
+        }
+    </style>
+</head>
+<body class="bg-[#F0F7FF]">
+    <div class="app-container min-h-screen bg-[#F0F7FF]">
+        <!-- 상단 헤더 (이미지 스타일 매칭) -->
+        <div class="bg-[#FFF8E7] px-4 py-2 flex items-center justify-between text-xs">
+            <div class="flex items-center gap-x-1.5">
+                <div class="w-2.5 h-2.5 bg-[#F59E0B] rounded-full"></div>
+                <span class="font-medium text-[#854D0E]">DEV · 관리자</span>
+            </div>
+            <div class="flex gap-x-1.5">
+                <button class="bg-white text-[#374151] text-[11px] px-3 py-1 rounded-xl font-medium border border-[#E5E7EB]">
+                    직원 화면
+                </button>
+            </div>
+        </div>
+
+        <div class="px-4 pt-4 pb-2">
+            <!-- 상단 타이틀 + 월 선택 -->
+            <div class="flex items-center justify-between mb-3">
+                <div>
+                    <h1 class="section-title text-[#1F2937]">정산</h1>
+                    <div class="flex items-center gap-x-2 mt-1">
+                        <div class="flex items-center bg-white rounded-2xl px-4 py-1.5 shadow-sm border border-[#E5E7EB]">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mr-1.5 text-[#2563EB]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                            <span class="font-semibold text-base">2026년 7월</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 집계/갱신 버튼 -->
+            <button onclick="refreshCalculation()"
+                    class="w-full bg-[#2563EB] hover:bg-[#1D4ED8] transition-colors text-white font-semibold py-[13px] rounded-[18px] text-[15px] shadow-sm active:scale-[0.985]">
+                청소기록으로 정산 집계/갱신
+            </button>
+
+            <!-- 안내문구 -->
+            <div class="mt-2 mb-5">
+                <p class="text-[12.5px] text-[#64748B] flex items-center gap-x-1">
+                    <span class="text-[#2563EB]">•</span> 
+                    모든 정산 금액에 3.3% 원천징수가 적용됩니다
+                </p>
+            </div>
+
+            <!-- 정산 목록 -->
+            <div class="space-y-4">
+                
+                <!-- 카드 1 -->
+                <div class="bg-white card px-5 py-4">
+                    <!-- 직원명 + 현장명 + 상태 -->
+                    <div class="flex items-start justify-between">
+                        <div>
+                            <div class="font-semibold text-[15.5px] text-[#1F2937]">박지민</div>
+                            <div class="text-[#64748B] text-[13px] mt-0.5">강남 테크노타워</div>
+                        </div>
+                        <div class="status-badge bg-[#DBEAFE] text-[#1E40AF]">
+                            집계됨
+                        </div>
+                    </div>
+
+                    <!-- 계산 근거 -->
+                    <div class="mt-3.5">
+                        <div class="text-[#475569] text-[13.5px]">
+                            15시간 × 12,000원 = <span class="font-semibold">180,000원</span>
+                        </div>
+                    </div>
+
+                    <!-- 원천징수 및 지급액 -->
+                    <div class="mt-3 pt-3 border-t border-[#F1F5F9]">
+                        <div class="flex justify-between items-end">
+                            <div>
+                                <div class="text-[#64748B] text-[12.5px]">
+                                    원천징수 3.3% -5,940원
+                                </div>
+                                <div class="flex items-baseline gap-x-1 mt-0.5">
+                                    <span class="text-[#64748B] text-xs">지급액</span>
+                                    <span class="payment-amount text-[#2563EB]">174,060원</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 액션 버튼 -->
+                    <div class="mt-4">
+                        <button class="w-full py-2.5 text-[#2563EB] text-sm font-semibold border border-[#2563EB] rounded-[14px] active:bg-[#F0F7FF]">
+                            매니저 확정
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 카드 2 -->
+                <div class="bg-white card px-5 py-4">
+                    <!-- 직원명 + 현장명 + 상태 -->
+                    <div class="flex items-start justify-between">
+                        <div>
+                            <div class="font-semibold text-[15.5px] text-[#1F2937]">김하늘</div>
+                            <div class="text-[#64748B] text-[13px] mt-0.5">역삼 파크뷰 오피스</div>
+                        </div>
+                        <div class="status-badge bg-[#DBEAFE] text-[#1E40AF]">
+                            매니저확정
+                        </div>
+                    </div>
+
+                    <!-- 계산 근거 -->
+                    <div class="mt-3.5">
+                        <div class="text-[#475569] text-[13.5px]">
+                            10시간 × 13,500원 = <span class="font-semibold">135,000원</span>
+                        </div>
+                    </div>
+
+                    <!-- 원천징수 및 지급액 -->
+                    <div class="mt-3 pt-3 border-t border-[#F1F5F9]">
+                        <div class="flex justify-between items-end">
+                            <div>
+                                <div class="text-[#64748B] text-[12.5px]">
+                                    원천징수 3.3% -4,455원
+                                </div>
+                                <div class="flex items-baseline gap-x-1 mt-0.5">
+                                    <span class="text-[#64748B] text-xs">지급액</span>
+                                    <span class="payment-amount text-[#2563EB]">130,545원</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 액션 버튼 -->
+                    <div class="mt-4">
+                        <button class="w-full py-2.5 text-[#2563EB] text-sm font-semibold border border-[#2563EB] rounded-[14px] active:bg-[#F0F7FF]">
+                            대표 승인
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function refreshCalculation() {
+            const button = event.currentTarget;
+            const originalText = "청소기록으로 정산 집계/갱신";
+            
+            const originalHTML = event.target.innerHTML;
+            event.target.innerHTML = `
+                <span class="inline-flex items-center">
+                    <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    집계 중...
+                </span>
+            `;
+            
+            setTimeout(() => {
+                event.target.innerHTML = `
+                    <span class="text-white">정산이 갱신되었습니다</span>
+                `;
+                
+                setTimeout(() => {
+                    // 성공 표시 후 원래 텍스트 복구
+                    if (event.target) {
+                        event.target.innerHTML = originalHTML;
+                    }
+                }, 1500);
+            }, 1700);
+        }
+
+        // Tailwind 스크립트 실행
+        function initializeTailwind() {
+            document.documentElement.style.setProperty('--accent-blue', '#2563EB');
+        }
+        
+        window.onload = initializeTailwind;
+    </script>
+</body>
+</html>

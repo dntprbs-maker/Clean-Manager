@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>파트너 앱 - 작업 체크인</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&amp;display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        .phone-frame {
+            box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25),
+                        0 10px 10px -6px rgb(0 0 0 / 0.1);
+        }
+    </style>
+</head>
+<body class="bg-zinc-100 flex items-center justify-center min-h-screen p-4">
+    <!-- 모바일 폰 프레임 (420px 기준) -->
+    <div class="w-[420px] mx-auto phone-frame border-[12px] border-[#A8D4F3] rounded-[3.75rem] overflow-hidden bg-white">
+        
+        <!-- 메인 화면 -->
+        <div class="bg-gradient-to-b from-[#80CEFF] via-[#4B9BE8] to-[#0F2D72] text-white" style="height: 780px;">
+            
+            <!-- 헤더 영역 (그라디언트 위에 텍스트) -->
+            <div class="px-5 pt-6 pb-1 flex items-center">
+                <!-- 햄버거 메뉴 -->
+                <div class="mr-3">
+                    <div class="flex flex-col gap-[3.5px]">
+                        <div class="w-[19px] h-[2.5px] bg-[#1E3A8A] rounded-full"></div>
+                        <div class="w-[19px] h-[2.5px] bg-[#1E3A8A] rounded-full"></div>
+                        <div class="w-[19px] h-[2.5px] bg-[#1E3A8A] rounded-full"></div>
+                    </div>
+                </div>
+                
+                <!-- 이름/전화번호 -->
+                <div class="text-[#1E3A8A] font-semibold text-[17.5px] tracking-[-0.2px]">
+                    테스트 직원 (010-9999-9999)
+                </div>
+            </div>
+            
+            <!-- 날짜 표시줄 -->
+            <div class="px-5 pt-4 pb-2">
+                <div class="text-white text-center text-[16.5px] font-semibold tracking-[-0.1px]">
+                    2026년 7월 26일 일
+                </div>
+            </div>
+            
+            <!-- 오늘 작업 현장 라벨 -->
+            <div class="px-5 pt-3 pb-1">
+                <div class="text-white text-[15px] font-medium tracking-[-0.2px]">
+                    오늘 작업 현장
+                </div>
+            </div>
+            
+            <!-- 흰색 카드 -->
+            <div class="mx-4 bg-white shadow-[0_4px_12px_rgb(0,0,0,0.1)] rounded-[18px] overflow-hidden mt-1">
+                
+                <!-- 현장 미지정 + 작업 준비 -->
+                <div class="px-4 pt-3.5 pb-3.5 flex items-center justify-between">
+                    <div class="flex items-center gap-x-2">
+                        <!-- 위치 아이콘 -->
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-[19px] h-[19px] text-[#2E7BE8]" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                        </svg>
+                        <span class="text-[#2E7BE8] font-semibold text-[15px]">현장 미지정</span>
+                    </div>
+                    
+                    <!-- 작업 준비 배지 -->
+                    <div class="bg-[#2D96F5] text-white text-[12.5px] font-extrabold px-[10px] py-[3px] leading-none rounded-[7px] flex items-center justify-center h-[22px]">
+                        작업 준비
+                    </div>
+                </div>
+                
+                <!-- 구분선 -->
+                <div class="h-[0.5px] bg-[#E9ECF1] w-[calc(100%-32px)] mx-auto"></div>
+                
+                <!-- 작업 시작 행 -->
+                <div class="mx-1 my-1 bg-[#0066CC] rounded-[14px] px-4 py-[13.5px] flex items-center">
+                    <div class="flex-1 flex items-center gap-x-2">
+                        <!-- 흰 원형 아이콘 + 시계 -->
+                        <div class="w-[23px] h-[23px] rounded-full bg-white flex items-center justify-center shrink-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-[13.5px] h-[13.5px] text-[#0066CC]" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/>
+                            </svg>
+                        </div>
+                        <span class="text-white font-extrabold text-[15.2px]">작업 시작</span>
+                    </div>
+                    <div class="text-white font-bold text-[17px]">---</div>
+                </div>
+                
+                <!-- 작업 완료 행 -->
+                <div class="mx-1 mb-1 bg-[#E8ECF1] rounded-[14px] px-4 py-[13.5px] flex items-center">
+                    <div class="flex-1 flex items-center gap-x-2">
+                        <!-- 회색 깃발 아이콘 -->
+                        <div class="w-[22px] h-[22px] flex items-center justify-center shrink-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-[#9AA1AD]" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M3.172 2.172a4 4 0 015.656 0L10 3.343l1.172-1.171a4 4 0 015.656 5.656L10 15.657l-6.828-6.829a4 4 0 010-5.656z"/>
+                            </svg>
+                        </div>
+                        <span class="text-[#8A919F] font-semibold text-[15.2px]">작업 완료</span>
+                    </div>
+                    <div class="text-[#9AA1AD] font-bold text-[17px]">---</div>
+                </div>
+            </div>
+            
+            <!-- 하단 여백 (그라디언트 공간) -->
+            <div class="h-40"></div>
+            
+        </div>
+    </div>
+</body>
+</html>

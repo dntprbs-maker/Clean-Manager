@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>청소기록</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Noto+Sans+KR:wght@400;500;700&amp;display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        
+        .card {
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08), 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+        
+        .blue-badge {
+            background-color: #2563EB;
+            box-shadow: 0 2px 4px rgba(37, 99, 235, 0.25);
+        }
+    </style>
+</head>
+<body class="bg-[#E8F1FE] flex justify-center">
+    <div class="w-[420px] min-h-screen bg-[#E8F1FE]">
+        
+        <!-- 상단 헤더 -->
+        <div class="px-5 pt-5 pb-4">
+            <div class="flex items-center justify-between">
+                <h1 class="text-2xl font-bold text-gray-800">청소기록</h1>
+                
+                <!-- 월 선택 -->
+                <div class="flex items-center bg-white px-4 py-[7px] rounded-full shadow text-sm font-semibold text-gray-700 cursor-pointer active:bg-gray-50 transition-colors">
+                    <span>2026년 07월</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 ml-2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" />
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <!-- 추가 버튼 -->
+        <div class="px-5 mb-4">
+            <button onclick="addCleaningRecord()"
+                    class="w-full h-12 bg-[#2563EB] hover:bg-[#1d4ed8] active:bg-[#1e40af] transition-all text-white font-bold rounded-[22px] flex items-center justify-center gap-2 text-[15px] shadow-md">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M12 4v16m8-8H4" />
+                </svg>
+                <span>청소기록 추가</span>
+            </button>
+        </div>
+
+        <!-- 리스트 섹션 -->
+        <div class="px-5 space-y-3">
+            
+            <!-- 기록 1 -->
+            <div class="bg-white rounded-[22px] p-4 card">
+                <div class="flex items-start gap-3">
+                    <!-- 파란 원형 위치 아이콘 배지 -->
+                    <div class="w-[38px] h-[38px] rounded-full flex-shrink-0 blue-badge flex items-center justify-center text-white mt-0.5">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.25">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314-11.314z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                    </div>
+                    
+                    <div class="flex-1 min-w-0">
+                        <!-- 날짜 + 직원 + 현장 -->
+                        <div class="flex items-baseline justify-between">
+                            <div>
+                                <div class="text-[15px] font-bold text-gray-800">2026-07-20 <span class="font-semibold text-gray-600">우세균</span></div>
+                                <div class="font-bold text-[15.5px] text-gray-800 leading-tight">앤드테라스</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="font-bold text-[#2563EB] text-lg leading-none">8</div>
+                                <div class="text-[10px] text-gray-500 font-medium -mt-0.5">시간</div>
+                            </div>
+                        </div>
+                        
+                        <!-- 출근~퇴근 -->
+                        <div class="text-xs text-gray-500 mt-1.5 font-medium">
+                            09:00 ~ 17:00
+                        </div>
+                    </div>
+                    
+                    <!-- 수정/삭제 버튼 -->
+                    <div class="flex flex-col gap-1.5 items-end flex-shrink-0 ml-1">
+                        <button onclick="editRecord(0)"
+                                class="px-3 py-[3px] text-[12px] font-semibold text-[#2563EB] hover:bg-blue-50 active:bg-blue-100 rounded-[10px] transition-colors px-2.5">
+                            수정
+                        </button>
+                        <button onclick="deleteRecord(0)"
+                                class="px-3 py-[3px] text-[12px] font-medium text-red-500 hover:bg-red-50 active:bg-red-100 rounded-[10px] transition-colors px-2.5">
+                            삭제
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 기록 2 -->
+            <div class="bg-white rounded-[22px] p-4 card">
+                <div class="flex items-start gap-3">
+                    <!-- 파란 원형 위치 아이콘 배지 -->
+                    <div class="w-[38px] h-[38px] rounded-full flex-shrink-0 blue-badge flex items-center justify-center text-white mt-0.5">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.25">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314-11.314z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                    </div>
+                    
+                    <div class="flex-1 min-w-0">
+                        <!-- 날짜 + 직원 + 현장 -->
+                        <div class="flex items-baseline justify-between">
+                            <div>
+                                <div class="text-[15px] font-bold text-gray-800">2026-07-22 <span class="font-semibold text-gray-600">테스트직원</span></div>
+                                <div class="font-bold text-[15.5px] text-gray-800 leading-tight">팝마트코리아</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="font-bold text-[#2563EB] text-lg leading-none">5</div>
+                                <div class="text-[10px] text-gray-500 font-medium -mt-0.5">시간</div>
+                            </div>
+                        </div>
+                        
+                        <!-- 출근~퇴근 -->
+                        <div class="text-xs text-gray-500 mt-1.5 font-medium">
+                            10:00 ~ 15:00
+                        </div>
+                    </div>
+                    
+                    <!-- 수정/삭제 버튼 -->
+                    <div class="flex flex-col gap-1.5 items-end flex-shrink-0 ml-1">
+                        <button onclick="editRecord(1)"
+                                class="px-3 py-[3px] text-[12px] font-semibold text-[#2563EB] hover:bg-blue-50 active:bg-blue-100 rounded-[10px] transition-colors px-2.5">
+                            수정
+                        </button>
+                        <button onclick="deleteRecord(1)"
+                                class="px-3 py-[3px] text-[12px] font-medium text-red-500 hover:bg-red-50 active:bg-red-100 rounded-[10px] transition-colors px-2.5">
+                            삭제
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- 하단 여백 -->
+        <div class="h-10"></div>
+
+    </div>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Tailwind 스크립트
+        function initializeTailwind() {
+            document.documentElement.style.setProperty('--accent', '#2563EB');
+        }
+        
+        // 데이터 (데모용으로 사용)
+        let records = [
+            {
+                id: 0,
+                date: "2026-07-20",
+                employee: "우세균",
+                site: "앤드테라스",
+                start: "09:00",
+                end: "17:00",
+                hours: 8
+            },
+            {
+                id: 1,
+                date: "2026-07-22",
+                employee: "테스트직원",
+                site: "팝마트코리아",
+                start: "10:00",
+                end: "15:00",
+                hours: 5
+            }
+        ];
+        
+        function editRecord(index) {
+            const record = records[index];
+            const newDate = prompt("날짜를 입력하세요:", record.date);
+            if (!newDate) return;
+            
+            const newSite = prompt("현장명을 입력하세요:", record.site);
+            if (!newSite) return;
+            
+            const newStart = prompt("출근 시간을 입력하세요 (예: 09:00):", record.start);
+            if (!newStart) return;
+            
+            const newEnd = prompt("퇴근 시간을 입력하세요 (예: 17:00):", record.end);
+            if (!newEnd) return;
+            
+            // 간단 계산
+            const hours = calculateHours(newStart, newEnd);
+            
+            records[index] = {
+                ...record,
+                date: newDate,
+                site: newSite,
+                start: newStart,
+                end: newEnd,
+                hours: hours
+            };
+            
+            renderRecords();
+        }
+        
+        function deleteRecord(index) {
+            if (confirm("해당 청소 기록을 삭제하시겠습니까?")) {
+                records.splice(index, 1);
+                renderRecords();
+            }
+        }
+        
+        function calculateHours(start, end) {
+            const startTime = parseInt(start.replace(":", ""));
+            const endTime = parseInt(end.replace(":", ""));
+            let hours = Math.round((endTime - startTime) / 100);
+            return hours;
+        }
+        
+        function addCleaningRecord() {
+            const date = prompt("날짜를 입력하세요:", "2026-07-25");
+            if (!date) return;
+            
+            const employee = prompt("직원명을 입력하세요:", "김철수");
+            if (!employee) return;
+            
+            const site = prompt("현장명을 입력하세요:", "새현장");
+            if (!site) return;
+            
+            const start = prompt("출근 시간 (예: 09:00):", "09:00");
+            if (!start) return;
+            
+            const end = prompt("퇴근 시간 (예: 17:00):", "17:00");
+            if (!end) return;
+            
+            const hours = calculateHours(start, end);
+            
+            records.unshift({
+                id: Date.now(),
+                date: date,
+                employee: employee,
+                site: site,
+                start: start,
+                end: end,
+                hours: hours
+            });
+            
+            renderRecords();
+        }
+        
+        function renderRecords() {
+            const container = document.querySelector('.px-5.space-y-3');
+            container.innerHTML = ''; // 기존 내용 초기화
+            
+            if (records.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'bg-white rounded-[22px] p-6 text-center text-gray-500 text-sm card';
+                empty.innerHTML = `아직 청소 기록이 없습니다.`;
+                container.appendChild(empty);
+                return;
+            }
+            
+            records.forEach((record, index) => {
+                const div = document.createElement('div');
+                div.className = `bg-white rounded-[22px] p-4 card`;
+                
+                div.innerHTML = `
+                    <div class="flex items-start gap-3">
+                        <!-- 파란 원형 위치 아이콘 -->
+                        <div class="w-[38px] h-[38px] rounded-full flex-shrink-0 bg-[#2563EB] flex items-center justify-center text-white mt-0.5">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.25">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314-11.314z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                        </div>
+                        
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-baseline justify-between">
+                                <div>
+                                    <div class="text-[15px] font-bold text-gray-800">
+                                        ${record.date} <span class="font-semibold text-gray-600">${record.employee}</span>
+                                    </div>
+                                    <div class="font-bold text-[15.5px] text-gray-800 leading-tight">${record.site}</div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="font-bold text-[#2563EB] text-lg leading-none">${record.hours}</div>
+                                    <div class="text-[10px] text-gray-500 font-medium -mt-0.5">시간</div>
+                                </div>
+                            </div>
+                            
+                            <div class="text-xs text-gray-500 mt-1.5 font-medium">
+                                ${record.start} ~ ${record.end}
+                            </div>
+                        </div>
+                        
+                        <div class="flex flex-col gap-1.5 items-end flex-shrink-0 ml-1">
+                            <button onclick="editRecordFromElement(event, ${index})" 
+                                    class="px-3 py-[3px] text-[12px] font-semibold text-[#2563EB] hover:bg-blue-50 active:bg-blue-100 rounded-[10px] transition-colors px-2.5">
+                                수정
+                            </button>
+                            <button onclick="deleteRecordFromElement(event, ${index})" 
+                                    class="px-3 py-[3px] text-[12px] font-medium text-red-500 hover:bg-red-50 active:bg-red-100 rounded-[10px] transition-colors px-2.5">
+                                삭제
+                            </button>
+                        </div>
+                    </div>
+                `;
+                
+                container.appendChild(div);
+            });
+        }
+        
+        // 버튼에서 index를 찾기 위한 헬퍼 함수
+        function editRecordFromElement(e, index) {
+            e.stopImmediatePropagation();
+            editRecord(index);
+        }
+        
+        function deleteRecordFromElement(e, index) {
+            e.stopImmediatePropagation();
+            deleteRecord(index);
+        }
+        
+        // 초기화
+        function init() {
+            initializeTailwind();
+            
+            // 초기 데이터 렌더링
+            const container = document.querySelector('.px-5.space-y-3');
+            container.innerHTML = '';
+            
+            records.forEach((record, index) => {
+                const div = document.createElement('div');
+                div.className = `bg-white rounded-[22px] p-4 card`;
+                
+                div.innerHTML = `
+                    <div class="flex items-start gap-3">
+                        <div class="w-[38px] h-[38px] rounded-full flex-shrink-0 bg-[#2563EB] flex items-center justify-center text-white mt-0.5">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.25">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314-11.314z" />
+                                <path stroke-linecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                        </div>
+                        
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-baseline justify-between">
+                                <div>
+                                    <div class="text-[15px] font-bold text-gray-800">
+                                        ${record.date} <span class="font-semibold text-gray-600">${record.employee}</span>
+                                    </div>
+                                    <div class="font-bold text-[15.5px] text-gray-800 leading-tight">${record.site}</div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="font-bold text-[#2563EB] text-lg leading-none">${record.hours}</div>
+                                    <div class="text-[10px] text-gray-500 font-medium -mt-0.5">시간</div>
+                                </div>
+                            </div>
+                            
+                            <div class="text-xs text-gray-500 mt-1.5 font-medium">
+                                ${record.start} ~ ${record.end}
+                            </div>
+                        </div>
+                        
+                        <div class="flex flex-col gap-1.5 items-end flex-shrink-0 ml-1">
+                            <button onclick="editRecordFromElement(event, ${index})" 
+                                    class="px-3 py-[3px] text-[12px] font-semibold text-[#2563EB] hover:bg-blue-50 active:bg-blue-100 rounded-[10px] transition-colors px-2.5">
+                                수정
+                            </button>
+                            <button onclick="deleteRecordFromElement(event, ${index})" 
+                                    class="px-3 py-[3px] text-[12px] font-medium text-red-500 hover:bg-red-50 active:bg-red-100 rounded-[10px] transition-colors px-2.5">
+                                삭제
+                            </button>
+                        </div>
+                    </div>
+                `;
+                
+                container.appendChild(div);
+            });
+        }
+        
+        // 페이지 로드 시 실행
+        window.onload = init;
+    </script>
+</body>
+</html>

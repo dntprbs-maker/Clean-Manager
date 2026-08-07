@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>내 작업내역</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        
+        .app-container {
+            max-width: 420px;
+            margin: 0 auto;
+            background-color: #F4F7FB;
+            min-height: 100vh;
+            box-shadow: 0 0 0 1px #e5e7eb;
+        }
+        
+        .work-card {
+            border-radius: 22px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.06);
+            background-color: white;
+        }
+        
+        .blue-badge {
+            background-color: #2563EB;
+        }
+        
+        .section-title {
+            font-weight: 700;
+            color: #111827;
+        }
+        
+        .nav-active {
+            color: #2563EB;
+            font-weight: 700;
+        }
+        
+        .bottom-nav {
+            box-shadow: 0 -1px 10px rgba(0, 0, 0, 0.05);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center py-4">
+    <!-- 모바일 기기 프레임 -->
+    <div class="app-container rounded-3xl overflow-hidden shadow-xl border border-gray-200">
+        
+        <!-- 헤더 -->
+        <div class="px-4 pt-4 pb-2 bg-[#F4F7FB]">
+            <div class="flex items-center justify-between">
+                <h1 class="text-xl font-extrabold section-title">내 작업내역</h1>
+                <div class="bg-white border border-gray-200 rounded-full px-3 py-1.5 flex items-center text-sm font-medium">
+                    <span>2026년 07월</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 ml-1.5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <!-- 리스트 영역 -->
+        <div class="px-4 pt-2 pb-24 space-y-3 bg-[#F4F7FB]">
+            
+            <!-- 카드 1 -->
+            <div class="work-card p-4">
+                <div class="flex items-start justify-between">
+                    <div class="text-sm font-medium text-gray-500">2026-07-20</div>
+                    <div class="px-3 py-0.5 bg-[#E8EFFF] rounded-full flex items-center">
+                        <span class="text-xs font-semibold" style="color: #2563EB;">4.5시간</span>
+                    </div>
+                </div>
+                
+                <div class="flex items-center mt-3">
+                    <div class="w-7 h-7 rounded-full blue-badge flex items-center justify-center flex-shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314-11.314z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                    </div>
+                    <span class="ml-2.5 font-semibold text-base text-gray-900">앤드테라스</span>
+                </div>
+                
+                <div class="mt-3">
+                    <div class="text-xs text-gray-500 mb-1">출근 ~ 퇴근 시각</div>
+                    <div class="font-medium text-sm">7월 20일 오전 9:00 ~ 7월 20일 오후 1:30</div>
+                </div>
+            </div>
+
+            <!-- 카드 2 -->
+            <div class="work-card p-4">
+                <div class="flex items-start justify-between">
+                    <div class="text-sm font-medium text-gray-500">2026-07-22</div>
+                    <div class="px-3 py-0.5 bg-[#E8EFFF] rounded-full flex items-center">
+                        <span class="text-xs font-semibold" style="color: #2563EB;">8시간</span>
+                    </div>
+                </div>
+                
+                <div class="flex items-center mt-3">
+                    <div class="w-7 h-7 rounded-full blue-badge flex items-center justify-center flex-shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314-11.314z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                    </div>
+                    <span class="ml-2.5 font-semibold text-base text-gray-900">앤드테라스</span>
+                </div>
+                
+                <div class="mt-3">
+                    <div class="text-xs text-gray-500 mb-1">출근 ~ 퇴근 시각</div>
+                    <div class="font-medium text-sm">7월 22일 오전 9:00 ~ 7월 22일 오후 5:00</div>
+                </div>
+            </div>
+
+            <!-- 카드 3 -->
+            <div class="work-card p-4">
+                <div class="flex items-start justify-between">
+                    <div class="text-sm font-medium text-gray-500">2026-07-24</div>
+                    <div class="px-3 py-0.5 bg-[#E8EFFF] rounded-full flex items-center">
+                        <span class="text-xs font-semibold" style="color: #2563EB;">5시간</span>
+                    </div>
+                </div>
+                
+                <div class="flex items-center mt-3">
+                    <div class="w-7 h-7 rounded-full blue-badge flex items-center justify-center flex-shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314-11.314z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                    </div>
+                    <span class="ml-2.5 font-semibold text-base text-gray-900">팝마트코리아</span>
+                </div>
+                
+                <div class="mt-3">
+                    <div class="text-xs text-gray-500 mb-1">출근 ~ 퇴근 시각</div>
+                    <div class="font-medium text-sm">7월 24일 오전 10:00 ~ 7월 24일 오후 3:00</div>
+                </div>
+            </div>
+
+            <!-- 카드 4 -->
+            <div class="work-card p-4">
+                <div class="flex items-start justify-between">
+                    <div class="text-sm font-medium text-gray-500">2026-07-25</div>
+                    <div class="px-3 py-0.5 bg-[#E8EFFF] rounded-full flex items-center">
+                        <span class="text-xs font-semibold" style="color: #2563EB;">7시간</span>
+                    </div>
+                </div>
+                
+                <div class="flex items-center mt-3">
+                    <div class="w-7 h-7 rounded-full blue-badge flex items-center justify-center flex-shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314-11.314z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                    </div>
+                    <span class="ml-2.5 font-semibold text-base text-gray-900">팝마트코리아</span>
+                </div>
+                
+                <div class="mt-3">
+                    <div class="text-xs text-gray-500 mb-1">출근 ~ 퇴근 시각</div>
+                    <div class="font-medium text-sm">7월 25일 오전 9:00 ~ 7월 25일 오후 4:00</div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- 하단 네비게이션 -->
+        <div class="fixed bottom-0 w-full max-w-[420px] mx-auto bg-white bottom-nav border-t border-gray-100">
+            <div class="grid grid-cols-4 py-[6px]">
+                
+                <!-- 홈 -->
+                <div class="flex flex-col items-center justify-center py-1 text-gray-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1v-1m-1-1h-1m-4 1v-3" />
+                    </svg>
+                    <span class="text-xs font-medium">홈</span>
+                </div>
+                
+                <!-- 내 작업내역 (활성화) -->
+                <div class="flex flex-col items-center justify-center py-1 text-[#2563EB]">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 mb-0.5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M9 17v-6a1 1 0 00-1-1H5a1 1 0 00-1 1v6a1 1 0 001 1h3a1 1 0 001-1z" />
+                        <path d="M19 17v-6a1 1 0 00-1-1h-3a1 1 0 00-1 1v6a1 1 0 001 1h3a1 1 0 001-1z" />
+                        <path d="M9 9v2m4-2v2m4-2v2" />
+                    </svg>
+                    <span class="text-xs font-semibold">내 작업내역</span>
+                </div>
+                
+                <!-- 정산내역 -->
+                <div class="flex flex-col items-center justify-center py-1 text-gray-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span class="text-xs font-medium">정산내역</span>
+                </div>
+                
+                <!-- 로그아웃 -->
+                <div class="flex flex-col items-center justify-center py-1 text-gray-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                    <span class="text-xs font-medium">로그아웃</span>
+                </div>
+                
+            </div>
+        </div>
+        
+    </div>
+</body>
+</html>

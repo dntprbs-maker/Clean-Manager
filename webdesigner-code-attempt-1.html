@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>파트너 앱 체크인</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&amp;display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        
+        .phone-frame {
+            box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25),
+                        0 10px 10px -6px rgb(0 0 0 / 0.1);
+            border: 12px solid #a5d0ff;
+        }
+        
+        .app-gradient {
+            background: linear-gradient(to bottom, #5ba3ff 0%, #00378f 100%);
+        }
+        
+        .section-label {
+            font-size: 13px;
+            font-weight: 500;
+            color: #e0f0ff;
+            letter-spacing: -0.3px;
+        }
+        
+        .header-text {
+            color: #0c2a4d;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: -0.3px;
+        }
+        
+        .date-text {
+            color: white;
+            font-size: 15px;
+            font-weight: 500;
+            letter-spacing: -0.2px;
+        }
+        
+        .location-text {
+            color: #2563eb;
+            font-weight: 500;
+            font-size: 15px;
+        }
+        
+        .task-row {
+            transition: all 0.2s ease;
+        }
+    </style>
+</head>
+<body class="bg-[#f1f5f9] flex items-center justify-center min-h-screen p-4">
+    <!-- 모바일 프레임 -->
+    <div class="w-[420px] h-[720px] bg-white rounded-[52px] overflow-hidden shadow-2xl phone-frame">
+        
+        <!-- 그라디언트 배경 -->
+        <div class="h-full app-gradient relative flex flex-col">
+            
+            <!-- 상단 헤더 -->
+            <div class="px-4 pt-6 pb-3 flex items-center">
+                <!-- 햄버거 메뉴 -->
+                <div class="flex flex-col gap-y-[3px] mr-3 cursor-pointer">
+                    <div class="w-[17px] h-[2.5px] bg-[#0c2a4d] rounded-full"></div>
+                    <div class="w-[17px] h-[2.5px] bg-[#0c2a4d] rounded-full"></div>
+                    <div class="w-[17px] h-[2.5px] bg-[#0c2a4d] rounded-full"></div>
+                </div>
+                
+                <!-- 이름/전화번호 -->
+                <div>
+                    <span class="header-text">테스트 직원 (010-9999-9999)</span>
+                </div>
+            </div>
+            
+            <!-- 날짜 표시줄 -->
+            <div class="mx-4 mt-1">
+                <div class="flex justify-center">
+                    <span class="date-text">2026년 7월 26일 일</span>
+                </div>
+            </div>
+            
+            <!-- 오늘 작업 현장 라벨 -->
+            <div class="px-4 mt-4 mb-1.5">
+                <div class="section-label">오늘 작업 현장</div>
+            </div>
+            
+            <!-- 흰색 카드 -->
+            <div class="mx-4 rounded-3xl bg-white shadow-sm border border-[#e6f0ff]">
+                
+                <!-- 현장 정보 행 -->
+                <div class="px-4 pt-3.5 pb-3 flex items-center justify-between">
+                    <div class="flex items-center">
+                        <!-- 위치 아이콘 -->
+                        <div class="mr-2.5">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 21C15.5 17.5 21 13.882 21 9C21 5.686 18.314 3 15 3C11.686 3 9 5.686 9 9C9 13.882 14.5 17.5 12 21Z" fill="#2563eb"/>
+                                <circle cx="12" cy="9" r="3" fill="white"/>
+                            </svg>
+                        </div>
+                        <span class="location-text text-[14.5px]">현장 미지정</span>
+                    </div>
+                    
+                    <!-- 작업 준비 배지 -->
+                    <div>
+                        <span class="inline-flex items-center justify-center bg-[#2563eb] text-white text-[12px] font-semibold px-3 py-[3px] rounded-[6px]">
+                            작업 준비
+                        </span>
+                    </div>
+                </div>
+                
+                <!-- 작업 시작 행 -->
+                <div class="mx-[3px] mb-1 rounded-3xl bg-[#2563eb] px-4 py-[13px] flex items-center justify-between">
+                    <div class="flex items-center">
+                        <!-- 시계 아이콘 (흰 원형 배경) -->
+                        <div class="w-7 h-7 bg-white rounded-full flex items-center justify-center mr-3">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 8V12L15 14.5" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                <circle cx="12" cy="12" r="9" stroke="#2563eb" stroke-width="2"/>
+                            </svg>
+                        </div>
+                        <span class="text-white font-bold text-[15px]">작업 시작</span>
+                    </div>
+                    <span class="text-white font-semibold text-[15px] tracking-[0.5px]">--:--</span>
+                </div>
+                
+                <!-- 작업 완료 행 -->
+                <div class="mx-[3px] mb-1 rounded-3xl bg-[#e5e7eb] px-4 py-[12.5px] flex items-center justify-between">
+                    <div class="flex items-center">
+                        <!-- 작업 완료 아이콘 -->
+                        <div class="mr-3 ml-[1px]">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M5 19V5H12L19 12V19" stroke="#9ca3af" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                <path d="M12 5L19 12" stroke="#9ca3af" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </div>
+                        <span class="text-[#6b7280] font-semibold text-[15px]">작업 완료</span>
+                    </div>
+                    <span class="text-[#9ca3af] font-semibold text-[15px] tracking-[0.5px]">--:--</span>
+                </div>
+                
+            </div>
+            
+            <!-- 하단 그라디언트 공간 -->
+            <div class="flex-1"></div>
+            
+        </div>
+        
+    </div>
+</body>
+</html>
