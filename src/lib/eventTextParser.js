@@ -39,6 +39,55 @@ export function parseEventText(text, titleRule = DEFAULT_TITLE_RULE, typeKeyword
     }
   }
 
+  // 상대 날짜(절대 날짜가 위에서 안 잡혔을 때만) — "오늘/내일/모레/글피",
+  // "N일 후/뒤", "이번주/다음주/저번주 O요일", 수식어 없는 "O요일"(가장 가까운 미래로 해석)
+  if (!result.start) {
+    const now = new Date();
+    const addDays = (base, n) => { const dt = new Date(base); dt.setDate(dt.getDate()+n); return dt; };
+    const toDateStr = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+    const WD_MAP = { "일":0, "월":1, "화":2, "수":3, "목":4, "금":5, "토":6 };
+
+    let relDate = null;
+    // "내일모레"처럼 두 단어가 겹치는 경우를 고려해 더 먼 날짜(글피→모레→내일) 순으로 먼저 검사
+    if (/글피/.test(text)) relDate = addDays(now, 3);
+    else if (/모레/.test(text)) relDate = addDays(now, 2);
+    else if (/내일|명일/.test(text)) relDate = addDays(now, 1);
+    else if (/그제|그저께/.test(text)) relDate = addDays(now, -2);
+    else if (/어제/.test(text)) relDate = addDays(now, -1);
+    else if (/오늘|금일/.test(text)) relDate = now;
+
+    if (!relDate) {
+      const nDays = text.match(/(\d{1,2})\s*일\s*(후|뒤)/);
+      if (nDays) relDate = addDays(now, parseInt(nDays[1]));
+    }
+
+    if (!relDate) {
+      const wdMatch = text.match(/(이번\s*주|다음\s*주|담\s*주|저번\s*주|지난\s*주)?\s*(월|화|수|목|금|토|일)요일/);
+      if (wdMatch) {
+        const weekWord = wdMatch[1] || "";
+        const targetWd = WD_MAP[wdMatch[2]];
+        const todayWd  = now.getDay();
+        const thisWeekStart = addDays(now, -todayWd); // 이번 주 일요일
+        if (/다음|담/.test(weekWord)) {
+          relDate = addDays(thisWeekStart, 7 + targetWd);
+        } else if (/저번|지난/.test(weekWord)) {
+          relDate = addDays(thisWeekStart, -7 + targetWd);
+        } else if (/이번/.test(weekWord)) {
+          relDate = addDays(thisWeekStart, targetWd);
+        } else {
+          // 수식어 없이 "O요일"만 — 예약 등록 맥락이라 오늘 포함 가장 가까운 미래로 해석
+          relDate = addDays(now, (targetWd - todayWd + 7) % 7);
+        }
+      }
+    }
+
+    if (relDate) {
+      const s = toDateStr(relDate);
+      result.start = s;
+      result.end   = s;
+    }
+  }
+
   // 시간: "오전 9시" / "오후 2시30분" / "오전" / "오후" / "종일" / "14시"
   let hasAM = text.includes("오전");
   let hasPM = text.includes("오후");
@@ -114,7 +163,10 @@ export function parseEventText(text, titleRule = DEFAULT_TITLE_RULE, typeKeyword
 
   // 제목 자동 생성 — titleRule 토큰 순서대로 조합
   const roomMatch = text.match(/([가-힣]*방\s*\d+개|원룸|투룸|쓰리룸|포룸|\d+평)/);
-  const districtMatch = result.place ? result.place.match(/([가-힣]+(구|동|로|길))/) : null;
+  // 주소 줄(place)에서 못 찾으면 원문 전체에서라도 지역명을 찾는다 — place는 주소 패턴
+  // (도로명/동 뒤에 숫자 등)이 맞아떨어질 때만 채워지므로, "은평구 쪽이요" 처럼 느슨하게
+  // 쓴 글은 place가 비어도 district는 뽑을 수 있는 경우가 많다.
+  const districtMatch = (result.place || text).match(/([가-힣]+(구|동|로|길))/);
   const typeMatch = typeKeywords.map(k => text.includes(k) ? k : null).find(Boolean);
 
   const tokenValues = {
@@ -130,6 +182,15 @@ export function parseEventText(text, titleRule = DEFAULT_TITLE_RULE, typeKeyword
     .map(token => tokenValues[token] || "")
     .filter(Boolean)
     .join(" ");
+
+  // 토큰 조합으로 하나도 못 뽑았으면(주소·평수·청소종류·이름 다 실패) 빈 제목보다는
+  // 붙여넣은 글의 첫 줄이라도 채워서 "완전히 없음"보다 "고쳐 쓰기 쉬운 초안"을 준다.
+  if (!result.title) {
+    const firstLine = text.split("\n")
+      .map(l => l.trim())
+      .find(l => l && !/^010[-\s]?\d{3,4}[-\s]?\d{4}$/.test(l));
+    if (firstLine) result.title = firstLine.length > 40 ? firstLine.slice(0, 40) + "…" : firstLine;
+  }
 
   // 연락처 필드 별도 저장
   result.contact = phones.map(function(p){ return (p.name?p.name+" ":"")+p.phone; }).join(", ");
