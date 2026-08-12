@@ -8,6 +8,7 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { getMemberships } from "./lib/membership.js";
 import { fmtDate, addDays, expandRecurringForFeed } from "./lib/recurring.js";
+import { parseIcs } from "./lib/ics.js";
 export { mcp } from "./mcp/index.js";
 // mcp/index.js가 (ESM import 순서상 이 줄보다 먼저 평가되며) lib/db.js를 통해
 // initializeApp()을 이미 호출했을 수 있으므로 중복 호출 방지 체크.
@@ -442,3 +443,127 @@ export const calendarFeed = onRequest({ region: REGION, cors: true }, async (req
     res.status(500).send("서버 오류가 발생했습니다.");
   }
 });
+
+// ── 외부 캘린더 구독 자동 동기화 (반대 방향: 구글/네이버 → 클린메니져) ──────
+// calendarFeed()가 "클린메니져 → 외부"로 내보내는 피드라면, 이건 "외부 → 클린메니져"로
+// 끌어오는 쪽. 구글 캘린더는 "비공개 주소(iCal 형식)"로 구독용 .ics URL을 주는데, 그 주소는
+// 항상 최신 상태를 반환하는 정적 파일이라 서버가 주기적으로 다시 받아오기만 하면 자동 동기화가 된다.
+// (네이버는 이런 구독용 URL 자체가 없어 이 방식이 안 통함 — 그래서 여전히 파일 재업로드 방식만 지원)
+//
+// 팀(cal) 문서의 icsSubscriptionUrl 필드에 구독 URL을 저장해두면:
+//   1) syncIcsSubscriptionNow — 저장 직후 즉시 1회 동기화(onCall, 클라이언트에서 호출)
+//   2) icsSubscriptionAutoSync — 6시간마다 전체 회사·전체 팀을 돌며 자동 재동기화(onSchedule)
+// 두 경로 모두 같은 syncIcsForCal()을 호출해 로직이 한 곳에만 있다.
+
+// webcal:// 은 브라우저/캘린더 앱이 구독 앱을 실행하라는 신호일 뿐 실제 통신은 https와 동일 —
+// 서버에서 fetch할 땐 https로 바꿔야 함.
+function toFetchableUrl(raw) {
+  return String(raw || "").trim().replace(/^webcal:\/\//i, "https://");
+}
+
+// 아주 기초적인 SSRF 방지 — 회사 관리자가 입력한 URL을 서버가 대신 요청하는 구조라
+// 사내망(로컬호스트/사설대역)을 찌르는 값을 넣는 걸 최소한으로 막는다. 완벽한 차단은 아니고
+// (DNS 리바인딩 등은 못 막음) 실수/오남용 방지 수준.
+function isBlockedHost(hostname) {
+  const h = hostname.toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1" ||
+    /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(h);
+}
+
+// 한 팀 캘린더의 구독 URL을 받아와 파싱하고, 같은 방식(source: "ics_import")으로 이미
+// 가져온 이 팀의 기존 일정과 비교해 upsert + 소프트 삭제한다.
+// 클라이언트의 ImportCalendarScreen.handleImport()와 같은 알고리즘(UID로 갱신,
+// 구독 쪽에서 사라진 건 소프트 삭제)이되, calId로 범위를 좁혀서 다른 팀이 수동으로
+// 올린 파일이나 다른 구독의 일정까지 건드리지 않도록 한 점만 다르다.
+async function syncIcsForCal(companyId, calId, rawUrl) {
+  const url = toFetchableUrl(rawUrl);
+  let hostname;
+  try { hostname = new URL(url).hostname; } catch { throw new Error("구독 URL 형식이 올바르지 않습니다."); }
+  if (!/^https?:$/.test(new URL(url).protocol)) throw new Error("http(s) 또는 webcal 주소만 지원합니다.");
+  if (isBlockedHost(hostname)) throw new Error("허용되지 않는 주소입니다.");
+
+  const res = await fetch(url, { redirect: "follow" });
+  if (!res.ok) throw new Error(`구독 URL 응답 실패 (HTTP ${res.status})`);
+  const text = await res.text();
+  const parsed = parseIcs(text).filter(ev => ev.icsUid); // UID 없는 항목은 재동기화 추적이 안 돼 건너뜀
+
+  const eventsRef = db.collection(`companies/${companyId}/events`);
+  const newUidSet = new Set(parsed.map(ev => ev.icsUid));
+  const prevSnap = await eventsRef
+    .where("source", "==", "ics_import")
+    .where("calId", "==", calId)
+    .get();
+  const staleDocs = prevSnap.docs.filter(d => d.data().status !== "deleted" && !newUidSet.has(d.id));
+  const deletedAt = new Date().toISOString();
+  await Promise.all(staleDocs.map(d =>
+    d.ref.update({ status: "deleted", deletedAt, deletedBy: "ics_subscription" })
+  ));
+
+  await Promise.all(parsed.map(ev => {
+    const { icsUid, ...rest } = ev;
+    const docId = icsUid;
+    return eventsRef.doc(docId).set({
+      ...rest,
+      id: docId,
+      calId,
+      end: ev.end || ev.start,
+      startTime: ev.startTime || "09:00",
+      endTime: ev.endTime || "10:00",
+      allDay: ev.allDay || false,
+      place: ev.place || "",
+      description: ev.description || "",
+      source: "ics_import",
+    }, { merge: true });
+  }));
+
+  return { imported: parsed.length, removed: staleDocs.length };
+}
+
+// 저장 직후 "지금 바로 동기화" 버튼용 — 결과를 그 자리에서 화면에 보여줄 수 있도록 동기 호출
+export const syncIcsSubscriptionNow = onCall({ region: REGION }, async (request) => {
+  const { companyId, calId } = request.data || {};
+  if (!companyId || !calId) throw new HttpsError("invalid-argument", "companyId/calId가 필요합니다.");
+
+  const calRef = db.doc(`companies/${companyId}/cals/${calId}`);
+  const calSnap = await calRef.get();
+  if (!calSnap.exists) throw new HttpsError("not-found", "캘린더를 찾을 수 없습니다.");
+  const url = calSnap.data()?.icsSubscriptionUrl;
+  if (!url) throw new HttpsError("failed-precondition", "구독 URL이 설정되어 있지 않습니다.");
+
+  try {
+    const result = await syncIcsForCal(companyId, calId, url);
+    await calRef.update({ icsSubscriptionLastSyncAt: new Date().toISOString(), icsSubscriptionLastError: null });
+    return { ok: true, ...result };
+  } catch (e) {
+    await calRef.update({ icsSubscriptionLastError: e?.message || String(e) }).catch(() => {});
+    throw new HttpsError("internal", e?.message || "동기화 중 오류가 발생했습니다.");
+  }
+});
+
+// 6시간마다 전체 회사·전체 팀을 돌며 구독 URL이 설정된 캘린더를 재동기화.
+// 회사/팀 수가 많지 않은 서비스 규모라 전수 스캔으로 충분 — 늘어나면 그때 인덱싱 검토.
+export const icsSubscriptionAutoSync = onSchedule(
+  { region: REGION, schedule: "0 */6 * * *", timeZone: "Asia/Seoul" },
+  async () => {
+    const companiesSnap = await db.collection("companies").get();
+    const log = [];
+    for (const companyDoc of companiesSnap.docs) {
+      if (companyDoc.data()?.status === "deleted") continue;
+      const calsSnap = await db.collection(`companies/${companyDoc.id}/cals`).get();
+      for (const calDoc of calsSnap.docs) {
+        const url = calDoc.data()?.icsSubscriptionUrl;
+        if (!url) continue;
+        try {
+          const result = await syncIcsForCal(companyDoc.id, calDoc.id, url);
+          await calDoc.ref.update({ icsSubscriptionLastSyncAt: new Date().toISOString(), icsSubscriptionLastError: null });
+          log.push(`${companyDoc.id}/${calDoc.id}: 가져옴 ${result.imported} 삭제 ${result.removed}`);
+        } catch (e) {
+          await calDoc.ref.update({ icsSubscriptionLastError: e?.message || String(e) }).catch(() => {});
+          log.push(`${companyDoc.id}/${calDoc.id}: 오류 ${e?.message || e}`);
+        }
+      }
+    }
+    console.log(`[icsSubscriptionAutoSync] ${log.join(" | ")}`);
+  }
+);
