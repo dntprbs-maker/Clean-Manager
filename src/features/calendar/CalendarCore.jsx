@@ -17,6 +17,7 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage
 import { httpsCallable } from "firebase/functions";
 
 import { HOLIDAYS, WD, fmt, pd, diff, add, fmtTime } from "../../lib/dateTime";
+import { toLunarLabel } from "../../lib/lunar";
 import { CALS, calById, REGULAR_CAL_ID } from "../../lib/calendars";
 import { REPEAT_OPTS } from "../../lib/repeat";
 import { getReportStatus } from "../../lib/reports";
@@ -28,7 +29,7 @@ import { ReportStatusBadge } from "../../components/shared/ReportStatusBadge";
 import { MapLinkButton } from "../../components/shared/MapLinkButton";
 import { openLightbox } from "../../components/shared/PhotoLightbox";
 import { askRecurringScope } from "../../components/shared/RecurringScopeSheet";
-import { WheelPicker, RepeatToggleButton, RepeatPanel } from "../../components/shared/RepeatPicker";
+import { RepeatToggleButton, RepeatPanel } from "../../components/shared/RepeatPicker";
 import { RegularCleaningDetailBody } from "../regular-cleaning/RegularCleaningDetailBody";
 
 // ── 연속 일정 레이아웃 알고리즘 ──────────────────────────────────
@@ -228,6 +229,7 @@ export function ScheduleList({ selDate, compact=false }) {
   const d=pd(selDate), dow=d.getDay();
   const DAYS=["일","월","화","수","목","금","토"];
   const isHol=!!HOLIDAYS[selDate];
+  const lunarLabel = toLunarLabel(d);
 
   // 정기청소는 배정마다 이벤트가 따로 생성되므로, 같은 현장에 여러 명이 배정된 경우
   // 이 날짜 목록에서는 하나로 합쳐서 "N명"으로 표시한다 (상세보기는 원래대로 현장 전체 배정을 보여줌)
@@ -286,7 +288,7 @@ export function ScheduleList({ selDate, compact=false }) {
             <span className={`text-base font-bold ${headerColor}`}>
               {d.getMonth()+1}. {d.getDate()}. {DAYS[dow]}
             </span>
-            <span className="text-xs text-gray-400 ml-2">음력 5. 1.</span>
+            {lunarLabel && <span className="text-xs text-gray-400 ml-2">{lunarLabel}</span>}
           </div>
           <button onClick={()=>{
             const next=add(selDate,1); setSelDate(next);
@@ -1633,125 +1635,92 @@ const copyOf = ev => {
   };
 };
 
-// ── 날짜/시간 피커 (네이버 앱 스타일 — 인라인 드럼롤) ──────────────
+// 마지막으로 쓴 일정 입력방법(메모/대화/사진/직접)을 기기에 기억해뒀다가, 다음 "일정 추가" 때
+// 곧장 그 방법으로 진입한다(직접 입력을 자주 쓰는 사람이 매번 선택 화면을 안 거치도록).
+// 계정이 아니라 기기 기준(로그인 세션과 무관)이라 이 브라우저/기기에서만 적용된다.
+const LAST_INPUT_MODE_KEY = "lastEventInputMode";
+const saveLastInputMode = mode => { try { localStorage.setItem(LAST_INPUT_MODE_KEY, mode); } catch { /* 저장 실패해도 기능엔 지장 없음 */ } };
+
+// ── 날짜/시간 필드 — 기기 기본 날짜/시간 선택창(<input type="date"/"time">)을 그대로 사용.
+// 예전엔 자체 제작 5열(연/월/일/시/분) 드럼롤(WheelPicker)이었으나, 조작 부담이 커서
+// OS/브라우저가 이미 제공하는 표준 선택창으로 교체했다. 저장 형식(YYYY-MM-DD, HH:MM)은
+// 그대로라 기존 데이터·Firestore 구조와 호환된다. WheelPicker 자체는 반복 종료일 선택
+// (RepeatUntilPicker)에서 여전히 쓰고 있어 컴포넌트를 삭제하지 않고 이 화면의 사용만 걷어냈다.
+const fmtDateKorean = s => {
+  const d = pd(s);
+  if (!d) return null;
+  return `${d.getFullYear()}. ${String(d.getMonth()+1).padStart(2,"0")}. ${String(d.getDate()).padStart(2,"0")}.`;
+};
+
+// 네이티브 input을 보이지 않게(opacity 0) 같은 자리에 겹쳐두고, 보기 좋은 텍스트는 그 위에
+// 얹는 방식 — <label>로 감싸 텍스트를 눌러도 실제 input이 눌린 것과 동일하게 동작한다
+// (모바일에서 OS 기본 선택창이 뜸). 데스크톱 등 label-클릭만으로 안 열리는 브라우저를 위해
+// showPicker()도 시도하되, 지원 안 하면 조용히 무시(포커스만 돼도 키보드로 조작 가능).
+function NativeDateTimeField({ type, value, onChange, ariaLabel, min, step, display, size="base" }) {
+  const ref = useRef(null);
+  const openPicker = () => { try { ref.current?.showPicker?.(); } catch { /* 미지원 브라우저는 기본 동작에 맡김 */ } };
+  return (
+    <label onClick={openPicker}
+      className={`relative block cursor-pointer select-none ${size==="lg" ? "text-2xl font-bold text-gray-900" : "text-sm font-medium text-gray-600"}`}>
+      {display}
+      <input ref={ref} type={type} value={value||""} min={min} step={step}
+        aria-label={ariaLabel}
+        onChange={e=>onChange(e.target.value)}
+        onClick={e=>e.stopPropagation()}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
+    </label>
+  );
+}
+
 export function DateTimePicker({ form, set, errs, lockRepeat }) {
-  const [activePicker, setActivePicker] = useState(null); // null | "start" | "end"
   const [repeatOpen, setRepeatOpen] = useState(false);
+  // 사용자가 종료 시간을 직접(피커로) 바꾼 적이 있으면, 이후 시작 시간을 바꿔도
+  // 종료 시간을 더 이상 자동으로 밀지 않는다 — 애써 골라둔 값을 덮어쓰지 않기 위함.
+  // 모달을 새로 열 때마다(= 이 컴포넌트가 새로 마운트될 때마다) false로 리셋된다.
+  const endTimeTouchedRef = useRef(false);
 
-  // 피커 내부 상태 (ref로 항상 최신값 유지)
-  // h24: 0~23 (오전/오후 합친 연속 시간)
-  const ps = useRef({ year:2026, month:6, day:1, h24:9, min:0 });
-  const [pYear,  setPYear]  = useState(2026);
-  const [pMonth, setPMonth] = useState(6);
-  const [pDay,   setPDay]   = useState(1);
-  const [pH24,   setPH24]   = useState(9);
-  const [pMin,   setPMin]   = useState(0);
-
-  const parseTimeH24 = t => {
-    if (!t) return { h24: 9, m: 0 };
-    const [hh, mm] = t.split(":").map(Number);
-    return { h24: hh, m: Math.round(mm / 5) * 5 % 60 };
+  const handleStartDateChange = (newStart) => {
+    set("start", newStart);
+    // 종료 날짜는 시작 날짜보다 앞설 수 없음 — 앞서게 되면 시작과 같은 날로 맞춤
+    if (newStart > form.end) set("end", newStart);
   };
-  const fmtH24 = h => {
-    const ap = h < 12 ? "오전" : "오후";
-    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-    return `${ap} ${h12}시`;
+  const handleEndDateChange = (newEnd) => {
+    // <input min>이 1차로 막아주지만, 혹시 모를 경우를 대비한 안전망
+    set("end", newEnd < form.start ? form.start : newEnd);
   };
-  const dispTime = t => {
-    if (!t) return "--:--";
-    const [hh, mm] = t.split(":").map(Number);
-    const ap = hh < 12 ? "오전" : "오후";
-    const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
-    return `${ap} ${h12}:${String(mm).padStart(2,"0")}`;
-  };
-
-  const applyToForm = (y, mo, d, h24, m) => {
-    if (!activePicker) return;
-    const safeDay = Math.min(d, new Date(y, mo, 0).getDate());
-    const dateStr = `${y}-${String(mo).padStart(2,"0")}-${String(safeDay).padStart(2,"0")}`;
-    const timeStr = `${String(h24).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
-    if (activePicker === "start") {
-      set("start", dateStr);
-      if (dateStr > form.end) set("end", dateStr);
-      if (!form.allDay) {
-        // 기존 시간차(분)를 유지하면서 종료 시간 자동 조정
-        const [oldSH, oldSM] = (form.startTime||"09:00").split(":").map(Number);
-        const [oldEH, oldEM] = (form.endTime||"10:00").split(":").map(Number);
-        const diffMin = (oldEH*60+oldEM) - (oldSH*60+oldSM);
-        const newStartMin = h24*60 + m;
-        const totalEndMin = newStartMin + (diffMin > 0 ? diffMin : 60);
-        const dayOverflow = Math.floor(totalEndMin / (24*60)); // 넘어가는 날 수
-        const newEndMin = totalEndMin % (24*60);
-        const newEH = Math.floor(newEndMin/60);
-        const newEM = newEndMin%60;
-        const endTimeStr = `${String(newEH).padStart(2,"0")}:${String(newEM).padStart(2,"0")}`;
-        set("startTime", timeStr);
-        set("endTime", endTimeStr);
-        // 자정 넘어가면 종료 날짜도 다음날로
-        if (dayOverflow > 0) {
-          const endDate = new Date(dateStr);
-          endDate.setDate(endDate.getDate() + dayOverflow);
-          set("end", fmt(endDate));
-        }
-      }
-    } else {
-      set("end", dateStr);
-      if (!form.allDay) set("endTime", timeStr);
+  const handleStartTimeChange = (newStartTime) => {
+    set("startTime", newStartTime);
+    if (form.allDay || endTimeTouchedRef.current) return;
+    // 기존 시작~종료 시간차(분)를 유지한 채로 종료 시간을 같이 옮긴다
+    const [oldSH, oldSM] = (form.startTime||"09:00").split(":").map(Number);
+    const [oldEH, oldEM] = (form.endTime||"10:00").split(":").map(Number);
+    const diffMin = (oldEH*60+oldEM) - (oldSH*60+oldSM);
+    const [newSH, newSM] = newStartTime.split(":").map(Number);
+    const totalEndMin = (newSH*60+newSM) + (diffMin > 0 ? diffMin : 60);
+    const dayOverflow = Math.floor(totalEndMin / (24*60)); // 자정을 넘어간 날 수
+    const newEndMin = totalEndMin % (24*60);
+    set("endTime", `${String(Math.floor(newEndMin/60)).padStart(2,"0")}:${String(newEndMin%60).padStart(2,"0")}`);
+    if (dayOverflow > 0) {
+      const endDate = pd(form.start);
+      endDate.setDate(endDate.getDate() + dayOverflow);
+      set("end", fmt(endDate));
     }
   };
-
-  const openPicker = field => {
-    if (activePicker === field) { setActivePicker(null); return; }
-    const dateStr = field === "start" ? form.start : form.end;
-    const timeStr = field === "start" ? form.startTime : form.endTime;
-    const d = pd(dateStr) || new Date();
-    const t = parseTimeH24(timeStr);
-    const state = { year: d.getFullYear(), month: d.getMonth()+1, day: d.getDate(), h24: t.h24, min: t.m };
-    ps.current = state;
-    setPYear(state.year); setPMonth(state.month); setPDay(state.day);
-    setPH24(state.h24); setPMin(state.min);
-    setActivePicker(field);
+  const handleEndTimeChange = (newEndTime) => {
+    endTimeTouchedRef.current = true;
+    set("endTime", newEndTime);
   };
-
-  // ps.current → Date 객체
-  const baseDate = () => new Date(ps.current.year, ps.current.month-1, ps.current.day, ps.current.h24, ps.current.min);
-  // Date → ps.current 동기화 + 폼 반영
-  const reSync = b => {
-    ps.current = { year: b.getFullYear(), month: b.getMonth()+1, day: b.getDate(), h24: b.getHours(), min: b.getMinutes() };
-    setPYear(ps.current.year); setPMonth(ps.current.month); setPDay(ps.current.day);
-    setPH24(ps.current.h24); setPMin(ps.current.min);
-    applyToForm(ps.current.year, ps.current.month, ps.current.day, ps.current.h24, ps.current.min);
-  };
-
-  // 연도는 순환 안 함 → 값 직접 적용
-  const chYear  = v => { ps.current.year = v; setPYear(v); applyToForm(v, ps.current.month, ps.current.day, ps.current.h24, ps.current.min); };
-  // 월/일/시/분은 delta(움직인 칸 수)를 Date 연산으로 적용 → 자릿수 올림 자동
-  const chMonth = (v, delta=0) => {
-    const b = baseDate();
-    const targetDay = b.getDate();
-    b.setDate(1);
-    b.setMonth(b.getMonth() + delta);
-    const lastDay = new Date(b.getFullYear(), b.getMonth()+1, 0).getDate();
-    b.setDate(Math.min(targetDay, lastDay));
-    reSync(b);
-  };
-  const chDay = (v, delta=0) => { const b = baseDate(); b.setDate(b.getDate() + delta); reSync(b); };
-  const chH24 = (v, delta=0) => { const b = baseDate(); b.setHours(b.getHours() + delta); reSync(b); };
-  const chMin = (v, delta=0) => { const b = baseDate(); b.setMinutes(b.getMinutes() + delta*5); reSync(b); };
-
-  const daysInMonth = new Date(pYear, pMonth, 0).getDate();
-  const years  = Array.from({length:8}, (_,i) => 2023+i);
-  const months = Array.from({length:12},(_,i) => i+1);
-  const days   = Array.from({length:daysInMonth},(_,i) => i+1);
-  const hours24 = Array.from({length:24},(_,i) => i); // 0~23 연속
-  const mins   = Array.from({length:12},(_,i) => i*5);
-  const WD     = ["일","월","화","수","목","금","토"];
-
-  const dispDate = s => {
-    if (!s) return <span className="text-red-500 font-semibold">날짜 선택 필요</span>;
-    const d = pd(s); if (!d) return "--";
-    const yy = String(d.getFullYear()).slice(2);
-    return `${yy}. ${d.getMonth()+1}. ${d.getDate()}.(${WD[d.getDay()]})`;
+  // 빠른 종료 시간 버튼 — 시작 시각 기준으로 N분 뒤를 계산(자정 넘김 포함), 보조 기능이라
+  // 네이티브 종료 시간 입력을 대체하지 않고 그 옆에 나란히 둔다.
+  const applyQuickDuration = (minutes) => {
+    const [sh, sm] = (form.startTime||"09:00").split(":").map(Number);
+    const totalEndMin = sh*60+sm + minutes;
+    const dayOverflow = Math.floor(totalEndMin / (24*60));
+    const newEndMin = totalEndMin % (24*60);
+    set("endTime", `${String(Math.floor(newEndMin/60)).padStart(2,"0")}:${String(newEndMin%60).padStart(2,"0")}`);
+    const endDate = pd(form.start);
+    endDate.setDate(endDate.getDate() + dayOverflow);
+    set("end", fmt(endDate));
   };
 
   return (
@@ -1782,68 +1751,44 @@ export function DateTimePicker({ form, set, errs, lockRepeat }) {
       {/* 반복 설정 패널 — 전체 너비로 펼쳐짐 (단건 수정 중엔 숨김) */}
       {!lockRepeat && repeatOpen && <RepeatPanel form={form} set={set}/>}
 
-      {/* 시작/종료 날짜시간 버튼 */}
-      <div className="flex items-center px-4 py-3 gap-2">
-        <button onClick={()=>openPicker("start")} className="flex-1 text-left">
-          <div className={`text-sm font-medium ${activePicker==="start"?"text-yellow-500":"text-gray-600"}`}>
-            {dispDate(form.start)}
-          </div>
+      {/* 시작/종료 날짜·시간 */}
+      <div className="flex items-start px-4 py-3 gap-2">
+        <div className="flex-1 flex flex-col gap-1">
+          <span className="text-xs font-bold text-gray-400">시작</span>
+          <NativeDateTimeField type="date" value={form.start} onChange={handleStartDateChange}
+            ariaLabel="시작 날짜" display={fmtDateKorean(form.start) || <span className="text-red-500 font-semibold">날짜 선택 필요</span>}/>
           {!form.allDay && (
-            <div className={`text-2xl font-bold mt-0.5 ${activePicker==="start"?"text-yellow-500":"text-gray-900"}`}>
-              {dispTime(form.startTime)}
-            </div>
+            <NativeDateTimeField type="time" value={form.startTime} onChange={handleStartTimeChange}
+              ariaLabel="시작 시간" step={1800} size="lg" display={fmtTime(form.startTime) || "--:--"}/>
           )}
-        </button>
-        <ChevronRight size={16} className="text-gray-300 shrink-0"/>
-        <button onClick={()=>openPicker("end")} className="flex-1 text-right">
-          <div className={`text-sm font-medium ${activePicker==="end"?"text-yellow-500":"text-gray-600"}`}>
-            {dispDate(form.end)}
-          </div>
+        </div>
+        <ChevronRight size={16} className="text-gray-300 shrink-0 mt-6"/>
+        <div className="flex-1 flex flex-col gap-1 items-end text-right">
+          <span className="text-xs font-bold text-gray-400">종료</span>
+          <NativeDateTimeField type="date" value={form.end} onChange={handleEndDateChange}
+            ariaLabel="종료 날짜" min={form.start} display={fmtDateKorean(form.end) || <span className="text-red-500 font-semibold">날짜 선택 필요</span>}/>
           {!form.allDay && (
-            <div className={`text-2xl font-bold mt-0.5 ${activePicker==="end"?"text-yellow-500":"text-gray-900"}`}>
-              {dispTime(form.endTime)}
-            </div>
+            <NativeDateTimeField type="time" value={form.endTime} onChange={handleEndTimeChange}
+              ariaLabel="종료 시간" step={1800} size="lg" display={fmtTime(form.endTime) || "--:--"}/>
           )}
-        </button>
+        </div>
       </div>
+
+      {/* 빠른 종료 시간 버튼 — 위 종료 시간 입력의 보조 수단 */}
+      {!form.allDay && (
+        <div className="flex gap-1.5 px-4 pb-3 flex-wrap">
+          {[{m:30,l:"+30분"},{m:60,l:"+1시간"},{m:120,l:"+2시간"}].map(q => (
+            <button key={q.m} onClick={()=>applyQuickDuration(q.m)}
+              className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-gray-100 text-gray-600 hover:bg-gray-200">
+              {q.l}
+            </button>
+          ))}
+        </div>
+      )}
 
       {errs.start && <p className="text-red-500 text-xs px-4 pb-2">{errs.start}</p>}
       {errs.end  && <p className="text-red-500 text-xs px-4 pb-2">{errs.end}</p>}
       {errs.time && <p className="text-red-500 text-xs px-4 pb-2">{errs.time}</p>}
-
-      {/* 날짜/시간 팝업 — 버튼 바로 아래 인라인 */}
-      {activePicker && (
-        <div className="border-t border-gray-100 bg-white">
-          {/* 드럼롤 */}
-          <div className="flex px-1" style={{height:220}}>
-            <WheelPicker key={`y`}  items={years}  value={pYear}  onChange={chYear}  renderItem={v=>String(v)}/>
-            <WheelPicker key={`mo`} items={months} value={pMonth} onChange={chMonth} renderItem={v=>`${v}월`} loop/>
-            <WheelPicker key={`${pYear}-${pMonth}-d`} items={days} value={pDay} onChange={chDay}
-              renderItem={v=>`${v}일`} loop/>
-            {!form.allDay && <>
-              <WheelPicker key={`h24`} items={hours24} value={pH24} onChange={chH24} renderItem={fmtH24} loop/>
-              <WheelPicker key={`m`}   items={mins}    value={pMin} onChange={chMin} renderItem={v=>String(v).padStart(2,"0")} loop/>
-            </>}
-          </div>
-          {/* 오늘/닫기 버튼 */}
-          <div className="flex items-center justify-between px-4 py-2 border-t border-gray-100">
-            <button onClick={()=>{
-              const t = new Date();
-              const y=t.getFullYear(), mo=t.getMonth()+1, d=t.getDate();
-              ps.current = {...ps.current, year:y, month:mo, day:d};
-              setPYear(y); setPMonth(mo); setPDay(d);
-              applyToForm(y, mo, d, ps.current.h24, ps.current.min);
-            }} className="px-4 py-1.5 rounded-full text-sm font-bold bg-gray-100 text-gray-600">
-              오늘
-            </button>
-            <button onClick={()=>setActivePicker(null)}
-              className="px-6 py-1.5 rounded-full text-sm font-bold text-white"
-              style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
-              확인
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1901,13 +1846,22 @@ export function EventModal() {
       setExitConfirm(false);
       setErrs({});
       setPasteText("");
-      setInputMode("memo");
       setAiLoading(false);
       setImgFile(null);
       setImgPreview(null);
       setCalDropOpen(false);
-      // 복사는 이미 채워진 폼을 바로 손보는 흐름이라 입력방법 선택(paste) 단계를 건너뛴다
-      setStep(editEv || isCopy ? "form" : "paste");
+      // 복사/수정은 이미 채워진 폼을 바로 손보는 흐름이라 입력방법 선택(paste) 단계를 건너뛴다.
+      // 순수 신규 등록일 때만, 마지막으로 쓴 입력방법이 "직접"이었으면 매번 탭을 다시
+      // 고르지 않도록 곧장 입력폼으로 진입한다(처음 쓰는 기기는 저장된 값이 없어
+      // 기존처럼 선택 화면부터 보여줌).
+      if (editEv || isCopy) {
+        setInputMode("memo");
+        setStep("form");
+      } else {
+        const lastMode = (() => { try { return localStorage.getItem(LAST_INPUT_MODE_KEY); } catch { return null; } })();
+        if (lastMode === "direct") { setInputMode("direct"); setStep("form"); }
+        else { setInputMode("memo"); setStep("paste"); }
+      }
       setTimeout(()=>setAnim(true),10);
       setTimeout(()=>tRef.current?.focus(),150);
     }
@@ -1920,7 +1874,9 @@ export function EventModal() {
     if(!form.title.trim()) e.title="제목을 입력해주세요.";
     if(!form.start) e.start="시작 날짜를 선택해주세요.";
     if(form.end<form.start) e.end="종료일은 시작일 이후여야 합니다.";
-    if(!form.allDay&&form.startTime>=form.endTime) e.time="종료 시간은 시작 시간 이후여야 합니다.";
+    // 시작~종료가 여러 날에 걸치면(예: 자정을 넘는 일정) 시각만 비교하는 건 의미가 없다
+    // (다음날 00:30이 전날 23:30보다 "숫자로는" 앞서 보임) — 같은 날일 때만 검사한다.
+    if(!form.allDay && form.start===form.end && form.startTime>=form.endTime) e.time="종료 시간은 시작 시간 이후여야 합니다.";
     setErrs(e); return !Object.keys(e).length;
   };
   const [uploading, setUploading] = useState(false);
@@ -2021,7 +1977,7 @@ export function EventModal() {
                 <button key={tab.key}
                   onClick={()=>{
                     setInputMode(tab.key);
-                    if(tab.key==="direct"){ setStep("form"); }
+                    if(tab.key==="direct"){ saveLastInputMode("direct"); setStep("form"); }
                   }}
                   className="flex-1 flex flex-col items-center py-2.5 gap-0.5 relative transition-colors"
                   style={{color: active ? "#1a56db" : "#9ca3af"}}>
@@ -2099,6 +2055,7 @@ export function EventModal() {
             <button
               disabled={aiLoading}
               onClick={async ()=>{
+                saveLastInputMode(inputMode);
                 if(inputMode === "memo"){
                   if(pasteText.trim()){
                     const parsed = parseEventText(pasteText, titleRule, typeKeywords);
