@@ -420,6 +420,12 @@ export function ImportCalendarScreen() {
           )}
           {subCal && (
             <>
+              {/* 입력칸이 비어있지 않으면 예시가 아니라 실제로 저장된 값이라, 다시 헷갈리지
+                  않도록 그 사실을 라벨로 명시한다(잘못된 URL을 저장해둔 채 다시 눌러도
+                  왜 계속 실패하는지 못 알아챈 적이 있었음). */}
+              {subCal.icsSubscriptionUrl && (
+                <p className="text-[11px] font-bold text-blue-500 -mb-1">✓ 현재 구독 중인 주소</p>
+              )}
               <input value={subUrlDraft} onChange={e => setSubUrlDraft(e.target.value)}
                 placeholder="https://calendar.google.com/calendar/ical/.../basic.ics"
                 className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2.5 px-3 text-xs outline-none focus:border-blue-400 focus:bg-white"/>
