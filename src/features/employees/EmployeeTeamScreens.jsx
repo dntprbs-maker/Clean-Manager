@@ -235,20 +235,29 @@ function EmployeeTab() {
   );
 }
 
-// ── 직원 등록/수정 모달 — 이름/연락처만. 최고관리자(사장)는 1명뿐이라 여기서 부여하지 않음.
-// 팀 소속은 팀 탭에서 배정 ──
+// ── 직원 등록/수정 모달 — 이름/연락처 + 팀 배정(다중 선택, 선택 안 해도 됨).
+// 팀 "소속"은 여기서 즉시 설정 가능하지만, 각 팀 안에서의 역할(팀장/팀원) 변경은
+// 여전히 "팀" 탭에서 한다 — 그쪽이 팀 단위로 여러 명의 역할을 한눈에 보기 편해서
+// 굳이 이 모달에 또 넣지 않음(중복 UI 방지). 데이터는 기존 memberships 배열
+// 그대로 재사용 — 새 구조를 만들지 않음. ──
 export function EmployeeFormModal() {
-  const { empModal, setEmpModal, users, companyId } = useC();
+  const { empModal, setEmpModal, users, teams, companyId } = useC();
   const [form, setForm] = useState({ name: "", phone: "", pw: "" });
+  const [selectedTeams, setSelectedTeams] = useState([]); // string[] — 팀 이름
   const [loading, setLoading] = useState(false);
+  const visibleTeams = teams.filter(t => t !== "사장");
 
   useEffect(() => {
     if (empModal.open) {
       if (empModal.editId) {
         const u = users.find(x => x.id === empModal.editId);
-        if (u) setForm({ name: u.name || "", phone: fmtPhone(u.phone), pw: u.pw || "" });
+        if (u) {
+          setForm({ name: u.name || "", phone: fmtPhone(u.phone), pw: u.pw || "" });
+          setSelectedTeams(getMemberships(u).map(m => m.team));
+        }
       } else {
         setForm({ name: "", phone: "", pw: "" });
+        setSelectedTeams([]);
       }
     }
   }, [empModal.open, empModal.editId, users]);
@@ -257,28 +266,35 @@ export function EmployeeFormModal() {
 
   const close = () => { if(!loading) setEmpModal({open:false, editId:null}); };
 
+  const toggleTeam = (t) => setSelectedTeams(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
+
   const save = async () => {
     if (!form.name.trim() || !form.phone.trim()) return alert("이름과 연락처는 필수입니다.");
     setLoading(true);
 
     try {
+      // 계속 선택돼 있는 팀은 기존 역할(팀장/팀원)을 그대로 유지하고, 새로 체크한 팀만
+      // "팀원"으로 기본 배정 — 체크 해제한 팀은 자연히 목록에서 빠져 소속에서 제외된다.
+      const existingMs = empModal.editId ? getMemberships(users.find(u => u.id === empModal.editId)) : [];
+      const memberships = selectedTeams.map(team => existingMs.find(m => m.team === team) || { team, role: "팀원" });
+
       const baseData = {
         name: form.name,
         phone: onlyDigits(form.phone),
+        memberships,
       };
       if (empModal.editId) {
-        // 기존 유저 수정 (비밀번호 포함 저장, 팀 소속(memberships)은 이 화면에서 건드리지 않음)
+        // 기존 유저 수정 (비밀번호도 함께 저장)
         const updateData = { ...baseData, pw: form.pw };
         await setDoc(doc(db, "companies", companyId, "users", empModal.editId), updateData, { merge: true });
         await setDoc(doc(db, "staffs", empModal.editId), { ...updateData, companyId }, { merge: true });
       } else {
-        // 새 유저 생성 (Firestore 직접 저장 - 이메일 인증 사용안함) — 팀 소속은 없이 시작, 팀 탭에서 배정
+        // 새 유저 생성 (Firestore 직접 저장 - 이메일 인증 사용안함)
         const newDocRef = doc(collection(db, "staffs"));
         const uid = newDocRef.id;
 
         const userData = {
           ...baseData,
-          memberships: [],
           pw: "", // 로그인 시 본인이 직접 설정하도록 비워둠
           createdAt: serverTimestamp()
         };
@@ -352,7 +368,31 @@ export function EmployeeFormModal() {
               }}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-800" placeholder="010-0000-0000" />
           </div>
-          <p className="text-[11px] text-gray-400">팀 소속과 팀 내 역할(팀장/팀원)은 "팀" 탭에서 배정합니다.</p>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">소속 팀 (선택사항, 여러 개 가능)</label>
+            {visibleTeams.length === 0 ? (
+              <p className="text-xs text-gray-400">등록된 팀이 없습니다. "팀" 탭에서 먼저 만들어주세요.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {visibleTeams.map(t => {
+                  const on = selectedTeams.includes(t);
+                  return (
+                    <button key={t} type="button" onClick={() => toggleTeam(t)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${
+                        on ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-gray-200 text-gray-500"
+                      }`}>
+                      {t}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <p className="text-[11px] text-gray-400 mt-1.5">
+              {selectedTeams.length === 0
+                ? "선택한 팀이 없으면 \"소속 없음\"으로 등록돼요."
+                : "각 팀 안에서의 역할(팀장/팀원) 변경은 \"팀\" 탭에서 할 수 있어요."}
+            </p>
+          </div>
         </div>
         {empModal.editId && (
           <div className="px-5 pb-1">
@@ -395,8 +435,16 @@ function TeamTab() {
   const [copiedIdx, setCopiedIdx]       = useState(null);
   const [memberOpenIdx, setMemberOpenIdx] = useState(null); // 어느 팀의 "배정된 직원" 목록이 펼쳐져 있는지
   const [addMemberIdx, setAddMemberIdx]   = useState(null); // 어느 팀에 직원 추가 팝업이 열려있는지
-  const [addMemberEmpId, setAddMemberEmpId] = useState("");
-  const [addMemberRole, setAddMemberRole]   = useState("팀원");
+  const [addMemberEmpIds, setAddMemberEmpIds] = useState([]); // 일괄 추가용 다중 선택
+  const [addMemberRole, setAddMemberRole]   = useState("팀원"); // 이번에 추가하는 사람들에게 공통 적용
+  const [removeMode, setRemoveMode]         = useState(false); // 일괄 제외(체크박스) 모드
+  const [removeSelectedIds, setRemoveSelectedIds] = useState([]);
+
+  // 구성원 시트를 닫을 때 안의 부분 상태(추가/제외 모드 등)도 같이 초기화
+  const closeMemberSheet = () => {
+    setMemberOpenIdx(null); setAddMemberIdx(null); setAddMemberEmpIds([]);
+    setRemoveMode(false); setRemoveSelectedIds([]);
+  };
 
   // 탭 진입 시: isField 없는 기존 cal에 기본값 세팅 (청소 포함 → true, 그 외 → false)
   useEffect(() => {
@@ -438,6 +486,10 @@ function TeamTab() {
     if (!u) return;
     writeMemberships(employeeId, getMemberships(u).filter(m => m.team !== team));
   };
+  // 여러 명을 한 번에 추가/제외 — 기존 단건 함수를 그대로 반복 호출(각자 독립된
+  // 유저 문서를 읽고 쓰므로 겹칠 일 없음, 새 쓰기 로직을 따로 만들지 않음)
+  const addMembers = (team, employeeIds, role) => employeeIds.forEach(id => addMember(team, id, role));
+  const removeMembers = (team, employeeIds) => employeeIds.forEach(id => removeMember(team, id));
   const changeMemberRole = (team, employeeId, newRole) => {
     const u = users.find(x => x.id === employeeId);
     if (!u) return;
@@ -835,64 +887,117 @@ function TeamTab() {
         );
       })()}
 
-      {/* 구성원 바텀시트 */}
+      {/* 구성원 바텀시트 — 개별 추가/제외뿐 아니라 여러 명을 한 번에 추가·제외할 수 있음 */}
       {memberOpenIdx !== null && (() => {
         const t = visibleTeams[memberOpenIdx];
         if (!t) return null;
         const byName = (a, b) => (a.name || "").localeCompare(b.name || "", "ko");
         const members = users.filter(u => isMemberOf(u, t)).sort(byName);
         const nonMembers = users.filter(u => !isMemberOf(u, t)).sort(byName);
+        const toggleRemoveSelect = (id) => setRemoveSelectedIds(prev =>
+          prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+        const toggleAddSelect = (id) => setAddMemberEmpIds(prev =>
+          prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
         return (
           <>
-          <div className="fixed inset-0 z-30 flex items-center justify-center px-4 pb-32 bg-black/40" onClick={() => { setMemberOpenIdx(null); setAddMemberIdx(null); }}>
+          <div className="fixed inset-0 z-30 flex items-center justify-center px-4 pb-32 bg-black/40" onClick={closeMemberSheet}>
             <div className="bg-white w-full max-w-sm rounded-2xl p-4 max-h-[65vh] overflow-y-auto flex flex-col gap-2 shadow-2xl" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-1 gap-2">
                 <h3 className="font-bold text-gray-900 text-sm flex-1 truncate">{t} <span className="text-gray-400 font-normal">{members.length}명</span></h3>
                 {addMemberIdx !== memberOpenIdx && (
-                  <button onClick={() => { setAddMemberIdx(memberOpenIdx); setAddMemberRole("팀원"); }}
+                  <button onClick={() => { setRemoveMode(v => !v); setRemoveSelectedIds([]); }}
+                    disabled={members.length === 0}
+                    className={`text-xs font-bold shrink-0 px-1 disabled:text-gray-300 ${removeMode ? "text-gray-500" : "text-red-500"}`}>
+                    {removeMode ? "취소" : "선택 제외"}
+                  </button>
+                )}
+                {!removeMode && addMemberIdx !== memberOpenIdx && (
+                  <button onClick={() => { setAddMemberIdx(memberOpenIdx); setAddMemberRole("팀원"); setAddMemberEmpIds([]); }}
                     disabled={nonMembers.length === 0}
                     className="text-xs font-bold text-blue-600 disabled:text-gray-300 shrink-0 px-1">
                     + 직원 추가
                   </button>
                 )}
-                <button onClick={() => { setMemberOpenIdx(null); setAddMemberIdx(null); }} className="shrink-0"><X size={20} className="text-gray-400"/></button>
+                <button onClick={closeMemberSheet} className="shrink-0"><X size={20} className="text-gray-400"/></button>
               </div>
 
               {members.length === 0 ? (
                 <p className="text-xs text-gray-400 text-center py-4">배정된 직원이 없습니다.</p>
-              ) : members.map(u => (
-                <div key={u.id} className="flex items-center justify-between bg-gray-50 rounded-lg border border-gray-100 px-3 py-2">
-                  <span className="text-sm font-medium text-gray-800">{u.name}</span>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => changeMemberRole(t, u.id, teamRole(u, t) === "팀장" ? "팀원" : "팀장")}
-                      className={`text-[11px] font-bold px-2 py-1 rounded-full border ${teamRole(u,t)==="팀장" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-white text-gray-500 border-gray-200"}`}>
-                      {teamRole(u, t) || "팀원"}
-                    </button>
-                    <button onClick={() => removeMember(t, u.id)} className="text-gray-300 hover:text-red-500 p-1">
-                      <X size={14}/>
-                    </button>
+              ) : members.map(u => {
+                const checked = removeSelectedIds.includes(u.id);
+                return (
+                  <div key={u.id}
+                    onClick={removeMode ? () => toggleRemoveSelect(u.id) : undefined}
+                    className={`flex items-center justify-between rounded-lg border px-3 py-2 transition-colors ${
+                      removeMode ? "cursor-pointer" : ""
+                    } ${checked ? "bg-red-50 border-red-200" : "bg-gray-50 border-gray-100"}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      {removeMode && (
+                        <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center ${
+                          checked ? "bg-red-500 border-red-500" : "border-gray-300"
+                        }`}>
+                          {checked && <span className="text-white text-[9px]">✓</span>}
+                        </div>
+                      )}
+                      <span className="text-sm font-medium text-gray-800 truncate">{u.name}</span>
+                    </div>
+                    {!removeMode && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button onClick={() => changeMemberRole(t, u.id, teamRole(u, t) === "팀장" ? "팀원" : "팀장")}
+                          className={`text-[11px] font-bold px-2 py-1 rounded-full border ${teamRole(u,t)==="팀장" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-white text-gray-500 border-gray-200"}`}>
+                          {teamRole(u, t) || "팀원"}
+                        </button>
+                        <button onClick={() => removeMember(t, u.id)} className="text-gray-300 hover:text-red-500 p-1">
+                          <X size={14}/>
+                        </button>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
+
+              {/* 일괄 제외 실행 바 */}
+              {removeMode && (
+                <button onClick={() => { removeMembers(t, removeSelectedIds); setRemoveMode(false); setRemoveSelectedIds([]); }}
+                  disabled={removeSelectedIds.length === 0}
+                  className="mt-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40 disabled:bg-gray-300"
+                  style={{background: removeSelectedIds.length ? "#ef4444" : undefined}}>
+                  선택한 {removeSelectedIds.length}명 팀에서 제외
+                </button>
+              )}
             </div>
           </div>
 
-          {/* 직원 추가 폼 — 바텀시트 안(화면 아래쪽)이 아니라 중앙보다 살짝 위쪽에 별도 팝업으로 */}
+          {/* 직원 일괄 추가 폼 — 여러 명 체크 후 한 번에, 역할은 이번에 추가하는 사람 전체에 공통 적용 */}
           {addMemberIdx === memberOpenIdx && (
             <div className="fixed inset-0 z-40 flex items-center justify-center px-4 pb-32"
-              onClick={() => { setAddMemberIdx(null); setAddMemberEmpId(""); }}>
+              onClick={() => { setAddMemberIdx(null); setAddMemberEmpIds([]); }}>
               <div className="bg-white w-full max-w-xs rounded-2xl shadow-2xl p-4 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
                 <h4 className="font-bold text-gray-900 text-sm">{t}에 직원 추가</h4>
                 <div className="flex flex-col gap-1">
-                  <label className="text-[11px] text-gray-400 font-bold">직원</label>
-                  <select value={addMemberEmpId} onChange={e=>setAddMemberEmpId(e.target.value)}
-                    className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none bg-white">
-                    <option value="">직원 선택</option>
-                    {nonMembers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                  </select>
+                  <label className="text-[11px] text-gray-400 font-bold">직원 (여러 명 선택 가능)</label>
+                  <div className="flex flex-col gap-1 max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-1.5">
+                    {nonMembers.map(u => {
+                      const checked = addMemberEmpIds.includes(u.id);
+                      return (
+                        <button key={u.id} type="button" onClick={() => toggleAddSelect(u.id)}
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-sm transition-colors ${
+                            checked ? "bg-blue-50" : "hover:bg-gray-50"
+                          }`}>
+                          <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center ${
+                            checked ? "bg-blue-500 border-blue-500" : "border-gray-300"
+                          }`}>
+                            {checked && <span className="text-white text-[9px]">✓</span>}
+                          </div>
+                          <span className={checked ? "font-bold text-blue-700" : "text-gray-700"}>{u.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-[11px] text-gray-400 font-bold">역할</label>
+                  <label className="text-[11px] text-gray-400 font-bold">역할 (선택한 전체에 적용)</label>
                   <div className="flex bg-gray-50 border border-gray-200 rounded-lg p-0.5">
                     {["팀장","팀원"].map(r => (
                       <button key={r} onClick={()=>setAddMemberRole(r)}
@@ -903,12 +1008,14 @@ function TeamTab() {
                   </div>
                 </div>
                 <div className="flex gap-2 pt-2 border-t border-gray-100">
-                  <button onClick={() => { setAddMemberIdx(null); setAddMemberEmpId(""); }}
+                  <button onClick={() => { setAddMemberIdx(null); setAddMemberEmpIds([]); }}
                     className="flex-1 py-2 rounded-lg text-xs font-bold text-gray-500 bg-gray-100">취소</button>
-                  <button onClick={() => { if(addMemberEmpId){ addMember(t, addMemberEmpId, addMemberRole); setAddMemberIdx(null); setAddMemberEmpId(""); } }}
-                    disabled={!addMemberEmpId}
+                  <button onClick={() => { if(addMemberEmpIds.length){ addMembers(t, addMemberEmpIds, addMemberRole); setAddMemberIdx(null); setAddMemberEmpIds([]); } }}
+                    disabled={addMemberEmpIds.length === 0}
                     className="flex-[2] py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
-                    style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>+ 팀에 추가</button>
+                    style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
+                    {addMemberEmpIds.length > 1 ? `${addMemberEmpIds.length}명 팀에 추가` : "+ 팀에 추가"}
+                  </button>
                 </div>
               </div>
             </div>

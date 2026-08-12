@@ -28,7 +28,7 @@ export const hasLeadershipSomewhere = (u) => getMemberships(u).some(m => m.role 
 export const teamsLabel = (u) => {
   if (isSuperAdmin(u)) return "최고관리자";
   const teams = myTeamNames(u);
-  return teams.length ? teams.join(" · ") : "미배정";
+  return teams.length ? teams.join(" · ") : "소속 없음";
 };
 // 대시보드 카드 등 "직급 등급" 개념이 필요한 곳(팀 구분 없이 리더급/일반급)에 쓰는 3단계 티어.
 // 관리팀/영업팀 소속이거나 어느 팀에서든 팀장이면 "팀장" 등급으로 취급.
