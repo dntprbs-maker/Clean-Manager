@@ -488,8 +488,16 @@ async function syncIcsForCal(companyId, calId, rawUrl) {
   const text = await res.text();
   const parsed = parseIcs(text).filter(ev => ev.icsUid); // UID 없는 항목은 재동기화 추적이 안 돼 건너뜀
 
-  const eventsRef = db.collection(`companies/${companyId}/events`);
+  // 구글의 "비공개 주소" 피드는 그 캘린더의 전체 기록(수년 전 것 포함)을 다 담고 있어서
+  // 그대로 다 가져오면 안 됨 — 지난 1개월 이전 일정은 제외. 단, "존재 확인"(newUidSet)은
+  // 날짜 필터 전 전체 목록으로 해야 한다 — 필터링된 목록만으로 판단하면 예전에 가져온
+  // 일정이 그냥 오래돼서 이번엔 toImport에서 빠졌을 뿐인데 "구글에서 지워졌다"고 오판해
+  // 매번 소프트 삭제해버리게 된다.
+  const cutoff = fmtDate(new Date(Date.now() - 30 * 864e5));
   const newUidSet = new Set(parsed.map(ev => ev.icsUid));
+  const toImport = parsed.filter(ev => ev.start >= cutoff);
+
+  const eventsRef = db.collection(`companies/${companyId}/events`);
   const prevSnap = await eventsRef
     .where("source", "==", "ics_import")
     .where("calId", "==", calId)
@@ -500,7 +508,7 @@ async function syncIcsForCal(companyId, calId, rawUrl) {
     d.ref.update({ status: "deleted", deletedAt, deletedBy: "ics_subscription" })
   ));
 
-  await Promise.all(parsed.map(ev => {
+  await Promise.all(toImport.map(ev => {
     const { icsUid, ...rest } = ev;
     const docId = icsUid;
     return eventsRef.doc(docId).set({
@@ -517,7 +525,7 @@ async function syncIcsForCal(companyId, calId, rawUrl) {
     }, { merge: true });
   }));
 
-  return { imported: parsed.length, removed: staleDocs.length };
+  return { imported: toImport.length, removed: staleDocs.length, skippedOld: parsed.length - toImport.length };
 }
 
 // 저장 직후 "지금 바로 동기화" 버튼용 — 결과를 그 자리에서 화면에 보여줄 수 있도록 동기 호출

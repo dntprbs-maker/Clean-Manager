@@ -47,8 +47,12 @@ export function ImportCalendarScreen() {
       if (!url) { setSubSyncing(false); return; } // URL만 지운 경우 동기화는 건너뜀
       const sync = httpsCallable(functions, "syncIcsSubscriptionNow");
       const res = await sync({ companyId, calId: subCal.id });
-      const { imported, removed } = res.data || {};
-      setSubResult(`${imported ?? 0}개 가져옴${removed ? `, ${removed}개는 구독 쪽에서 사라져 삭제목록으로 정리` : ""}`);
+      const { imported, removed, skippedOld } = res.data || {};
+      setSubResult(
+        `${imported ?? 0}개 가져옴` +
+        (removed ? `, ${removed}개는 구독 쪽에서 사라져 삭제목록으로 정리` : "") +
+        (skippedOld ? `, ${skippedOld}개는 지난 1개월보다 오래돼 건너뜀` : "")
+      );
     } catch (e) {
       setSubError(e?.message || "동기화 중 오류가 발생했습니다.");
     } finally {
@@ -398,6 +402,7 @@ export function ImportCalendarScreen() {
           <p className="text-xs text-gray-400 leading-relaxed -mt-2">
             구글 캘린더 설정 → 캘린더 공유 → <b>비공개 주소(iCal 형식)</b>의 URL을 붙여넣으면,
             이후엔 파일을 다시 받을 필요 없이 <b>6시간마다 자동으로</b> 최신 일정을 반영해요.
+            (지난 1개월보다 오래된 일정은 자동으로 건너뛰어요 — 예전 기록까지 전부 끌어오지 않도록)
           </p>
           <div className="flex gap-1.5 overflow-x-auto pb-1">
             {cals.map(cal => (
