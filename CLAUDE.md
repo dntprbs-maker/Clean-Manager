@@ -7,6 +7,8 @@
 
 청소팀 일정 · 근태 · 정산 관리 (master-project가 쓰는 MCP 도구의 실제 코드가 있는 곳)
 
+> `attendance/`는 화면·데이터가 완전히 다른 별개 프로젝트입니다 — 관련 안내는 `attendance/CLAUDE.md` 참고.
+
 ## 할 일
 
 > 할 일 목록은 `TODO.md`에서 관리합니다.
