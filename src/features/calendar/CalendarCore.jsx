@@ -2095,7 +2095,7 @@ export function EventModal() {
                   setAiLoading(true);
                   try {
                     const analyze = httpsCallable(functions, "analyzeConsultation");
-                    const result = await analyze({ text: pasteText, companyId });
+                    const result = await analyze({ text: pasteText, companyId, titleRule, typeKeywords });
                     const parsed = result.data || {};
                     setForm(p=>({
                       ...p,
@@ -2119,7 +2119,7 @@ export function EventModal() {
                     const toBase64 = f => new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(f); });
                     const base64 = await toBase64(imgFile);
                     const extract = httpsCallable(functions, "extractFromImage");
-                    const result = await extract({ image: base64, companyId });
+                    const result = await extract({ image: base64, companyId, titleRule, typeKeywords });
                     const parsed = result.data || {};
                     setForm(p=>({
                       ...p,

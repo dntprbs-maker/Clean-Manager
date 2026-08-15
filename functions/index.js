@@ -250,14 +250,43 @@ export const dailyScheduleDigest = onSchedule(
 // 카카오톡 상담 대화 / 메모지 사진에서 일정 정보(제목·날짜·시간·장소·연락처)를 추출
 const TODAY_HINT = () => new Date().toISOString().slice(0, 10);
 
-const EXTRACT_PROMPT = (context) => `너는 청소업체 일정 관리 앱의 비서야. 아래 ${context}에서 청소/방문 일정 정보를 뽑아 JSON으로만 답해.
+// 클라이언트의 정규식 추출(메모 모드, src/lib/eventTextParser.js)이 쓰는 제목 토큰 라벨을
+// 그대로 복제 — 두 추출 경로(정규식/AI)가 서로 다른 기준으로 제목을 지어내면 회사가
+// 설정해둔 제목 형식과 안 맞아 "부정확하다"는 느낌을 주므로, AI에게도 같은 조합 규칙을
+// 명시적으로 알려준다. (functions/lib/membership.js 등과 같은 이유로 중복 유지 — 클라이언트/
+// functions가 별도 빌드라 공유 모듈로 못 묶음. 토큰 목록을 고치면 두 파일 다 같이 고칠 것.)
+const TITLE_TOKEN_LABELS = {
+  time:         "시간대(오전/오후/종일)",
+  district:     "지역(구·동·로·길 등 지역명)",
+  area:         "평수/방 개수(예: 15평, 원룸, 방 3개)",
+  type:         "청소종류 — 아래 목록에 있는 단어 중 하나여야 함(다른 표현으로 바꾸지 말고 목록 그대로)",
+  contact_name: "고객 이름",
+  phone_last4:  "전화번호 끝 4자리",
+};
+
+// titleRule/typeKeywords는 회사별 설정값(기본값: ["time","district","area"]) — 이걸 안 주면
+// AI가 매번 다른 기준으로 제목을 지어내 회사가 원하는 형식과 어긋나기 쉽다.
+const titleGuide = (titleRule, typeKeywords) => {
+  const rule = (Array.isArray(titleRule) && titleRule.length) ? titleRule : ["time", "district", "area"];
+  const parts = rule.map(t => TITLE_TOKEN_LABELS[t] || t).join(" → ");
+  const typesLine = Array.isArray(typeKeywords) && typeKeywords.length
+    ? `"청소종류" 토큰에 쓸 수 있는 값은 반드시 다음 중 하나: ${typeKeywords.join(", ")}. 이 목록에 없는 종류면 그 토큰은 그냥 건너뛰어.`
+    : "";
+  return `제목(title)은 아래 순서로 정보를 이어 붙여 만들어(토큰 사이는 띄어쓰기 한 칸, "예:" 같은 라벨은 절대 넣지 마):
+${parts}
+원문에서 못 찾은 토큰은 건너뛰고 나머지만 이어 붙여. ${typesLine}
+결과는 "오후 은평구 원룸"처럼 짧은 나열형이어야 하고, 완전한 문장으로 쓰지 마.`;
+};
+
+const EXTRACT_PROMPT = (context, titleRule, typeKeywords) => `너는 청소업체 일정 관리 앱의 비서야. 아래 ${context}에서 청소/방문 일정 정보를 뽑아 JSON으로만 답해.
 사진/대화 안에는 실제 청소 일정과 무관한 내용(다른 잡담, 앱 사용법 문의, 링크 미리보기 카드, 웹사이트 이름/URL 등)이 섞여 있을 수 있어.
 그런 것들은 절대 제목이나 내용으로 쓰지 말고, 반드시 "주소/평수/날짜/연락처 등이 포함된 실제 청소·방문 일정 내용"만 찾아서 추출해.
 오늘 날짜는 ${TODAY_HINT()}이야. 연도가 명시되지 않은 날짜는 오늘 기준 가까운 미래로 추정해.
 시간이 "오전"/"오후"처럼 대략적으로만 언급되고 정확한 시각이 없으면: "오전"은 09:00, "오후"는 14:00을 시작 시각으로 기본 사용해.
+${titleGuide(titleRule, typeKeywords)}
 반드시 아래 스키마의 JSON 객체 하나만 출력하고, 정보가 없는 필드는 빈 문자열("")로 남겨.
 {
-  "title": "일정 제목 (예: 역촌동 입주청소 25평)",
+  "title": "위 제목 조합 규칙을 따른 제목",
   "start": "YYYY-MM-DD",
   "end": "YYYY-MM-DD (모르면 start와 동일)",
   "startTime": "HH:MM (24시간제, 정확한 시각이 없고 오전/오후만 언급되면 위 기본값 규칙 적용, 그마저 없으면 빈 문자열)",
@@ -301,6 +330,8 @@ export const analyzeConsultation = onCall(
   async (request) => {
     const text = (request.data?.text || "").trim();
     const companyId = request.data?.companyId;
+    const titleRule = request.data?.titleRule;
+    const typeKeywords = request.data?.typeKeywords;
     if (!text) throw new HttpsError("invalid-argument", "분석할 텍스트가 없습니다.");
 
     if (companyId) {
@@ -313,7 +344,7 @@ export const analyzeConsultation = onCall(
     try {
       const raw = await callOpenRouter(
         OPENROUTER_API_KEY.value(),
-        EXTRACT_PROMPT("고객 상담 대화") + `\n\n---\n${text}\n---`
+        EXTRACT_PROMPT("고객 상담 대화", titleRule, typeKeywords) + `\n\n---\n${text}\n---`
       );
       return parseJsonFromModel(raw);
     } catch (e) {
@@ -330,6 +361,8 @@ export const extractFromImage = onCall(
   async (request) => {
     const image = request.data?.image;
     const companyId = request.data?.companyId;
+    const titleRule = request.data?.titleRule;
+    const typeKeywords = request.data?.typeKeywords;
     if (!image) throw new HttpsError("invalid-argument", "이미지가 없습니다.");
     if (!companyId) throw new HttpsError("invalid-argument", "companyId가 필요합니다.");
 
@@ -340,7 +373,7 @@ export const extractFromImage = onCall(
 
     try {
       const raw = await callOpenRouter(OPENROUTER_API_KEY.value(), [
-        { type: "text", text: EXTRACT_PROMPT("사진 속 텍스트(메모/캡처 이미지)") },
+        { type: "text", text: EXTRACT_PROMPT("사진 속 텍스트(메모/캡처 이미지)", titleRule, typeKeywords) },
         { type: "image_url", image_url: { url: `data:image/jpeg;base64,${image}` } },
       ]);
       return parseJsonFromModel(raw);
