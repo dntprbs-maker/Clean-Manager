@@ -1793,8 +1793,35 @@ export function DateTimePicker({ form, set, errs, lockRepeat }) {
   );
 }
 
+// 모바일 소프트 키보드가 화면 아래를 덮을 때, 그 위로 밀려 올라오는 높이(px)를 추적.
+// 이 앱 전체가 100svh(레이아웃 뷰포트 고정값 — 주소창 나타남/사라짐으로 화면이 흔들리던
+// 버그를 막으려고 일부러 이렇게 고정해둔 값)를 쓰기 때문에, 키보드가 올라와도 레이아웃
+// 높이 자체는 안 줄어들고 키보드가 화면 아래쪽을 그냥 덮어버린다 — 그 결과 맨 아래
+// 고정 버튼이 키보드 뒤에 숨는 문제가 생김. visualViewport(실제 보이는 영역)와
+// window.innerHeight(레이아웃 높이) 차이를 재서, 그 차이만큼 버튼을 위로 밀어 보정한다.
+function useKeyboardInset() {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => {
+      const gap = window.innerHeight - vv.height - vv.offsetTop;
+      setInset(Math.max(0, Math.round(gap)));
+    };
+    vv.addEventListener("resize", onResize);
+    vv.addEventListener("scroll", onResize);
+    onResize();
+    return () => {
+      vv.removeEventListener("resize", onResize);
+      vv.removeEventListener("scroll", onResize);
+    };
+  }, []);
+  return inset;
+}
+
 export function EventModal() {
   const { modal, closeModal, openCopyModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, teams, titleRule, typeKeywords, companyId, reports, companyDoc, currentUser, setFieldReportEv, eventModalGuardRef } = useC();
+  const keyboardInset = useKeyboardInset();
   const { open, date, editId, scope, instanceEv, copyFrom } = modal;
   const isCopy = !editId && !!copyFrom;
   // 반복일정의 "이 일정만/이후 전체" 수정은 클릭한 회차(instanceEv)의 값으로 폼을 채운다.
@@ -2050,8 +2077,9 @@ export function EventModal() {
             )}
           </div>
 
-          {/* 하단 버튼 — 모달 내부 고정 */}
-          <div className="shrink-0 px-4 py-3 bg-white border-t border-gray-100">
+          {/* 하단 버튼 — 모달 내부 고정. 키보드가 떠 있으면 그만큼 위로 밀어 항상 보이게 함 */}
+          <div className="shrink-0 px-4 py-3 bg-white border-t border-gray-100"
+            style={{ transform: keyboardInset ? `translateY(-${keyboardInset}px)` : undefined }}>
             <button
               disabled={aiLoading}
               onClick={async ()=>{
@@ -2124,10 +2152,7 @@ export function EventModal() {
       {/* 헤더 + 담당팀 드롭다운 */}
       <div className="flex flex-col px-4 pt-3 pb-0 border-b border-gray-100">
         <div className="flex items-center justify-between mb-1">
-          {/* 복사본은 되돌아갈 입력방법 선택 단계가 없으므로 수정과 같이 X(닫기)로 둔다 */}
-          <button onClick={()=>(editId || isCopy) ? tryClose() : setStep("paste")}>
-            {(editId || isCopy) ? <X size={22} className="text-gray-600"/> : <ChevronLeft size={22} className="text-gray-600"/>}
-          </button>
+          <button onClick={tryClose}><X size={22} className="text-gray-600"/></button>
           <h2 className="font-bold text-base">{editId ? "일정 수정" : isCopy ? "일정 복사" : "일정 추가"}</h2>
           <div className="flex items-center gap-3">
             {/* 복사 — 지금 보고 있는 일정 내용을 그대로 담은 새 일정 폼으로 갈아탄다.
@@ -2149,6 +2174,39 @@ export function EventModal() {
             </button>
           </div>
         </div>
+
+        {/* 신규 등록일 때만: 입력방법 탭을 선택 화면과 똑같은 모양으로 여기에도 노출.
+            작은 글자 링크보다 한눈에 훨씬 잘 보여서, "직접 입력"이 기억돼 곧장 이 화면으로
+            건너뛴 사람도 메모/대화/사진으로 쉽게 바꿀 수 있다. */}
+        {!editId && !isCopy && (
+          <div className="flex border-b border-gray-100 -mx-4 px-4">
+            {[
+              { key:"memo",  icon:"📋", label:"메모"  },
+              ...(companyDoc?.aiTextExtraction !== false ? [{ key:"chat", icon:"💬", label:"대화"  }] : []),
+              ...(companyDoc?.aiImageExtraction ? [{ key:"image", icon:"📷", label:"사진"  }] : []),
+              { key:"direct",icon:"✏️", label:"직접"  },
+            ].map(tab=>{
+              const active = inputMode === tab.key;
+              return (
+                <button key={tab.key}
+                  onClick={()=>{
+                    if (tab.key === "direct") { setInputMode("direct"); return; }
+                    setInputMode(tab.key);
+                    setStep("paste");
+                  }}
+                  className="flex-1 flex flex-col items-center py-2 gap-0.5 relative transition-colors"
+                  style={{color: active ? "#1a56db" : "#9ca3af"}}>
+                  <span className="text-base leading-none">{tab.icon}</span>
+                  <span className="text-[11px] font-semibold">{tab.label}</span>
+                  {active && (
+                    <span className="absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-blue-600"/>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* 담당팀 드롭다운 트리거 */}
         <div className="relative pb-2 flex items-center gap-1">
           <button onClick={()=>setCalDropOpen(o=>!o)}
