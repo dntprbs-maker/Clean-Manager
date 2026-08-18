@@ -1674,17 +1674,26 @@ function NativeDateTimeField({ type, value, onChange, ariaLabel, min, step, disp
 
 export function DateTimePicker({ form, set, errs, lockRepeat }) {
   const [repeatOpen, setRepeatOpen] = useState(false);
-  // 사용자가 종료 시간을 직접(피커로) 바꾼 적이 있으면, 이후 시작 시간을 바꿔도
-  // 종료 시간을 더 이상 자동으로 밀지 않는다 — 애써 골라둔 값을 덮어쓰지 않기 위함.
+  // 사용자가 종료 날짜/시간을 직접(피커로) 바꾼 적이 있으면, 이후 시작 날짜/시간을 바꿔도
+  // 더 이상 자동으로 같이 밀지 않는다 — 애써 골라둔 값을 덮어쓰지 않기 위함.
   // 모달을 새로 열 때마다(= 이 컴포넌트가 새로 마운트될 때마다) false로 리셋된다.
+  const endDateTouchedRef = useRef(false);
   const endTimeTouchedRef = useRef(false);
 
   const handleStartDateChange = (newStart) => {
+    // 기존 시작~종료 날짜 간격(일)을 시간과 동일하게 유지한 채로 종료 날짜도 같이 옮긴다.
+    // 사용자가 종료 날짜를 직접 고른 적이 있으면(endDateTouched) 자동으로 안 따라가고,
+    // 그 경우에도 종료가 시작보다 앞서게만 안 되도록 최소한으로 보정한다.
+    const spanDays = diff(form.start, form.end); // 0 이상 — validate()가 end<start를 막아둠
     set("start", newStart);
-    // 종료 날짜는 시작 날짜보다 앞설 수 없음 — 앞서게 되면 시작과 같은 날로 맞춤
-    if (newStart > form.end) set("end", newStart);
+    if (endDateTouchedRef.current) {
+      if (newStart > form.end) set("end", newStart);
+      return;
+    }
+    set("end", spanDays > 0 ? add(newStart, spanDays) : newStart);
   };
   const handleEndDateChange = (newEnd) => {
+    endDateTouchedRef.current = true;
     // <input min>이 1차로 막아주지만, 혹시 모를 경우를 대비한 안전망
     set("end", newEnd < form.start ? form.start : newEnd);
   };
