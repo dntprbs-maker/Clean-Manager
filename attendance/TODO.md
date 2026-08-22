@@ -18,8 +18,8 @@
 
 ## ✅ 완료 로그
 
-- [x] UI 전면 리디자인 — webdesigner 에이전트로 화면별 HTML 시안을 뽑아 실제 컴포넌트에 반영. 용역자 화면 "삼선메뉴+팝업" → **하단 탭바**(홈/내 작업내역/정산내역/로그아웃) 구조 전환, 관리자 6개 탭 화면 개편, 로직 훅 분리(`useWorkLog.js`, `useMyWorkHistory.js`), 개발용 빠른 로그인(`devMode.js` — `npm run dev`+`?dev=1`일 때만 동작, 운영 빌드 강제 비활성), `lucide-react` 추가. 변경 규모 20파일 +885/-344 — 완료: 2026-08-07(작업은 07-27~28), 커밋 790a406
-- [x] 출퇴근 툴 커밋 + main 머지 — 그동안 미커밋으로 쌓여있던 전체를 커밋. firebase.json 멀티사이트(main/attendance) 전환 여파로 GitHub Actions 자동배포가 실패하는 문제 발견 → 워크플로에 `target: main` 지정으로 수정 — 완료: 2026-07-20, 커밋 a8cd510/c871aed
+- [x] 2026-08-07(작업은 07-27~28) — UI 전면 리디자인 — webdesigner 에이전트로 화면별 HTML 시안을 뽑아 실제 컴포넌트에 반영. 용역자 화면 "삼선메뉴+팝업" → **하단 탭바**(홈/내 작업내역/정산내역/로그아웃) 구조 전환, 관리자 6개 탭 화면 개편, 로직 훅 분리(`useWorkLog.js`, `useMyWorkHistory.js`), 개발용 빠른 로그인(`devMode.js` — `npm run dev`+`?dev=1`일 때만 동작, 운영 빌드 강제 비활성), `lucide-react` 추가. 변경 규모 20파일 +885/-344 (커밋 790a406)
+- [x] 2026-07-20 — 출퇴근 툴 커밋 + main 머지 — 그동안 미커밋으로 쌓여있던 전체를 커밋. firebase.json 멀티사이트(main/attendance) 전환 여파로 GitHub Actions 자동배포가 실패하는 문제 발견 → 워크플로에 `target: main` 지정으로 수정 (커밋 a8cd510/c871aed)
 
 ---
 
