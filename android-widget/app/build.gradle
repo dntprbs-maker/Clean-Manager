@@ -3,11 +3,31 @@ plugins { id 'com.android.application' }
 android {
     namespace 'com.cleanmanager.widget'
     compileSdk 35
+
+    signingConfigs {
+        release {
+            def ksPath = System.getenv('CM_WIDGET_KEYSTORE_PATH')
+            if (ksPath) {
+                storeFile file(ksPath)
+                storePassword System.getenv('CM_WIDGET_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('CM_WIDGET_KEY_ALIAS')
+                keyPassword System.getenv('CM_WIDGET_KEY_PASSWORD')
+            }
+        }
+    }
+
     defaultConfig {
         applicationId 'com.cleanmanager.widget'
         minSdk 26
         targetSdk 35
-        versionCode 7
-        versionName '1.5.1'
+        versionCode 8
+        versionName '1.6.0'
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+        }
     }
 }
