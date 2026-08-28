@@ -55,44 +55,41 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
             r.setViewVisibility(R.id.loading, View.GONE);
             r.setTextViewText(R.id.year_title, base.plusDays(3).getYear() + "년");
             r.setTextViewText(R.id.week_title,
-                    base.format(DateTimeFormatter.ofPattern("M월 d일 (일)")) + " ~ " +
-                    base.plusDays(6).format(DateTimeFormatter.ofPattern("M월 d일 (토)")));
+                    base.format(DateTimeFormatter.ofPattern("M월 d일")) + "  ~  " +
+                    base.plusDays(6).format(DateTimeFormatter.ofPattern("M월 d일")));
             r.removeAllViews(R.id.week_row1);
             r.removeAllViews(R.id.week_row2);
 
             String[] ko = {"일","월","화","수","목","금","토"};
-            for (int k = 0; k < 4; k++) r.addView(R.id.week_row1, dayCell(c,id,base.plusDays(k),ko[k],evs,k));
+            for (int k = 0; k < 4; k++) r.addView(R.id.week_row1, dayCell(c,base.plusDays(k),ko[k],evs));
             r.addView(R.id.week_row2, miniCalendar(c,base));
-            for (int k = 4; k < 7; k++) r.addView(R.id.week_row2, dayCell(c,id,base.plusDays(k),ko[k],evs,k));
+            for (int k = 4; k < 7; k++) r.addView(R.id.week_row2, dayCell(c,base.plusDays(k),ko[k],evs));
             m.updateAppWidget(id, r);
         }).start();
     }
 
-    private static RemoteViews dayCell(Context c,int id,LocalDate d,String dayName,List<ScheduleRepository.Ev> evs,int k){
+    private static RemoteViews dayCell(Context c, LocalDate d, String dayName, List<ScheduleRepository.Ev> evs){
         RemoteViews cell = new RemoteViews(c.getPackageName(), R.layout.week_cell);
         cell.setTextViewText(R.id.cell_date, dayName + "  " + d.format(DateTimeFormatter.ofPattern("M/d")));
         if (d.getDayOfWeek()==DayOfWeek.SUNDAY) cell.setTextColor(R.id.cell_date, Color.rgb(220,38,38));
         if (d.getDayOfWeek()==DayOfWeek.SATURDAY) cell.setTextColor(R.id.cell_date, Color.rgb(37,99,235));
         List<ScheduleRepository.Ev> day = day(evs, d);
-        for (int q = 0; q < day.size(); q++) {
+        for (ScheduleRepository.Ev e : day) {
             RemoteViews chip = new RemoteViews(c.getPackageName(), R.layout.event_chip);
-            ScheduleRepository.Ev e = day.get(q);
             String text = (e.time == null || e.time.isEmpty() ? "" : e.time + " ") + e.title;
             chip.setTextViewText(R.id.chip, text);
             int color=parseColor(e.color,Color.rgb(156,163,175));
             chip.setTextColor(R.id.chip,color);
             chip.setInt(R.id.chip,"setBackgroundColor",tint(color));
-            chip.setOnClickPendingIntent(R.id.chip, openDate(c, id * 100 + k * 10 + q, d));
             cell.addView(R.id.cell_events, chip);
         }
         if (day.isEmpty()) {
             RemoteViews empty = new RemoteViews(c.getPackageName(), R.layout.event_chip);
             empty.setTextViewText(R.id.chip, "일정 없음");
-            empty.setTextColor(R.id.chip, Color.rgb(148,163,184));
+            empty.setTextColor(R.id.chip, Color.rgb(156,163,175));
             empty.setInt(R.id.chip, "setBackgroundColor", Color.TRANSPARENT);
             cell.addView(R.id.cell_events, empty);
         }
-        cell.setOnClickPendingIntent(R.id.cell, openDate(c, id * 10 + k, d));
         return cell;
     }
 
@@ -109,7 +106,7 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
             RemoteViews cell=new RemoteViews(c.getPackageName(),R.layout.week_mini_date);
             cell.setTextViewText(R.id.mini_date,String.valueOf(d.getDayOfMonth()));
             boolean inMonth=d.getMonthValue()==ym.getMonthValue();
-            int text=!inMonth?Color.rgb(180,184,190):d.getDayOfWeek()==DayOfWeek.SUNDAY?Color.rgb(220,38,38):d.getDayOfWeek()==DayOfWeek.SATURDAY?Color.rgb(37,99,235):Color.rgb(48,49,52);
+            int text=!inMonth?Color.rgb(190,194,200):d.getDayOfWeek()==DayOfWeek.SUNDAY?Color.rgb(220,38,38):d.getDayOfWeek()==DayOfWeek.SATURDAY?Color.rgb(37,99,235):Color.rgb(55,65,81);
             cell.setTextColor(R.id.mini_date,text);
             if(!d.isBefore(selectedWeek)&&!d.isAfter(selectedEnd)) cell.setInt(R.id.mini_date,"setBackgroundResource",R.drawable.mini_week_selected);
             mini.addView(rows[n/7],cell);
@@ -131,11 +128,6 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
         i.setAction(action);
         i.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id);
         return PendingIntent.getBroadcast(c, req, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-    }
-
-    private static PendingIntent openDate(Context c, int req, LocalDate d) {
-        Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(WidgetUtil.WEB + "?widgetDate=" + d));
-        return PendingIntent.getActivity(c, req, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     private static int parseColor(String s,int def){try{return Color.parseColor(s);}catch(Exception e){return def;}}
