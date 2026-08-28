@@ -20,36 +20,45 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
-      - name: Restore stable debug signing key
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: clean-manager-widget-debug-keystore-v1
-      - name: Ensure debug signing key exists
+
+      - name: Verify release signing secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.CM_WIDGET_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.CM_WIDGET_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.CM_WIDGET_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.CM_WIDGET_KEY_PASSWORD }}
         run: |
-          mkdir -p ~/.android
-          if [ ! -f ~/.android/debug.keystore ]; then
-            keytool -genkeypair -v \
-              -keystore ~/.android/debug.keystore \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
-      - name: Build APK
-        run: gradle -p android-widget assembleDebug
+          test -n "$KEYSTORE_B64" || (echo 'Missing CM_WIDGET_KEYSTORE_BASE64' && exit 1)
+          test -n "$STORE_PASS" || (echo 'Missing CM_WIDGET_KEYSTORE_PASSWORD' && exit 1)
+          test -n "$KEY_ALIAS" || (echo 'Missing CM_WIDGET_KEY_ALIAS' && exit 1)
+          test -n "$KEY_PASS" || (echo 'Missing CM_WIDGET_KEY_PASSWORD' && exit 1)
+
+      - name: Restore fixed release keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.CM_WIDGET_KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/cm-signing"
+          echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/cm-signing/clean-manager-widget-release.jks"
+
+      - name: Build fixed-signed release APK
+        env:
+          CM_WIDGET_KEYSTORE_PATH: ${{ runner.temp }}/cm-signing/clean-manager-widget-release.jks
+          CM_WIDGET_KEYSTORE_PASSWORD: ${{ secrets.CM_WIDGET_KEYSTORE_PASSWORD }}
+          CM_WIDGET_KEY_ALIAS: ${{ secrets.CM_WIDGET_KEY_ALIAS }}
+          CM_WIDGET_KEY_PASSWORD: ${{ secrets.CM_WIDGET_KEY_PASSWORD }}
+        run: gradle -p android-widget assembleRelease
+
       - name: Friendly APK name
-        run: cp android-widget/app/build/outputs/apk/debug/app-debug.apk clean-manager-widget.apk
+        run: cp android-widget/app/build/outputs/apk/release/app-release.apk clean-manager-widget.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: clean-manager-widget-apk
           path: clean-manager-widget.apk
+
       - name: Publish latest APK
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete clean-manager-widget-latest --cleanup-tag -y || true
-          gh release create clean-manager-widget-latest clean-manager-widget.apk --title 'Clean Manager Widget APK' --notes '안정적인 서명을 사용하는 업데이트 가능 빌드'
+          gh release create clean-manager-widget-latest clean-manager-widget.apk --title 'Clean Manager Widget APK' --notes '1.6.0부터 동일한 고정 release 서명키를 사용합니다. 이후 버전은 삭제 없이 업데이트 설치할 수 있습니다.'
