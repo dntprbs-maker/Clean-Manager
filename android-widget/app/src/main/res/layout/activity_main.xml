@@ -1,1 +1,15 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="match_parent"><TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="10dp" android:text="클린메니저 로그인 후 위젯이 자동 연결됩니다." android:textSize="14sp"/><WebView android:id="@+id/web" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"/></LinearLayout>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <WebView
+        android:id="@+id/web"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <TextView
+        android:id="@+id/status"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
+</FrameLayout>
