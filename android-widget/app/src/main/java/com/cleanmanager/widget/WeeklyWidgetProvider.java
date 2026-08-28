@@ -5,7 +5,12 @@ import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.RectF;
+import android.graphics.Typeface;
 import android.view.View;
 import android.widget.RemoteViews;
 
@@ -62,23 +67,26 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
 
             String[] names = {"일", "월", "화", "수", "목", "금", "토"};
             for (int k = 0; k < 4; k++) {
-                root.addView(R.id.week_row1, dayCell(c, start.plusDays(k), names[k], events));
+                root.addView(R.id.week_row1, dayCell(c, id, start.plusDays(k), names[k], events));
             }
 
-            // Keep the proven 8 x week_cell structure. The lower-left cell only changes its text content.
             root.addView(R.id.week_row2, miniMonthCell(c, start));
             for (int k = 4; k < 7; k++) {
-                root.addView(R.id.week_row2, dayCell(c, start.plusDays(k), names[k], events));
+                root.addView(R.id.week_row2, dayCell(c, id, start.plusDays(k), names[k], events));
             }
             m.updateAppWidget(id, root);
         }).start();
     }
 
-    private static RemoteViews dayCell(Context c, LocalDate date, String dayName, List<ScheduleRepository.Ev> events) {
+    private static RemoteViews dayCell(Context c, int widgetId, LocalDate date, String dayName, List<ScheduleRepository.Ev> events) {
         RemoteViews cell = new RemoteViews(c.getPackageName(), R.layout.week_cell);
         cell.setTextViewText(R.id.cell_date, dayName + "  " + date.format(DateTimeFormatter.ofPattern("M/d")));
         if (date.getDayOfWeek() == DayOfWeek.SUNDAY) cell.setTextColor(R.id.cell_date, Color.rgb(220, 38, 38));
         if (date.getDayOfWeek() == DayOfWeek.SATURDAY) cell.setTextColor(R.id.cell_date, Color.rgb(37, 99, 235));
+
+        PendingIntent open = openDate(c, widgetId, date);
+        cell.setOnClickPendingIntent(R.id.cell_date, open);
+        cell.setOnClickPendingIntent(R.id.cell, open);
 
         List<ScheduleRepository.Ev> dayEvents = day(events, date);
         for (ScheduleRepository.Ev e : dayEvents) {
@@ -104,31 +112,73 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
         YearMonth month = YearMonth.from(selectedWeekStart.plusDays(3));
         cell.setTextViewText(R.id.cell_date, month.getMonthValue() + "월");
         cell.setTextColor(R.id.cell_date, Color.rgb(22, 101, 52));
+        cell.setViewVisibility(R.id.cell_events, View.GONE);
+        cell.setViewVisibility(R.id.cell_image, View.VISIBLE);
+        cell.setImageViewBitmap(R.id.cell_image, drawMiniMonth(month, selectedWeekStart));
+        return cell;
+    }
+
+    private static Bitmap drawMiniMonth(YearMonth month, LocalDate selectedWeekStart) {
+        final int width = 320;
+        final int height = 230;
+        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        canvas.drawColor(Color.WHITE);
+
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        paint.setTextSize(22f);
+
+        float colW = width / 7f;
+        float headerY = 27f;
+        String[] week = {"일", "월", "화", "수", "목", "금", "토"};
+        for (int col = 0; col < 7; col++) {
+            paint.setColor(col == 0 ? Color.rgb(220, 38, 38) : col == 6 ? Color.rgb(37, 99, 235) : Color.rgb(75, 85, 99));
+            canvas.drawText(week[col], colW * (col + 0.5f), headerY, paint);
+        }
 
         LocalDate first = month.atDay(1);
         LocalDate gridStart = first.minusDays(first.getDayOfWeek().getValue() % 7);
         int selectedRow = (int) (ChronoUnit.DAYS.between(gridStart, selectedWeekStart) / 7);
+        float gridTop = 42f;
+        float rowH = (height - gridTop - 6f) / 6f;
 
-        addMiniLine(c, cell, "일 월 화 수 목 금 토", false);
-        for (int row = 0; row < 6; row++) {
-            StringBuilder line = new StringBuilder();
-            for (int col = 0; col < 7; col++) {
-                LocalDate d = gridStart.plusDays(row * 7L + col);
-                if (col > 0) line.append(' ');
-                if (d.getDayOfMonth() < 10) line.append(' ');
-                line.append(d.getDayOfMonth());
-            }
-            addMiniLine(c, cell, line.toString(), row == selectedRow);
+        if (selectedRow >= 0 && selectedRow < 6) {
+            paint.setColor(Color.rgb(220, 237, 216));
+            float top = gridTop + selectedRow * rowH + 2f;
+            canvas.drawRoundRect(new RectF(4f, top, width - 4f, top + rowH - 4f), 12f, 12f, paint);
         }
-        return cell;
+
+        paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.NORMAL));
+        paint.setTextSize(21f);
+        for (int row = 0; row < 6; row++) {
+            float centerY = gridTop + row * rowH + rowH * 0.67f;
+            for (int col = 0; col < 7; col++) {
+                LocalDate date = gridStart.plusDays(row * 7L + col);
+                boolean currentMonth = date.getMonthValue() == month.getMonthValue();
+                if (!currentMonth) {
+                    paint.setColor(Color.rgb(156, 163, 175));
+                } else if (col == 0) {
+                    paint.setColor(Color.rgb(220, 38, 38));
+                } else if (col == 6) {
+                    paint.setColor(Color.rgb(37, 99, 235));
+                } else {
+                    paint.setColor(Color.rgb(55, 65, 81));
+                }
+                canvas.drawText(String.valueOf(date.getDayOfMonth()), colW * (col + 0.5f), centerY, paint);
+            }
+        }
+        return bitmap;
     }
 
-    private static void addMiniLine(Context c, RemoteViews cell, String text, boolean selected) {
-        RemoteViews line = new RemoteViews(c.getPackageName(), R.layout.event_chip);
-        line.setTextViewText(R.id.chip, text);
-        line.setTextColor(R.id.chip, Color.rgb(55, 65, 81));
-        line.setInt(R.id.chip, "setBackgroundColor", selected ? Color.rgb(220, 237, 216) : Color.TRANSPARENT);
-        cell.addView(R.id.cell_events, line);
+    private static PendingIntent openDate(Context c, int widgetId, LocalDate date) {
+        Intent i = new Intent(c, MainActivity.class);
+        i.setAction("cm.open.date." + date);
+        i.putExtra("widgetDate", date.toString());
+        i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        int req = ((widgetId * 997) ^ date.toString().hashCode()) & 0x7fffffff;
+        return PendingIntent.getActivity(c, req, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     private static RemoteViews base(Context c, int id) {
