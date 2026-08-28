@@ -458,11 +458,20 @@ export function Provider({ children, loginUser, onLogout }) {
   // copyFrom: 기존 일정을 복사해 새 일정으로 등록할 때의 원본 일정.
   // editId가 없으므로 저장은 addEvent(신규)로 흘러가고, 폼 초기값만 원본에서 가져온다.
   const [modal,setModal]       = useState({open:false,date:null,editId:null,scope:"all",instanceEv:null,copyFrom:null});
-  const [current,setCurrent]   = useState(() => {
-    const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1);
-  });
-  const [selDate,setSelDate]   = useState(() => fmt(new Date()));
+  const widgetDate = (() => {
+  try {
+    const raw = new URLSearchParams(window.location.search).get("widgetDate");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw || "")) return null;
+    const d = new Date(raw + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return null;
+    return { raw, d };
+  } catch { return null; }
+})();
+const [current,setCurrent]   = useState(() => {
+  const d = widgetDate?.d || new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+});
+const [selDate,setSelDate]   = useState(() => widgetDate?.raw || fmt(new Date()));
   const [detEv,setDetEv]       = useState(null);
   const [fieldReportEv, setFieldReportEv] = useState(null);
   const [drawer,setDrawer]     = useState(false);
