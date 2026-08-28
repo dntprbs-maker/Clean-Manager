@@ -21,7 +21,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />
 
-    <View
+    <TextView
+        android:text=""
         android:background="#E5E7EB"
         android:layout_width="match_parent"
         android:layout_height="1dp" />
