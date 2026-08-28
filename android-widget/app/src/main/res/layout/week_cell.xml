@@ -27,6 +27,15 @@
         android:layout_width="match_parent"
         android:layout_height="1dp" />
 
+    <ImageView
+        android:id="@+id/cell_image"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:scaleType="fitCenter"
+        android:visibility="gone"
+        android:contentDescription="미니 월달력" />
+
     <LinearLayout
         android:id="@+id/cell_events"
         android:orientation="vertical"
