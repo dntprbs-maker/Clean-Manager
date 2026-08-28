@@ -1,1 +1,67 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:padding="8dp" android:background="@drawable/widget_bg" android:layout_width="match_parent" android:layout_height="match_parent"><LinearLayout android:orientation="horizontal" android:gravity="center_vertical" android:layout_width="match_parent" android:layout_height="36dp"><TextView android:id="@+id/prev" android:text="‹ 지난주" android:textStyle="bold" android:textSize="12sp" android:gravity="center" android:background="@drawable/nav_button" android:layout_width="78dp" android:layout_height="32dp"/><TextView android:text="클린메니저 · 주간" android:textStyle="bold" android:textSize="14sp" android:gravity="center" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent"/><TextView android:id="@+id/next" android:text="다음주 ›" android:textStyle="bold" android:textSize="12sp" android:gravity="center" android:background="@drawable/nav_button" android:layout_width="78dp" android:layout_height="32dp"/></LinearLayout><StackView android:id="@+id/stack" android:loopViews="false" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"/><TextView android:id="@+id/open_app" android:text="날짜/일정 터치 → 클린메니저" android:textSize="10sp" android:textColor="#777777" android:gravity="end" android:paddingTop="4dp" android:layout_width="match_parent" android:layout_height="wrap_content"/></LinearLayout>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:padding="8dp"
+    android:background="@drawable/widget_bg"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_width="match_parent"
+        android:layout_height="38dp">
+
+        <TextView
+            android:id="@+id/prev"
+            android:text="‹ 지난주"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:background="@drawable/nav_button"
+            android:layout_width="78dp"
+            android:layout_height="32dp" />
+
+        <TextView
+            android:id="@+id/week_title"
+            android:text="이번 주"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:gravity="center"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="match_parent" />
+
+        <TextView
+            android:id="@+id/next"
+            android:text="다음주 ›"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:background="@drawable/nav_button"
+            android:layout_width="78dp"
+            android:layout_height="32dp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/loading"
+        android:text="일정 불러오는 중…"
+        android:textSize="11sp"
+        android:textColor="#777777"
+        android:gravity="center"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+    <LinearLayout
+        android:id="@+id/week_row1"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <LinearLayout
+        android:id="@+id/week_row2"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+</LinearLayout>
