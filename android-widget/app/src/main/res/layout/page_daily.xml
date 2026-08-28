@@ -1,1 +1,1 @@
-x
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="match_parent"><TextView android:id="@+id/title" android:textStyle="bold" android:textSize="18sp" android:paddingBottom="5dp" android:layout_width="match_parent" android:layout_height="wrap_content"/><TextView android:id="@+id/body" android:textSize="13sp" android:maxLines="8" android:layout_width="match_parent" android:layout_height="match_parent"/></LinearLayout>
