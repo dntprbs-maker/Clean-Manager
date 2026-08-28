@@ -14,24 +14,23 @@
         android:textSize="12sp"
         android:textColor="#16784B"
         android:gravity="center"
-        android:paddingBottom="3dp"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content" />
+        android:layout_height="20dp" />
 
     <TextView
-        android:text="일   월   화   수   목   금   토"
+        android:text="일  월  화  수  목  금  토"
+        android:textStyle="bold"
         android:textSize="8sp"
         android:textColor="#6B7280"
         android:gravity="center"
         android:singleLine="true"
-        android:paddingBottom="2dp"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content" />
+        android:layout_height="18dp" />
 
-    <LinearLayout android:id="@+id/mini_row1" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
-    <LinearLayout android:id="@+id/mini_row2" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
-    <LinearLayout android:id="@+id/mini_row3" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
-    <LinearLayout android:id="@+id/mini_row4" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
-    <LinearLayout android:id="@+id/mini_row5" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
-    <LinearLayout android:id="@+id/mini_row6" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+    <TextView android:id="@+id/mini_row1" android:text="26 27 28 29 30 31  1" android:textSize="8sp" android:textColor="#6B7280" android:gravity="center" android:singleLine="true" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+    <TextView android:id="@+id/mini_row2" android:text=" 2  3  4  5  6  7  8" android:textSize="8sp" android:textColor="#374151" android:gravity="center" android:singleLine="true" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+    <TextView android:id="@+id/mini_row3" android:text=" 9 10 11 12 13 14 15" android:textSize="8sp" android:textColor="#374151" android:gravity="center" android:singleLine="true" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+    <TextView android:id="@+id/mini_row4" android:text="16 17 18 19 20 21 22" android:textSize="8sp" android:textColor="#374151" android:gravity="center" android:singleLine="true" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+    <TextView android:id="@+id/mini_row5" android:text="23 24 25 26 27 28 29" android:textSize="8sp" android:textColor="#374151" android:gravity="center" android:singleLine="true" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+    <TextView android:id="@+id/mini_row6" android:text="30 31  1  2  3  4  5" android:textSize="8sp" android:textColor="#6B7280" android:gravity="center" android:singleLine="true" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
 </LinearLayout>
