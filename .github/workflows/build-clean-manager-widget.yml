@@ -1,0 +1,36 @@
+name: Build Clean Manager Widgets
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'android-widget/**'
+      - '.github/workflows/build-clean-manager-widget.yml'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Build APK
+        run: gradle -p android-widget assembleDebug
+      - name: Friendly APK name
+        run: cp android-widget/app/build/outputs/apk/debug/app-debug.apk clean-manager-widget.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clean-manager-widget-apk
+          path: clean-manager-widget.apk
+      - name: Publish latest APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete clean-manager-widget-latest --cleanup-tag -y || true
+          gh release create clean-manager-widget-latest clean-manager-widget.apk --title 'Clean Manager Widget APK' --notes '일간·주간·월간 홈 화면 위젯 최신 빌드'

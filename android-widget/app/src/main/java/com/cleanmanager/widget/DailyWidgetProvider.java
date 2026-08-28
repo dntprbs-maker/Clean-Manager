@@ -1,0 +1,1 @@
+package com.cleanmanager.widget; import android.appwidget.*;import android.content.*; public class DailyWidgetProvider extends AppWidgetProvider{public void onUpdate(Context c,AppWidgetManager m,int[] ids){for(int id:ids)WidgetUtil.setup(c,m,id,R.layout.widget_daily,"daily");}}
