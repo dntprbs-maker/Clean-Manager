@@ -14,7 +14,6 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -23,7 +22,6 @@ import java.util.List;
 public class WeeklyWidgetProvider extends AppWidgetProvider {
     private static final String PREV = "cm.week.prev";
     private static final String NEXT = "cm.week.next";
-    private static final String SELECT = "cm.week.select";
     private static final String PREF = "cm_week_widget";
 
     @Override public void onUpdate(Context c, AppWidgetManager m, int[] ids) {
@@ -33,20 +31,11 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
     @Override public void onReceive(Context c, Intent i) {
         super.onReceive(c, i);
         String a = i.getAction();
-        if (!PREV.equals(a) && !NEXT.equals(a) && !SELECT.equals(a)) return;
+        if (!PREV.equals(a) && !NEXT.equals(a)) return;
         int id = i.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1);
         if (id < 0) return;
         int offset = c.getSharedPreferences(PREF, Context.MODE_PRIVATE).getInt("offset_" + id, 0);
-        if (SELECT.equals(a)) {
-            String ds = i.getStringExtra("date");
-            try {
-                LocalDate selected = LocalDate.parse(ds).with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY));
-                LocalDate current = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY));
-                offset = (int)(ChronoUnit.DAYS.between(current, selected) / 7);
-            } catch (Exception ignored) { return; }
-        } else {
-            offset += NEXT.equals(a) ? 1 : -1;
-        }
+        offset += NEXT.equals(a) ? 1 : -1;
         c.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putInt("offset_" + id, offset).apply();
         renderAsync(c, AppWidgetManager.getInstance(c), id);
     }
@@ -73,7 +62,7 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
 
             String[] ko = {"일","월","화","수","목","금","토"};
             for (int k = 0; k < 4; k++) r.addView(R.id.week_row1, dayCell(c,id,base.plusDays(k),ko[k],evs,k));
-            r.addView(R.id.week_row2, miniCalendar(c,id,base));
+            r.addView(R.id.week_row2, miniCalendar(c,base));
             for (int k = 4; k < 7; k++) r.addView(R.id.week_row2, dayCell(c,id,base.plusDays(k),ko[k],evs,k));
             m.updateAppWidget(id, r);
         }).start();
@@ -107,7 +96,7 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
         return cell;
     }
 
-    private static RemoteViews miniCalendar(Context c,int id,LocalDate selectedWeek){
+    private static RemoteViews miniCalendar(Context c,LocalDate selectedWeek){
         RemoteViews mini=new RemoteViews(c.getPackageName(),R.layout.week_mini_calendar);
         YearMonth ym=YearMonth.from(selectedWeek.plusDays(3));
         mini.setTextViewText(R.id.mini_month,ym.getMonthValue()+"월");
@@ -123,7 +112,6 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
             int text=!inMonth?Color.rgb(180,184,190):d.getDayOfWeek()==DayOfWeek.SUNDAY?Color.rgb(220,38,38):d.getDayOfWeek()==DayOfWeek.SATURDAY?Color.rgb(37,99,235):Color.rgb(48,49,52);
             cell.setTextColor(R.id.mini_date,text);
             if(!d.isBefore(selectedWeek)&&!d.isAfter(selectedEnd)) cell.setInt(R.id.mini_date,"setBackgroundResource",R.drawable.mini_week_selected);
-            cell.setOnClickPendingIntent(R.id.mini_date,selectWeek(c,id,50000+id*100+n,d));
             mini.addView(rows[n/7],cell);
         }
         return mini;
@@ -143,11 +131,6 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
         i.setAction(action);
         i.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id);
         return PendingIntent.getBroadcast(c, req, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-    }
-
-    private static PendingIntent selectWeek(Context c,int id,int req,LocalDate d){
-        Intent i=new Intent(c,WeeklyWidgetProvider.class);i.setAction(SELECT);i.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID,id);i.putExtra("date",d.toString());
-        return PendingIntent.getBroadcast(c,req,i,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
     }
 
     private static PendingIntent openDate(Context c, int req, LocalDate d) {
