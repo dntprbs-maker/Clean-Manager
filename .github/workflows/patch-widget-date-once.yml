@@ -22,11 +22,21 @@ jobs:
 
           p = Path('src/context/AppContext.jsx')
           s = p.read_text(encoding='utf-8')
-          old = '''  const [current,setCurrent]   = useState(() => {
-            const d = new Date();
-            return new Date(d.getFullYear(), d.getMonth(), 1);
-          });
-          const [selDate,setSelDate]   = useState(() => fmt(new Date()));'''
+
+          if 'const widgetDate = (() =>' in s:
+              print('Widget date support already present; no change needed.')
+              raise SystemExit(0)
+
+          start_marker = '  const [current,setCurrent]'
+          sel_marker = '  const [selDate,setSelDate]'
+          start = s.find(start_marker)
+          sel = s.find(sel_marker, start)
+          if start < 0 or sel < 0:
+              raise SystemExit('Expected AppContext date state block not found')
+          end = s.find('\n', sel)
+          if end < 0:
+              end = len(s)
+
           new = '''  const widgetDate = (() => {
             try {
               const raw = new URLSearchParams(window.location.search).get("widgetDate");
@@ -42,13 +52,7 @@ jobs:
           });
           const [selDate,setSelDate]   = useState(() => widgetDate?.raw || fmt(new Date()));'''
 
-          if old not in s:
-              if 'const widgetDate = (() =>' in s:
-                  print('Widget date support already present; no change needed.')
-                  raise SystemExit(0)
-              raise SystemExit('Expected AppContext initialization block not found')
-
-          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          p.write_text(s[:start] + new + s[end:], encoding='utf-8')
           PY
 
       - name: Commit patch
