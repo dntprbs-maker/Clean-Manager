@@ -112,9 +112,19 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
 
     private static RemoteViews dayCell(Context c, int widgetId, LocalDate date, String dayName, List<ScheduleRepository.Ev> events) {
         RemoteViews cell = new RemoteViews(c.getPackageName(), R.layout.week_cell);
-        cell.setTextViewText(R.id.cell_date, dayName + "  " + date.format(DateTimeFormatter.ofPattern("M/d")));
-        if (date.getDayOfWeek() == DayOfWeek.SUNDAY) cell.setTextColor(R.id.cell_date, Color.rgb(220, 38, 38));
-        if (date.getDayOfWeek() == DayOfWeek.SATURDAY) cell.setTextColor(R.id.cell_date, Color.rgb(37, 99, 235));
+        cell.setTextViewText(R.id.cell_date,
+                date.format(DateTimeFormatter.ofPattern("M/d")) + "(" + dayName + ")");
+
+        boolean isToday = date.equals(LocalDate.now());
+        if (isToday) {
+            // 오늘은 날짜 머리글 자체를 진한 초록색으로 칠해 한눈에 보이게 한다.
+            cell.setInt(R.id.cell_date, "setBackgroundColor", Color.rgb(22, 101, 52));
+            cell.setTextColor(R.id.cell_date, Color.WHITE);
+        } else if (date.getDayOfWeek() == DayOfWeek.SUNDAY) {
+            cell.setTextColor(R.id.cell_date, Color.rgb(220, 38, 38));
+        } else if (date.getDayOfWeek() == DayOfWeek.SATURDAY) {
+            cell.setTextColor(R.id.cell_date, Color.rgb(37, 99, 235));
+        }
 
         PendingIntent open = openDate(c, widgetId, date);
         cell.setOnClickPendingIntent(R.id.cell_date, open);
