@@ -5,6 +5,7 @@ import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -13,6 +14,9 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.view.View;
 import android.widget.RemoteViews;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -27,7 +31,9 @@ import java.util.List;
 public class WeeklyWidgetProvider extends AppWidgetProvider {
     private static final String PREV = "cm.week.prev";
     private static final String NEXT = "cm.week.next";
+    private static final String TODAY = "cm.week.today";
     private static final String PREF = "cm_week_widget";
+    private static final String CACHE = "cm_week_widget_cache";
 
     @Override public void onUpdate(Context c, AppWidgetManager m, int[] ids) {
         for (int id : ids) renderAsync(c, m, id);
@@ -36,46 +42,72 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
     @Override public void onReceive(Context c, Intent i) {
         super.onReceive(c, i);
         String action = i.getAction();
-        if (!PREV.equals(action) && !NEXT.equals(action)) return;
+        if (!PREV.equals(action) && !NEXT.equals(action) && !TODAY.equals(action)) return;
+
         int id = i.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1);
         if (id < 0) return;
-        int offset = c.getSharedPreferences(PREF, Context.MODE_PRIVATE).getInt("offset_" + id, 0);
-        offset += NEXT.equals(action) ? 1 : -1;
-        c.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putInt("offset_" + id, offset).apply();
+
+        SharedPreferences prefs = c.getSharedPreferences(PREF, Context.MODE_PRIVATE);
+        int offset = prefs.getInt("offset_" + id, 0);
+        if (TODAY.equals(action)) offset = 0;
+        else offset += NEXT.equals(action) ? 1 : -1;
+        prefs.edit().putInt("offset_" + id, offset).apply();
+
         renderAsync(c, AppWidgetManager.getInstance(c), id);
     }
 
     private static void renderAsync(Context c, AppWidgetManager m, int id) {
-        RemoteViews loading = base(c, id);
-        loading.setViewVisibility(R.id.loading, View.VISIBLE);
-        m.updateAppWidget(id, loading);
+        int offset = c.getSharedPreferences(PREF, Context.MODE_PRIVATE).getInt("offset_" + id, 0);
+        LocalDate start = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY)).plusWeeks(offset);
+        LocalDate end = start.plusDays(6);
+
+        // 홈 화면으로 돌아왔을 때는 네트워크를 기다리지 않고 마지막 성공 화면을 즉시 보여준다.
+        List<ScheduleRepository.Ev> cached = loadCache(c, id, start);
+        if (cached != null) {
+            m.updateAppWidget(id, buildWidget(c, id, start, cached, false));
+        } else {
+            m.updateAppWidget(id, buildWidget(c, id, start, new ArrayList<>(), true));
+        }
 
         new Thread(() -> {
-            int offset = c.getSharedPreferences(PREF, Context.MODE_PRIVATE).getInt("offset_" + id, 0);
-            LocalDate start = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY)).plusWeeks(offset);
-            LocalDate end = start.plusDays(6);
-            List<ScheduleRepository.Ev> events = ScheduleRepository.load(c, start, end);
+            List<ScheduleRepository.Ev> fresh = ScheduleRepository.load(c, start, end);
 
-            RemoteViews root = base(c, id);
-            root.setViewVisibility(R.id.loading, View.GONE);
-            root.setTextViewText(R.id.year_title, start.plusDays(3).getYear() + "년");
-            root.setTextViewText(R.id.week_title,
-                    start.format(DateTimeFormatter.ofPattern("M월 d일 (일)")) + " ~ " +
-                    end.format(DateTimeFormatter.ofPattern("M월 d일 (토)")));
-            root.removeAllViews(R.id.week_row1);
-            root.removeAllViews(R.id.week_row2);
-
-            String[] names = {"일", "월", "화", "수", "목", "금", "토"};
-            for (int k = 0; k < 4; k++) {
-                root.addView(R.id.week_row1, dayCell(c, id, start.plusDays(k), names[k], events));
+            // 기존 캐시가 있는데 네트워크 결과가 갑자기 0건이면 일시적인 통신 실패일 수 있으므로
+            // 즉시 빈 화면으로 덮지 않는다. 일정이 하나라도 오거나 캐시가 없을 때만 새 결과를 저장한다.
+            List<ScheduleRepository.Ev> shown = fresh;
+            if (cached != null && fresh.isEmpty() && !cached.isEmpty()) {
+                shown = cached;
+            } else {
+                saveCache(c, id, start, fresh);
             }
 
-            root.addView(R.id.week_row2, miniMonthCell(c, start));
-            for (int k = 4; k < 7; k++) {
-                root.addView(R.id.week_row2, dayCell(c, id, start.plusDays(k), names[k], events));
-            }
-            m.updateAppWidget(id, root);
+            m.updateAppWidget(id, buildWidget(c, id, start, shown, false));
         }).start();
+    }
+
+    private static RemoteViews buildWidget(Context c, int id, LocalDate start, List<ScheduleRepository.Ev> events, boolean loading) {
+        LocalDate end = start.plusDays(6);
+        RemoteViews root = base(c, id);
+        root.setViewVisibility(R.id.loading, loading ? View.VISIBLE : View.GONE);
+        root.setTextViewText(R.id.year_title, start.plusDays(3).getYear() + "년");
+        root.setTextViewText(R.id.week_title,
+                start.format(DateTimeFormatter.ofPattern("M월 d일 (일)")) + " ~ " +
+                end.format(DateTimeFormatter.ofPattern("M월 d일 (토)")));
+        root.removeAllViews(R.id.week_row1);
+        root.removeAllViews(R.id.week_row2);
+
+        if (loading) return root;
+
+        String[] names = {"일", "월", "화", "수", "목", "금", "토"};
+        for (int k = 0; k < 4; k++) {
+            root.addView(R.id.week_row1, dayCell(c, id, start.plusDays(k), names[k], events));
+        }
+
+        root.addView(R.id.week_row2, miniMonthCell(c, start));
+        for (int k = 4; k < 7; k++) {
+            root.addView(R.id.week_row2, dayCell(c, id, start.plusDays(k), names[k], events));
+        }
+        return root;
     }
 
     private static RemoteViews dayCell(Context c, int widgetId, LocalDate date, String dayName, List<ScheduleRepository.Ev> events) {
@@ -185,6 +217,7 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
         RemoteViews root = new RemoteViews(c.getPackageName(), R.layout.widget_weekly);
         root.setOnClickPendingIntent(R.id.prev, nav(c, id, PREV, id + 20000));
         root.setOnClickPendingIntent(R.id.next, nav(c, id, NEXT, id + 30000));
+        root.setOnClickPendingIntent(R.id.today, nav(c, id, TODAY, id + 40000));
         return root;
     }
 
@@ -194,6 +227,55 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
         i.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id);
         return PendingIntent.getBroadcast(c, req, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
+
+    private static void saveCache(Context c, int widgetId, LocalDate start, List<ScheduleRepository.Ev> events) {
+        try {
+            JSONArray arr = new JSONArray();
+            for (ScheduleRepository.Ev e : events) {
+                JSONObject o = new JSONObject();
+                o.put("id", safe(e.id));
+                o.put("title", safe(e.title));
+                o.put("date", safe(e.date));
+                o.put("time", safe(e.time));
+                o.put("calId", safe(e.calId));
+                o.put("color", safe(e.color));
+                arr.put(o);
+            }
+            c.getSharedPreferences(CACHE, Context.MODE_PRIVATE).edit()
+                    .putString("start_" + widgetId, start.toString())
+                    .putString("events_" + widgetId, arr.toString())
+                    .apply();
+        } catch (Exception ignored) {}
+    }
+
+    private static List<ScheduleRepository.Ev> loadCache(Context c, int widgetId, LocalDate start) {
+        try {
+            SharedPreferences p = c.getSharedPreferences(CACHE, Context.MODE_PRIVATE);
+            String savedStart = p.getString("start_" + widgetId, "");
+            if (!start.toString().equals(savedStart)) return null;
+            String raw = p.getString("events_" + widgetId, null);
+            if (raw == null) return null;
+
+            JSONArray arr = new JSONArray(raw);
+            ArrayList<ScheduleRepository.Ev> out = new ArrayList<>();
+            for (int n = 0; n < arr.length(); n++) {
+                JSONObject o = arr.getJSONObject(n);
+                out.add(new ScheduleRepository.Ev(
+                        o.optString("id", ""),
+                        o.optString("title", "일정"),
+                        o.optString("date", ""),
+                        o.optString("time", ""),
+                        o.optString("calId", "unassigned"),
+                        o.optString("color", "#9ca3af")
+                ));
+            }
+            return out;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String safe(String s) { return s == null ? "" : s; }
 
     private static int parseColor(String value, int fallback) {
         try { return Color.parseColor(value); } catch (Exception e) { return fallback; }
