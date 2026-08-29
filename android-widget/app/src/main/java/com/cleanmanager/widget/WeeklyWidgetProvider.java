@@ -61,7 +61,6 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
         LocalDate start = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY)).plusWeeks(offset);
         LocalDate end = start.plusDays(6);
 
-        // 홈 화면으로 돌아왔을 때는 네트워크를 기다리지 않고 마지막 성공 화면을 즉시 보여준다.
         List<ScheduleRepository.Ev> cached = loadCache(c, id, start);
         if (cached != null) {
             m.updateAppWidget(id, buildWidget(c, id, start, cached, false));
@@ -72,8 +71,6 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
         new Thread(() -> {
             List<ScheduleRepository.Ev> fresh = ScheduleRepository.load(c, start, end);
 
-            // 기존 캐시가 있는데 네트워크 결과가 갑자기 0건이면 일시적인 통신 실패일 수 있으므로
-            // 즉시 빈 화면으로 덮지 않는다. 일정이 하나라도 오거나 캐시가 없을 때만 새 결과를 저장한다.
             List<ScheduleRepository.Ev> shown = fresh;
             if (cached != null && fresh.isEmpty() && !cached.isEmpty()) {
                 shown = cached;
@@ -117,7 +114,6 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
 
         boolean isToday = date.equals(LocalDate.now());
         if (isToday) {
-            // 오늘은 날짜 머리글 자체를 진한 초록색으로 칠해 한눈에 보이게 한다.
             cell.setInt(R.id.cell_date, "setBackgroundColor", Color.rgb(22, 101, 52));
             cell.setTextColor(R.id.cell_date, Color.WHITE);
         } else if (date.getDayOfWeek() == DayOfWeek.SUNDAY) {
@@ -152,8 +148,11 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
     private static RemoteViews miniMonthCell(Context c, LocalDate selectedWeekStart) {
         RemoteViews cell = new RemoteViews(c.getPackageName(), R.layout.week_cell);
         YearMonth month = YearMonth.from(selectedWeekStart.plusDays(3));
-        cell.setTextViewText(R.id.cell_date, month.getMonthValue() + "월");
-        cell.setTextColor(R.id.cell_date, Color.rgb(22, 101, 52));
+
+        // 미니달력은 다른 날짜 머리글 흐름에 끼지 않게 전용 머리글을 숨기고,
+        // '8월' 같은 월 제목을 달력 이미지 안쪽 바로 위에 그린다.
+        cell.setViewVisibility(R.id.cell_date, View.GONE);
+        cell.setViewVisibility(R.id.cell_separator, View.GONE);
         cell.setViewVisibility(R.id.cell_events, View.GONE);
         cell.setViewVisibility(R.id.cell_image, View.VISIBLE);
         cell.setImageViewBitmap(R.id.cell_image, drawMiniMonth(month, selectedWeekStart));
@@ -162,18 +161,23 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
 
     private static Bitmap drawMiniMonth(YearMonth month, LocalDate selectedWeekStart) {
         final int width = 320;
-        final int height = 230;
+        final int height = 250;
         Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
         canvas.drawColor(Color.WHITE);
 
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         paint.setTextAlign(Paint.Align.CENTER);
-        paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-        paint.setTextSize(22f);
 
+        // 월 제목을 미니달력 바로 위에 배치한다.
+        paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        paint.setTextSize(30f);
+        paint.setColor(Color.rgb(22, 101, 52));
+        canvas.drawText(month.getMonthValue() + "월", width / 2f, 34f, paint);
+
+        paint.setTextSize(21f);
         float colW = width / 7f;
-        float headerY = 27f;
+        float headerY = 67f;
         String[] week = {"일", "월", "화", "수", "목", "금", "토"};
         for (int col = 0; col < 7; col++) {
             paint.setColor(col == 0 ? Color.rgb(220, 38, 38) : col == 6 ? Color.rgb(37, 99, 235) : Color.rgb(75, 85, 99));
@@ -183,7 +187,7 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
         LocalDate first = month.atDay(1);
         LocalDate gridStart = first.minusDays(first.getDayOfWeek().getValue() % 7);
         int selectedRow = (int) (ChronoUnit.DAYS.between(gridStart, selectedWeekStart) / 7);
-        float gridTop = 42f;
+        float gridTop = 80f;
         float rowH = (height - gridTop - 6f) / 6f;
 
         if (selectedRow >= 0 && selectedRow < 6) {
