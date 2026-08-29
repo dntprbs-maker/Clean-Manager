@@ -8,7 +8,7 @@
     <LinearLayout android:orientation="horizontal" android:gravity="center_vertical" android:layout_width="match_parent" android:layout_height="34dp">
         <TextView android:id="@+id/brand" android:text="▣  클린메니저" android:textStyle="bold" android:textSize="13sp" android:textColor="#166534" android:gravity="center_vertical" android:singleLine="true" android:layout_width="110dp" android:layout_height="match_parent" />
         <TextView android:id="@+id/year_title" android:text="2026년" android:textStyle="bold" android:textSize="21sp" android:textColor="#166534" android:gravity="center" android:singleLine="true" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" />
-        <TextView android:text="" android:layout_width="110dp" android:layout_height="1dp" />
+        <TextView android:id="@+id/today" android:text="오늘" android:textStyle="bold" android:textSize="12sp" android:textColor="#166534" android:gravity="center" android:background="@drawable/nav_button" android:layout_width="70dp" android:layout_height="30dp" />
     </LinearLayout>
 
     <LinearLayout android:orientation="horizontal" android:gravity="center_vertical" android:layout_width="match_parent" android:layout_height="38dp">
