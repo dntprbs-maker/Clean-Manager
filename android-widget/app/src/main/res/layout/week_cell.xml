@@ -22,6 +22,7 @@
         android:layout_height="wrap_content" />
 
     <TextView
+        android:id="@+id/cell_separator"
         android:text=""
         android:background="#D1D5DB"
         android:layout_width="match_parent"
