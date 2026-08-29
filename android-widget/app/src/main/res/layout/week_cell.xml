@@ -11,21 +11,21 @@
     <TextView
         android:id="@+id/cell_date"
         android:textStyle="bold"
-        android:textSize="12sp"
-        android:textColor="#374151"
+        android:textSize="15sp"
+        android:textColor="#1F2937"
         android:gravity="center"
         android:singleLine="true"
         android:background="#F8FAFC"
-        android:paddingTop="5dp"
-        android:paddingBottom="5dp"
+        android:paddingTop="7dp"
+        android:paddingBottom="7dp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />
 
     <TextView
         android:text=""
-        android:background="#E5E7EB"
+        android:background="#D1D5DB"
         android:layout_width="match_parent"
-        android:layout_height="1dp" />
+        android:layout_height="2dp" />
 
     <ImageView
         android:id="@+id/cell_image"
@@ -41,7 +41,7 @@
         android:orientation="vertical"
         android:paddingLeft="2dp"
         android:paddingRight="2dp"
-        android:paddingTop="4dp"
+        android:paddingTop="5dp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />
 </LinearLayout>
