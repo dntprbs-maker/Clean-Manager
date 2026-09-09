@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">클린매니저 앱</string>
+    <string name="title_activity_main">클린매니저 앱</string>
+    <string name="package_name">com.cleanmanager.app</string>
+    <string name="custom_url_scheme">com.cleanmanager.app</string>
+    <string name="widget_weekly_label">클린매니저 위젯</string>
+    <string name="widget_weekly_description">오늘부터 2주간의 크린드림 일정을 보여줍니다. 눌러서 클린매니저 웹앱을 엽니다.</string>
+    <string name="widget_weekly_title">크린드림 일정</string>
+    <string name="widget_refresh_label">새로고침</string>
+    <string name="widget_empty_label">표시할 일정이 없습니다</string>
+</resources>

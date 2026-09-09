@@ -11,6 +11,8 @@
     "webdesigner": "node call-webdesigner.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/core": "^8.5.1",
     "firebase": "^12.15.0",
     "korean-lunar-calendar": "^0.4.0",
     "lucide-react": "^1.21.0",
@@ -19,6 +21,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.1",
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.1",
     "@types/react": "^19.2.14",
