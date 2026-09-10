@@ -6,7 +6,6 @@ import android.appwidget.AppWidgetProvider;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
-import android.net.Uri;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.style.StyleSpan;
@@ -186,8 +185,11 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
                 }
             }
 
-            Intent openIntent = new Intent(Intent.ACTION_VIEW,
-                    Uri.parse(WidgetConfig.WEB_APP_URL + "?widgetDate=" + dayIso));
+            Intent openIntent = new Intent(context, com.cleanmanager.app.MainActivity.class);
+            openIntent.setAction(Intent.ACTION_MAIN);
+            openIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            openIntent.putExtra("widgetDate", dayIso);
             PendingIntent openPending = PendingIntent.getActivity(
                     context, appWidgetId * 100 + 10 + dayIdx, openIntent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
