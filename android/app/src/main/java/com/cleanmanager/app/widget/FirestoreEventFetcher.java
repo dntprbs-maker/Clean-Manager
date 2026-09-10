@@ -30,6 +30,10 @@ final class FirestoreEventFetcher {
 
     private FirestoreEventFetcher() {}
 
+    // 위젯 기기에서 실제로 계산된 조회 기간 — "일정 없음" 화면에 노출해서
+    // 기기 날짜/시간대 문제인지 진단할 수 있게 한다.
+    static volatile String lastQueryRange = "";
+
     /**
      * 성공(빈 목록 포함)이면 리스트를, 네트워크/파싱 오류가 나면 null을 반환한다.
      * 위젯이 "일정 없음"과 "불러오기 실패"를 구분해서 보여줄 수 있게 하기 위함.
@@ -39,6 +43,7 @@ final class FirestoreEventFetcher {
         try {
             String today = isoDate(0);
             String until = isoDate(WidgetConfig.DAYS_AHEAD);
+            lastQueryRange = today + " ~ " + until;
 
             // runQuery는 부모 문서 경로에 대해 호출하고, 대상 서브컬렉션은
             // structuredQuery.from(collectionId)으로 지정해야 한다.
