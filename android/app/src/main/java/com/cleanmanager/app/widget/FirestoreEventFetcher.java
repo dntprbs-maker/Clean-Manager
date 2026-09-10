@@ -30,6 +30,10 @@ final class FirestoreEventFetcher {
 
     private FirestoreEventFetcher() {}
 
+    /**
+     * 성공(빈 목록 포함)이면 리스트를, 네트워크/파싱 오류가 나면 null을 반환한다.
+     * 위젯이 "일정 없음"과 "불러오기 실패"를 구분해서 보여줄 수 있게 하기 위함.
+     */
     static List<WidgetEvent> fetchUpcoming() {
         List<WidgetEvent> result = new ArrayList<>();
         try {
@@ -67,7 +71,7 @@ final class FirestoreEventFetcher {
 
             if (code < 200 || code >= 300) {
                 Log.w(TAG, "runQuery failed: " + code + " " + response);
-                return result;
+                return null;
             }
 
             JSONArray arr = new JSONArray(response);
@@ -90,6 +94,7 @@ final class FirestoreEventFetcher {
             }
         } catch (Exception e) {
             Log.w(TAG, "일정 조회 실패", e);
+            return null;
         }
         return result;
     }

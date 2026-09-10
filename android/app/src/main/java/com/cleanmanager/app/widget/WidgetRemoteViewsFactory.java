@@ -16,6 +16,7 @@ class WidgetRemoteViewsFactory implements RemoteViewsService.RemoteViewsFactory 
 
     private final Context context;
     private final List<WidgetEvent> events = new ArrayList<>();
+    private volatile boolean lastFetchFailed = false;
 
     WidgetRemoteViewsFactory(Context context) {
         this.context = context;
@@ -30,7 +31,12 @@ class WidgetRemoteViewsFactory implements RemoteViewsService.RemoteViewsFactory 
         // 위젯 호스트가 이 메서드를 백그라운드 스레드에서 호출하므로 동기(blocking) 네트워크 호출이 안전하다.
         List<WidgetEvent> fetched = FirestoreEventFetcher.fetchUpcoming();
         events.clear();
-        events.addAll(fetched);
+        if (fetched == null) {
+            lastFetchFailed = true;
+        } else {
+            lastFetchFailed = false;
+            events.addAll(fetched);
+        }
     }
 
     @Override
@@ -40,12 +46,22 @@ class WidgetRemoteViewsFactory implements RemoteViewsService.RemoteViewsFactory 
 
     @Override
     public int getCount() {
+        if (lastFetchFailed) return 1;
         return events.size();
     }
 
     @Override
     public RemoteViews getViewAt(int position) {
         RemoteViews rv = new RemoteViews(context.getPackageName(), R.layout.widget_weekly_item);
+
+        if (lastFetchFailed) {
+            rv.setTextViewText(R.id.item_date, "");
+            rv.setTextViewText(R.id.item_title, "일정을 불러오지 못했습니다 — 헤더를 눌러 새로고침하세요");
+            rv.setViewVisibility(R.id.item_place, android.view.View.GONE);
+            rv.setOnClickFillInIntent(R.id.item_root, new Intent());
+            return rv;
+        }
+
         WidgetEvent e = events.get(position);
 
         String dateLabel = formatDateLabel(e);

@@ -21,6 +21,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.5.1",
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.1",
@@ -36,5 +37,8 @@
     "puppeteer": "^25.2.1",
     "tailwindcss": "^4.3.1",
     "vite": "^8.0.12"
+  },
+  "allowScripts": {
+    "sharp@0.32.6": true
   }
 }
