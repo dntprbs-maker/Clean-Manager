@@ -36,11 +36,15 @@ final class FirestoreEventFetcher {
             String today = isoDate(0);
             String until = isoDate(WidgetConfig.DAYS_AHEAD);
 
+            // runQuery는 부모 문서 경로에 대해 호출하고, 대상 서브컬렉션은
+            // structuredQuery.from(collectionId)으로 지정해야 한다.
+            // (documents/companies/{id}/events:runQuery 처럼 컬렉션명을 경로에 직접
+            //  붙이면 400 INVALID_ARGUMENT가 난다 — 이전 버전의 버그였음)
             String urlStr = "https://firestore.googleapis.com/v1/projects/"
                     + WidgetConfig.FIRESTORE_PROJECT_ID
                     + "/databases/(default)/documents/companies/"
                     + WidgetConfig.COMPANY_ID
-                    + "/events:runQuery?key=" + WidgetConfig.FIRESTORE_API_KEY;
+                    + ":runQuery?key=" + WidgetConfig.FIRESTORE_API_KEY;
 
             JSONObject body = buildQuery(today, until);
 
@@ -112,7 +116,10 @@ final class FirestoreEventFetcher {
                 .put("field", new JSONObject().put("fieldPath", "start"))
                 .put("direction", "ASCENDING");
 
+        JSONObject from = new JSONObject().put("collectionId", "events");
+
         JSONObject structuredQuery = new JSONObject()
+                .put("from", new JSONArray().put(from))
                 .put("where", where)
                 .put("orderBy", new JSONArray().put(orderBy))
                 .put("limit", 100);
