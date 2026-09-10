@@ -55,12 +55,9 @@ export const syncAdminPushToken = onCall({ region: REGION }, async (request) => 
   return { ok: true };
 });
 
-// 공통: 특정 일정(ev)에 대해 담당 팀원에게 알림 발송
-// action: "created" | "updated" | "deleted"
-async function notifyTeam(companyId, eventId, ev, action) {
-  if (!ev) return;
-
-  // 1) 담당 팀명 알아내기
+// 일정(ev)의 담당 팀명을 알아낸다. team 필드가 없으면 calId로 cals 문서를 찾아본다.
+async function resolveTeamName(companyId, ev) {
+  if (!ev) return "";
   let teamName = ev.team || "";
   if (!teamName && ev.calId) {
     try {
@@ -68,6 +65,16 @@ async function notifyTeam(companyId, eventId, ev, action) {
       if (calDoc.exists) teamName = calDoc.data().name || calDoc.data().label || "";
     } catch (e) { /* 무시 */ }
   }
+  return teamName;
+}
+
+// 공통: 특정 일정(ev)에 대해 담당 팀원에게 알림 발송
+// action: "created" | "updated" | "deleted"
+async function notifyTeam(companyId, eventId, ev, action) {
+  if (!ev) return;
+
+  // 1) 담당 팀명 알아내기
+  const teamName = await resolveTeamName(companyId, ev);
 
   // 2) 알림 받을 직원 추리기 (다대다 멤버십 기준)
   const usersSnap = await db.collection(`companies/${companyId}/users`).get();
@@ -144,22 +151,24 @@ export const sendEventNotification = onDocumentCreated(
   }
 );
 
-// 일정 수정 — 알림에 영향 없는 사소한 변경은 건너뛰기
+// 일정 수정 — 일반적인 내용 수정은 알림을 보내지 않는다(새로 생길 때만 알림이 가야 함, 2026-09-10 지시).
+// 단, 담당팀이 바뀐 경우는 예외: 이전 팀 입장에선 일이 없어진 것(취소 알림), 새 팀 입장에선
+// 새로 생긴 것(신규 알림)이므로 이 두 알림만 보낸다.
 export const sendEventUpdateNotification = onDocumentUpdated(
   { region: REGION, document: DOC },
   async (event) => {
     const before = event.data?.before?.data();
     const after = event.data?.after?.data();
-    if (!after) return;
+    if (!before || !after) return;
 
-    // 팀장 코멘트(leaderComment*)만 바뀐 경우는 "일정 수정"이 아니라 별도 메모 기능이라 제외.
-    // 그 외에는 반복 설정 등 어떤 필드든 바뀌면 알림 (예전엔 특정 필드만 봐서 반복만 바꾼 수정이 누락됐음)
-    const NOISE_KEYS = new Set(["leaderComment", "leaderCommentBy", "leaderCommentAt"]);
-    const allKeys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
-    const changed = [...allKeys].some((k) => !NOISE_KEYS.has(k) && JSON.stringify(before?.[k]) !== JSON.stringify(after?.[k]));
-    if (!changed) return;
+    const { companyId, eventId } = event.params;
+    const teamBefore = await resolveTeamName(companyId, before);
+    const teamAfter = await resolveTeamName(companyId, after);
 
-    await notifyTeam(event.params.companyId, event.params.eventId, after, "updated");
+    if (teamBefore === teamAfter) return; // 담당팀 그대로면 일반 수정 — 알림 없음
+
+    await notifyTeam(companyId, eventId, before, "deleted"); // 이전 담당팀: 일정이 없어짐
+    await notifyTeam(companyId, eventId, after, "created");  // 새 담당팀: 새 일정이 생김
   }
 );
 
