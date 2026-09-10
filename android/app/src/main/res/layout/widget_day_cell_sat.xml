@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/cell_sat_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg_day_cell">
+
+    <TextView
+        android:id="@+id/cell_sat_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:textStyle="bold"
+        android:textSize="15sp"
+        android:textColor="@color/widget_saturday_text" />
+
+    <TextView
+        android:id="@+id/cell_sat_divider"
+        android:layout_width="match_parent"
+        android:layout_height="2dp"
+        android:background="@color/widget_divider" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:paddingLeft="3dp"
+        android:paddingRight="3dp"
+        android:paddingTop="2dp">
+
+        <TextView android:id="@+id/cell_sat_line1" android:layout_width="match_parent" android:layout_height="wrap_content" android:singleLine="true" android:ellipsize="end" android:textSize="10sp" android:visibility="gone" android:paddingTop="1dp" android:paddingBottom="1dp" android:paddingLeft="2dp" android:paddingRight="2dp" />
+        <TextView android:id="@+id/cell_sat_line2" android:layout_width="match_parent" android:layout_height="wrap_content" android:singleLine="true" android:ellipsize="end" android:textSize="10sp" android:visibility="gone" android:paddingTop="1dp" android:paddingBottom="1dp" android:paddingLeft="2dp" android:paddingRight="2dp" />
+        <TextView android:id="@+id/cell_sat_line3" android:layout_width="match_parent" android:layout_height="wrap_content" android:singleLine="true" android:ellipsize="end" android:textSize="10sp" android:visibility="gone" android:paddingTop="1dp" android:paddingBottom="1dp" android:paddingLeft="2dp" android:paddingRight="2dp" />
+        <TextView android:id="@+id/cell_sat_line4" android:layout_width="match_parent" android:layout_height="wrap_content" android:singleLine="true" android:ellipsize="end" android:textSize="10sp" android:visibility="gone" android:paddingTop="1dp" android:paddingBottom="1dp" android:paddingLeft="2dp" android:paddingRight="2dp" />
+    </LinearLayout>
+</LinearLayout>

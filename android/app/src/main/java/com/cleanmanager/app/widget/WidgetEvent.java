@@ -8,9 +8,10 @@ final class WidgetEvent {
     final String endTime;
     final boolean allDay;
     final String place;
+    final String calId;
 
     WidgetEvent(String title, String start, String end, String startTime, String endTime,
-                boolean allDay, String place) {
+                boolean allDay, String place, String calId) {
         this.title = title;
         this.start = start;
         this.end = end;
@@ -18,5 +19,6 @@ final class WidgetEvent {
         this.endTime = endTime;
         this.allDay = allDay;
         this.place = place;
+        this.calId = calId;
     }
 }

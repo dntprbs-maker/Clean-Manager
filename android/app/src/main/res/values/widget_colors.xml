@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="widget_card_bg">#FFFFFFFF</color>
+    <color name="widget_card_border">#FFE5E7EB</color>
+    <color name="widget_brand_green">#FF166534</color>
+    <color name="widget_button_text_green">#FF15803D</color>
+    <color name="widget_button_bg">#FFF7F9F7</color>
+    <color name="widget_button_border">#FFD1D5DB</color>
+    <color name="widget_today_bg">#FF166534</color>
+    <color name="widget_date_range_text">#FF1F2937</color>
+    <color name="widget_weekday_text">#FF1F2937</color>
+    <color name="widget_sunday_text">#FFDC2626</color>
+    <color name="widget_saturday_text">#FF2563EB</color>
+    <color name="widget_divider">#FFE5E7EB</color>
+</resources>

@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg_card"
+    android:padding="8dp">
+
+    <!-- 1행: 브랜드 / 연도 / 오늘 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:id="@+id/widget_brand"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="클린매니저"
+            android:textStyle="bold"
+            android:textSize="13sp"
+            android:textColor="@color/widget_brand_green" />
+
+        <TextView
+            android:id="@+id/widget_year"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="2"
+            android:gravity="center"
+            android:textStyle="bold"
+            android:textSize="21sp"
+            android:textColor="@color/widget_brand_green" />
+
+        <TextView
+            android:id="@+id/widget_today_btn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:background="@drawable/widget_bg_pill_button"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:text="오늘"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:textColor="@color/widget_button_text_green" />
+    </LinearLayout>
+
+    <!-- 2행: 지난주 / 날짜범위 / 다음주 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:id="@+id/widget_prev_btn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/widget_bg_pill_button"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:text="‹ 지난주"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:textColor="@color/widget_button_text_green" />
+
+        <TextView
+            android:id="@+id/widget_date_range"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginLeft="6dp"
+            android:layout_marginRight="6dp"
+            android:gravity="center"
+            android:singleLine="true"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:textColor="@color/widget_date_range_text" />
+
+        <TextView
+            android:id="@+id/widget_next_btn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/widget_bg_pill_button"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:text="다음주 ›"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:textColor="@color/widget_button_text_green" />
+    </LinearLayout>
+
+    <!-- 3행: 일 / 월 / 화 / 수 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <include layout="@layout/widget_day_cell_sun" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginRight="2dp" />
+        <include layout="@layout/widget_day_cell_mon" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginLeft="2dp" android:layout_marginRight="2dp" />
+        <include layout="@layout/widget_day_cell_tue" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginLeft="2dp" android:layout_marginRight="2dp" />
+        <include layout="@layout/widget_day_cell_wed" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginLeft="2dp" />
+    </LinearLayout>
+
+    <!-- 4행: 보조칸 / 목 / 금 / 토 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="4dp"
+        android:orientation="horizontal">
+
+        <include layout="@layout/widget_day_cell_aux" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginRight="2dp" />
+        <include layout="@layout/widget_day_cell_thu" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginLeft="2dp" android:layout_marginRight="2dp" />
+        <include layout="@layout/widget_day_cell_fri" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginLeft="2dp" android:layout_marginRight="2dp" />
+        <include layout="@layout/widget_day_cell_sat" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginLeft="2dp" />
+    </LinearLayout>
+
+</LinearLayout>

@@ -34,16 +34,9 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.cleanmanager.app.widget.ACTION_REFRESH" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_weekly_info" />
         </receiver>
-
-        <service
-            android:name=".widget.WidgetRemoteViewsService"
-            android:exported="false"
-            android:permission="android.permission.BIND_REMOTEVIEWS"
-        />
     </application>
 
     <!-- Permissions -->
