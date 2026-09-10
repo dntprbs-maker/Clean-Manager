@@ -56,9 +56,8 @@ class WidgetRemoteViewsFactory implements RemoteViewsService.RemoteViewsFactory 
 
         if (lastFetchFailed) {
             rv.setTextViewText(R.id.item_date, "");
-            rv.setTextViewText(R.id.item_title, "일정을 불러오지 못했습니다 — 헤더를 눌러 새로고침하세요");
+            rv.setTextViewText(R.id.item_title, "일정을 불러오지 못했습니다 — 새로고침 버튼을 눌러주세요");
             rv.setViewVisibility(R.id.item_place, android.view.View.GONE);
-            rv.setOnClickFillInIntent(R.id.item_root, new Intent());
             return rv;
         }
 
@@ -67,7 +66,6 @@ class WidgetRemoteViewsFactory implements RemoteViewsService.RemoteViewsFactory 
             rv.setTextViewText(R.id.item_title, "표시할 일정이 없습니다");
             rv.setTextViewText(R.id.item_place, "조회 기간: " + FirestoreEventFetcher.lastQueryRange);
             rv.setViewVisibility(R.id.item_place, android.view.View.VISIBLE);
-            rv.setOnClickFillInIntent(R.id.item_root, new Intent());
             return rv;
         }
 
