@@ -45,6 +45,16 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x android/gradlew
 
+      - name: Ensure fixed debug keystore exists
+        run: |
+          if [ ! -f android/app/debug-widget.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore android/app/debug-widget.keystore \
+              -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=CleanManager Debug, OU=Dev, O=CleanManager, L=Seoul, S=Seoul, C=KR"
+          fi
+
       - name: Build debug APK
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
