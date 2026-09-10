@@ -116,10 +116,10 @@ final class FirestoreEventFetcher {
                 .put("field", new JSONObject().put("fieldPath", "start"))
                 .put("direction", "ASCENDING");
 
-        JSONObject from = new JSONObject().put("collectionId", "events");
+        JSONObject fromClause = new JSONObject().put("collectionId", "events");
 
         JSONObject structuredQuery = new JSONObject()
-                .put("from", new JSONArray().put(from))
+                .put("from", new JSONArray().put(fromClause))
                 .put("where", where)
                 .put("orderBy", new JSONArray().put(orderBy))
                 .put("limit", 100);
