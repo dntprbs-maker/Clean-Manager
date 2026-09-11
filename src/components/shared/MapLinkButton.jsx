@@ -19,6 +19,15 @@ const ua = () => (typeof navigator === "undefined" ? "" : navigator.userAgent);
 const isAndroid = () => /android/i.test(ua());
 const isIOS     = () => /iphone|ipad|ipod/i.test(ua());
 
+// Capacitor 네이티브 앱(WebView) 안인지 여부.
+// Capacitor 브리지가 페이지 내 모든 URL 이동을 자체적으로 가로채(Bridge.launchIntent)
+// ACTION_VIEW 인텐트로 바꿔서 처리하는데, 이때 intent://...#Intent;...;end 같은
+// "브라우저 전용" 문법은 이해하지 못하고 스킴이 "intent"인 URI로 잘못 해석해 아무 앱도
+// 못 찾고 조용히 실패한다. 반면 tmap:// 같은 순수 스킴은 ACTION_VIEW로 그대로 잘 연다.
+// 그래서 네이티브 앱 안에서는 intent:// 래핑 없이 스킴을 직접 열어야 한다.
+const isCapacitorNative = () =>
+  typeof window !== "undefined" && !!window.Capacitor?.isNativePlatform?.();
+
 export function MapLinkButton({ place, className, children }) {
   const [open, setOpen] = useState(false);
   if (!place) return null;
@@ -40,8 +49,16 @@ export function MapLinkButton({ place, className, children }) {
     }
 
     if (isAndroid()) {
-      // 안드로이드에서 location.href로 tmap://을 직접 던지면 앱이 없을 때
-      // ERR_UNKNOWN_URL_SCHEME 오류 페이지로 넘어가면서 앱 화면을 벗어나버린다.
+      // 클린매니저 앱(Capacitor WebView) 안에서는 Capacitor 브리지가 URL 이동을 가로채
+      // ACTION_VIEW 인텐트로 직접 바꿔 처리하므로, tmap:// 스킴을 그대로 던지면 된다.
+      // (아래 intent:// 래핑은 이 브리지가 이해하지 못해 조용히 실패한다.)
+      if (isCapacitorNative()) {
+        window.location.href = url;
+        return;
+      }
+
+      // 일반 모바일 브라우저(Chrome 등)에서 location.href로 tmap://을 직접 던지면 앱이
+      // 없을 때 ERR_UNKNOWN_URL_SCHEME 오류 페이지로 넘어가면서 앱 화면을 벗어나버린다.
       // intent:// 형식은 앱이 없으면 browser_fallback_url로 대신 이동해 그 사고를 막아준다.
       const path = url.replace(/^tmap:\/\//, "");
       window.location.href =

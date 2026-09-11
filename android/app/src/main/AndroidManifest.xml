@@ -39,6 +39,14 @@
         </receiver>
     </application>
 
+    <!-- 티맵 앱 스킴(tmap://)으로 열기 위한 패키지 가시성 선언 (Android 11+/targetSdk 30+ 필수) -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="tmap" />
+        </intent>
+    </queries>
+
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
