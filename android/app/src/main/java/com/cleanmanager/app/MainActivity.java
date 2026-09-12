@@ -3,6 +3,7 @@ package com.cleanmanager.app;
 import android.content.Intent;
 import android.os.Bundle;
 
+import com.cleanmanager.app.widget.CleanManagerWeeklyWidgetProvider;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
@@ -11,6 +12,18 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         applyWidgetDate(getIntent());
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        CleanManagerWeeklyWidgetProvider.requestRefresh(this);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        CleanManagerWeeklyWidgetProvider.requestRefresh(this);
     }
 
     @Override

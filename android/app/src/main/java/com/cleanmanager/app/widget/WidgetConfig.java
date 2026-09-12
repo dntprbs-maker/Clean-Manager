@@ -10,7 +10,7 @@ final class WidgetConfig {
     static final int FETCH_DAYS_BEFORE = 7;
     static final int FETCH_DAYS_AFTER = 28;
 
-    static final int MAX_EVENTS_PER_CELL = 4;
+    static final int MAX_EVENTS_PER_CELL = 10;
 
     static final String PREFS_NAME = "clean_manager_widget_prefs";
     static final String PREF_KEY_CACHE_BLOB = "cache_blob";

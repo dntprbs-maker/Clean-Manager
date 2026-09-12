@@ -3,6 +3,7 @@ package com.cleanmanager.app.widget;
 import android.app.PendingIntent;
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
@@ -26,6 +27,7 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
     static final String ACTION_PREV_WEEK = "com.cleanmanager.app.widget.ACTION_PREV_WEEK";
     static final String ACTION_NEXT_WEEK = "com.cleanmanager.app.widget.ACTION_NEXT_WEEK";
     static final String ACTION_TODAY = "com.cleanmanager.app.widget.ACTION_TODAY";
+    static final String ACTION_REFRESH = "com.cleanmanager.app.widget.ACTION_REFRESH";
 
     private static final String[] WEEKDAY_KO = {"일", "월", "화", "수", "목", "금", "토"};
     // 그리드 순서(월요일 자리에 보조칸이 아니라 일요일부터): sun, mon, tue, wed / aux, thu, fri, sat
@@ -38,13 +40,27 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
             R.id.cell_thu_root, R.id.cell_fri_root, R.id.cell_sat_root
     };
     private static final int[][] LINE_IDS = {
-            {R.id.cell_sun_line1, R.id.cell_sun_line2, R.id.cell_sun_line3, R.id.cell_sun_line4},
-            {R.id.cell_mon_line1, R.id.cell_mon_line2, R.id.cell_mon_line3, R.id.cell_mon_line4},
-            {R.id.cell_tue_line1, R.id.cell_tue_line2, R.id.cell_tue_line3, R.id.cell_tue_line4},
-            {R.id.cell_wed_line1, R.id.cell_wed_line2, R.id.cell_wed_line3, R.id.cell_wed_line4},
-            {R.id.cell_thu_line1, R.id.cell_thu_line2, R.id.cell_thu_line3, R.id.cell_thu_line4},
-            {R.id.cell_fri_line1, R.id.cell_fri_line2, R.id.cell_fri_line3, R.id.cell_fri_line4},
-            {R.id.cell_sat_line1, R.id.cell_sat_line2, R.id.cell_sat_line3, R.id.cell_sat_line4},
+            {R.id.cell_sun_line1, R.id.cell_sun_line2, R.id.cell_sun_line3, R.id.cell_sun_line4,
+                    R.id.cell_sun_line5, R.id.cell_sun_line6, R.id.cell_sun_line7, R.id.cell_sun_line8,
+                    R.id.cell_sun_line9, R.id.cell_sun_line10},
+            {R.id.cell_mon_line1, R.id.cell_mon_line2, R.id.cell_mon_line3, R.id.cell_mon_line4,
+                    R.id.cell_mon_line5, R.id.cell_mon_line6, R.id.cell_mon_line7, R.id.cell_mon_line8,
+                    R.id.cell_mon_line9, R.id.cell_mon_line10},
+            {R.id.cell_tue_line1, R.id.cell_tue_line2, R.id.cell_tue_line3, R.id.cell_tue_line4,
+                    R.id.cell_tue_line5, R.id.cell_tue_line6, R.id.cell_tue_line7, R.id.cell_tue_line8,
+                    R.id.cell_tue_line9, R.id.cell_tue_line10},
+            {R.id.cell_wed_line1, R.id.cell_wed_line2, R.id.cell_wed_line3, R.id.cell_wed_line4,
+                    R.id.cell_wed_line5, R.id.cell_wed_line6, R.id.cell_wed_line7, R.id.cell_wed_line8,
+                    R.id.cell_wed_line9, R.id.cell_wed_line10},
+            {R.id.cell_thu_line1, R.id.cell_thu_line2, R.id.cell_thu_line3, R.id.cell_thu_line4,
+                    R.id.cell_thu_line5, R.id.cell_thu_line6, R.id.cell_thu_line7, R.id.cell_thu_line8,
+                    R.id.cell_thu_line9, R.id.cell_thu_line10},
+            {R.id.cell_fri_line1, R.id.cell_fri_line2, R.id.cell_fri_line3, R.id.cell_fri_line4,
+                    R.id.cell_fri_line5, R.id.cell_fri_line6, R.id.cell_fri_line7, R.id.cell_fri_line8,
+                    R.id.cell_fri_line9, R.id.cell_fri_line10},
+            {R.id.cell_sat_line1, R.id.cell_sat_line2, R.id.cell_sat_line3, R.id.cell_sat_line4,
+                    R.id.cell_sat_line5, R.id.cell_sat_line6, R.id.cell_sat_line7, R.id.cell_sat_line8,
+                    R.id.cell_sat_line9, R.id.cell_sat_line10},
     };
 
     @Override
@@ -75,7 +91,7 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
             // 주 이동은 캐시만으로 즉시 반영 (네트워크 호출 없음 — 빠른 반응성 우선)
             applyWeekViews(context, AppWidgetManager.getInstance(context), appWidgetId);
 
-        } else if (AppWidgetManager.ACTION_APPWIDGET_UPDATE.equals(action)) {
+        } else if (ACTION_REFRESH.equals(action) || AppWidgetManager.ACTION_APPWIDGET_UPDATE.equals(action)) {
             int[] ids = intent.getIntArrayExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS);
             if (ids == null || ids.length == 0) return;
             refreshDataInBackground(context, ids);
@@ -87,6 +103,18 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
         for (int id : appWidgetIds) {
             WidgetCache.clearWeekOffset(context, id);
         }
+    }
+
+    /** 앱이 포그라운드/백그라운드를 오갈 때 호출해 위젯이 최신 일정을 다시 읽도록 한다. */
+    public static void requestRefresh(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        ComponentName provider = new ComponentName(context, CleanManagerWeeklyWidgetProvider.class);
+        int[] ids = mgr.getAppWidgetIds(provider);
+        if (ids == null || ids.length == 0) return;
+        Intent intent = new Intent(context, CleanManagerWeeklyWidgetProvider.class);
+        intent.setAction(ACTION_REFRESH);
+        intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+        context.sendBroadcast(intent);
     }
 
     /** goAsync()로 브로드캐스트 우선순위를 유지한 채 백그라운드에서 최신 데이터를 받아온다. */
