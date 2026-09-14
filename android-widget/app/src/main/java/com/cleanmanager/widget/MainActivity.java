@@ -54,5 +54,11 @@ public class MainActivity extends Activity {
     });
   }
 
+  @Override protected void onPause(){
+    super.onPause();
+    if(!getSharedPreferences("cm",MODE_PRIVATE).getString("companyId","").isEmpty())
+      WidgetUtil.refreshAll(this);
+  }
+
   @Override protected void onDestroy(){h.removeCallbacksAndMessages(null);super.onDestroy();}
 }

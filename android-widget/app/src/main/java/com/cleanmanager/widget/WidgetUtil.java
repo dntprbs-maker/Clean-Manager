@@ -12,5 +12,5 @@ public final class WidgetUtil{
  }
  static PendingIntent nav(Context c,Class<?> k,int id,String a,int req){Intent i=new Intent(c,k);i.setAction(a);i.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID,id);return PendingIntent.getBroadcast(c,req,i,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);}
  static void handleNav(Context c,Intent i,int layout){String a=i.getAction();if(!PREV.equals(a)&&!NEXT.equals(a))return;int id=i.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID,-1);if(id<0)return;RemoteViews r=new RemoteViews(c.getPackageName(),layout);if(NEXT.equals(a))r.showNext(R.id.stack);else r.showPrevious(R.id.stack);AppWidgetManager.getInstance(c).updateAppWidget(id,r);}
- static void refreshAll(Context c){AppWidgetManager m=AppWidgetManager.getInstance(c);Class<?>[]cs={DailyWidgetProvider.class,WeeklyWidgetProvider.class,MonthlyWidgetProvider.class,ListWidgetProvider.class};for(Class<?>k:cs)for(int id:m.getAppWidgetIds(new ComponentName(c,k)))m.notifyAppWidgetViewDataChanged(id,R.id.stack);}
+  static void refreshAll(Context c){AppWidgetManager m=AppWidgetManager.getInstance(c);Class<?>[]cs={DailyWidgetProvider.class,MonthlyWidgetProvider.class,ListWidgetProvider.class};for(Class<?>k:cs)for(int id:m.getAppWidgetIds(new ComponentName(c,k)))m.notifyAppWidgetViewDataChanged(id,R.id.stack);WeeklyWidgetProvider.refresh(c);}
 }

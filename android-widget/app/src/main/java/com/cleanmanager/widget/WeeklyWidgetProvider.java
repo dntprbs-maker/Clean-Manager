@@ -3,6 +3,7 @@ package com.cleanmanager.widget;
 import android.app.PendingIntent;
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -80,6 +81,12 @@ public class WeeklyWidgetProvider extends AppWidgetProvider {
 
             m.updateAppWidget(id, buildWidget(c, id, start, shown, false));
         }).start();
+    }
+
+    static void refresh(Context c) {
+        AppWidgetManager m = AppWidgetManager.getInstance(c);
+        for (int id : m.getAppWidgetIds(new ComponentName(c, WeeklyWidgetProvider.class)))
+            renderAsync(c, m, id);
     }
 
     private static RemoteViews buildWidget(Context c, int id, LocalDate start, List<ScheduleRepository.Ev> events, boolean loading) {
