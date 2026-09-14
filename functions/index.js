@@ -550,21 +550,41 @@ async function syncIcsForCal(companyId, calId, rawUrl) {
     d.ref.update({ status: "deleted", deletedAt, deletedBy: "ics_subscription" })
   ));
 
+  const prevMap = new Map(prevSnap.docs.map(d => [d.id, d.data()]));
+  const trackedFields = ["title", "start", "startTime", "end", "endTime", "allDay", "place", "description"];
+
   await Promise.all(toImport.map(ev => {
-    const { icsUid, ...rest } = ev;
+    const { icsUid } = ev;
     const docId = icsUid;
-    return eventsRef.doc(docId).set({
-      ...rest,
-      id: docId,
-      calId,
-      end: ev.end || ev.start,
+    const existing = prevMap.get(docId);
+    const prevRaw = existing?.icsRaw;
+
+    const incoming = {
+      title: ev.title,
+      start: ev.start,
       startTime: ev.startTime || "09:00",
+      end: ev.end || ev.start,
       endTime: ev.endTime || "10:00",
       allDay: ev.allDay || false,
       place: ev.place || "",
       description: ev.description || "",
+    };
+
+    const patch = {
+      id: docId,
+      calId,
       source: "ics_import",
-    }, { merge: true });
+      icsRaw: incoming,
+    };
+
+    for (const field of trackedFields) {
+      // 사용자가 마지막 동기화 이후 이 필드를 직접 고쳤으면(현재 값이 icsRaw 스냅샷과 다르면)
+      // patch에 넣지 않아 merge 시 기존 값을 보존한다. 그 외엔 incoming 값으로 갱신.
+      const userEdited = existing && prevRaw && existing[field] !== prevRaw[field];
+      if (!userEdited) patch[field] = incoming[field];
+    }
+
+    return eventsRef.doc(docId).set(patch, { merge: true });
   }));
 
   return { imported: toImport.length, removed: staleDocs.length, skippedOld: parsed.length - toImport.length };

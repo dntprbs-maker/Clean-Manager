@@ -6,6 +6,36 @@ import { db, functions } from "../../firebase";
 import { useC } from "../../context/AppContext";
 import { uid } from "../../lib/uid";
 
+// DTSTART/DTEND 값을 파싱해 { date, time } 으로 반환한다.
+// "Z"로 끝나는 값은 UTC이므로 KST(UTC+9)로 변환한다. 그 외(TZID 로컬/floating)는 문자열 그대로.
+function toKstDateTime(val) {
+  const date = val.length >= 8
+    ? val.slice(0, 4) + "-" + val.slice(4, 6) + "-" + val.slice(6, 8)
+    : val;
+  if (val.length <= 8) return { date, time: null };
+
+  if (val.endsWith("Z")) {
+    const y = Number(val.slice(0, 4));
+    const m = Number(val.slice(4, 6));
+    const d = Number(val.slice(6, 8));
+    const h = Number(val.slice(9, 11));
+    const mi = Number(val.slice(11, 13));
+    const utc = new Date(Date.UTC(y, m - 1, d, h, mi, 0));
+    const kst = new Date(utc.getTime() + 9 * 3600 * 1000);
+    return {
+      date:
+        String(kst.getUTCFullYear()) + "-" +
+        String(kst.getUTCMonth() + 1).padStart(2, "0") + "-" +
+        String(kst.getUTCDate()).padStart(2, "0"),
+      time:
+        String(kst.getUTCHours()).padStart(2, "0") + ":" +
+        String(kst.getUTCMinutes()).padStart(2, "0"),
+    };
+  }
+
+  return { date, time: val.slice(9, 11) + ":" + val.slice(11, 13) };
+}
+
 export function ImportCalendarScreen() {
   const { setCurrentScreen, addEvent, visibleCals: cals, companyId, updateCal } = useC();
   const [step, setStep]                 = useState("upload");
@@ -116,26 +146,20 @@ export function ImportCalendarScreen() {
           current.title = line.replace("SUMMARY:", "").trim();
         } else if (line.startsWith("DTSTART")) {
           const val = line.split(":").pop().trim();
-          current.start = val.length >= 8
-            ? val.slice(0,4) + "-" + val.slice(4,6) + "-" + val.slice(6,8)
-            : val;
+          const dt = toKstDateTime(val);
+          current.start = dt.date;
           if (val.length > 8) {
-            const h = val.slice(9, 11);
-            const m = val.slice(11, 13);
-            current.startTime = h + ":" + m;
+            current.startTime = dt.time;
             current.allDay = false;
           } else {
             current.allDay = true;
           }
         } else if (line.startsWith("DTEND")) {
           const val = line.split(":").pop().trim();
-          current.end = val.length >= 8
-            ? val.slice(0,4) + "-" + val.slice(4,6) + "-" + val.slice(6,8)
-            : val;
+          const dt = toKstDateTime(val);
+          current.end = dt.date;
           if (val.length > 8) {
-            const h = val.slice(9, 11);
-            const m = val.slice(11, 13);
-            current.endTime = h + ":" + m;
+            current.endTime = dt.time;
           }
         } else if (line.startsWith("LOCATION:")) {
           current.place = line.replace("LOCATION:", "").trim();
@@ -195,22 +219,42 @@ export function ImportCalendarScreen() {
       updateDoc(doc(db, "companies", companyId, "events", d.id), { status: "deleted", deletedAt, deletedBy: "ics_sync" })
     ));
 
+    const prevMap = new Map(prevImported.docs.map(d => [d.id, d.data()]));
+    const trackedFields = ["title", "start", "startTime", "end", "endTime", "allDay", "place", "description"];
+
     await Promise.all(toImport.map(ev => {
       // icsUid가 있으면 그걸 문서 ID로 써서 재동기화 시 같은 일정을 덮어쓰기
       const docId = ev.icsUid || uid();
-      const evData = {
-        ...ev,
-        id: docId,
-        calId: selectedCal,
-        end: ev.end || ev.start,
+      const existing = prevMap.get(docId);
+      const prevRaw = existing?.icsRaw;
+
+      const incoming = {
+        title: ev.title,
+        start: ev.start,
         startTime: ev.startTime || "09:00",
+        end: ev.end || ev.start,
         endTime: ev.endTime || "10:00",
         allDay: ev.allDay || false,
         place: ev.place || "",
         description: ev.description || "",
       };
-      if (ev.icsUid) evData.source = "ics_import";
-      delete evData.icsUid;
+
+      const evData = {
+        id: docId,
+        calId: selectedCal,
+      };
+      if (ev.icsUid) {
+        evData.source = "ics_import";
+        evData.icsRaw = incoming;
+      }
+
+      for (const field of trackedFields) {
+        // 사용자가 마지막 동기화 이후 이 필드를 직접 고쳤으면(현재 값이 icsRaw 스냅샷과 다르면)
+        // evData에 넣지 않아 merge 시 기존 값을 보존한다. 그 외엔 incoming 값으로 갱신.
+        const userEdited = existing && prevRaw && existing[field] !== prevRaw[field];
+        if (!userEdited) evData[field] = incoming[field];
+      }
+
       return setDoc(doc(db, "companies", companyId, "events", docId), evData, { merge: true });
     }));
     setRemovedCount(staleDocs.length);
