@@ -9,6 +9,11 @@ import { getMessaging } from "firebase-admin/messaging";
 import { getMemberships } from "./lib/membership.js";
 import { fmtDate, addDays, expandRecurringForFeed } from "./lib/recurring.js";
 import { parseIcs } from "./lib/ics.js";
+import { createGoogleClient } from "./lib/gcal/googleApi.js";
+import { isPushActive } from "./lib/gcal/store.js";
+import { handleWebhook, runMaintenance } from "./lib/gcal/service.js";
+import { handleAdmin } from "./lib/gcal/adminPage.js";
+import process from "node:process";
 export { mcp } from "./mcp/index.js";
 // mcp/index.js가 (ESM import 순서상 이 줄보다 먼저 평가되며) lib/db.js를 통해
 // initializeApp()을 이미 호출했을 수 있으므로 중복 호출 방지 체크.
@@ -583,6 +588,10 @@ async function syncIcsForCal(companyId, calId, rawUrl) {
       const userEdited = existing && prevRaw && existing[field] !== prevRaw[field];
       if (!userEdited) patch[field] = incoming[field];
     }
+    // 구글 실시간(push) 동기화가 지웠던 일정이 ICS로 돌아왔을 때 다시 보이게(push를 끄고 ICS로 복귀하는 경우)
+    if (existing?.status === "deleted" && existing.deletedBy === "gcal_push") {
+      Object.assign(patch, { status: "active", deletedAt: null, deletedBy: null });
+    }
 
     return eventsRef.doc(docId).set(patch, { merge: true });
   }));
@@ -600,6 +609,8 @@ export const syncIcsSubscriptionNow = onCall({ region: REGION }, async (request)
   if (!calSnap.exists) throw new HttpsError("not-found", "캘린더를 찾을 수 없습니다.");
   const url = calSnap.data()?.icsSubscriptionUrl;
   if (!url) throw new HttpsError("failed-precondition", "구독 URL이 설정되어 있지 않습니다.");
+  // 이 팀이 구글 실시간(push) 동기화로 관리 중이면 ICS는 건너뜀(둘이 같은 일정을 동시에 고치지 않도록)
+  if (await isPushActive(db, companyId, calId)) return { ok: true, skippedByPush: true, imported: 0, removed: 0 };
 
   try {
     const result = await syncIcsForCal(companyId, calId, url);
@@ -624,6 +635,10 @@ export const icsSubscriptionAutoSync = onSchedule(
       for (const calDoc of calsSnap.docs) {
         const url = calDoc.data()?.icsSubscriptionUrl;
         if (!url) continue;
+        if (await isPushActive(db, companyDoc.id, calDoc.id)) {
+          log.push(`${companyDoc.id}/${calDoc.id}: 구글 실시간 동기화 사용 중 — ICS 건너뜀`);
+          continue;
+        }
         try {
           const result = await syncIcsForCal(companyDoc.id, calDoc.id, url);
           await calDoc.ref.update({ icsSubscriptionLastSyncAt: new Date().toISOString(), icsSubscriptionLastError: null });
@@ -636,4 +651,72 @@ export const icsSubscriptionAutoSync = onSchedule(
     }
     console.log(`[icsSubscriptionAutoSync] ${log.join(" | ")}`);
   }
+);
+
+// ── 구글 캘린더 실시간(push) 동기화 ─────────────────────────────────────────
+// 위 ICS 구독 자동 동기화(6시간 폴링)를 대체할 새 경로. Google Calendar API의 events.watch 채널로
+// 변경 알림을 받아 syncToken 증분 동기화를 돌린다. 기본값 꺼짐 — 전역 스위치(gcalConfig/global)와
+// 팀별 스위치(gcalCalendars/{회사ID}__{팀ID}.enabled)가 둘 다 켜진 팀만 이 경로를 쓰고,
+// 그 팀은 ICS 자동 동기화가 건너뛴다. 끄면 즉시 ICS로 복귀. 설계·배포 절차: docs/calendar-push-sync.md
+const GCAL_OAUTH_CLIENT_ID     = defineSecret("GCAL_OAUTH_CLIENT_ID");
+const GCAL_OAUTH_CLIENT_SECRET = defineSecret("GCAL_OAUTH_CLIENT_SECRET");
+const GCAL_TOKEN_KEY           = defineSecret("GCAL_TOKEN_KEY");        // refresh token 암호화 키
+const GCAL_ADMIN_PASSPHRASE    = defineSecret("GCAL_ADMIN_PASSPHRASE"); // 관리 페이지 패스프레이즈
+const GCAL_SECRETS = [GCAL_OAUTH_CLIENT_ID, GCAL_OAUTH_CLIENT_SECRET, GCAL_TOKEN_KEY];
+
+// 함수 공개 주소. 기본은 cloudfunctions.net 주소(2세대 함수도 이 주소로 호출 가능),
+// 필요하면 functions/.env 의 GCAL_PUBLIC_BASE_URL 로 바꿀 수 있다(비밀값 아님).
+function gcalBaseUrl() {
+  const project = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
+  return (process.env.GCAL_PUBLIC_BASE_URL || `https://${REGION}-${project}.cloudfunctions.net`).replace(/\/$/, "");
+}
+
+function gcalDeps() {
+  const base = gcalBaseUrl();
+  return {
+    db,
+    google: createGoogleClient({ clientId: GCAL_OAUTH_CLIENT_ID.value(), clientSecret: GCAL_OAUTH_CLIENT_SECRET.value() }),
+    clientId: GCAL_OAUTH_CLIENT_ID.value(),
+    tokenKey: GCAL_TOKEN_KEY.value(),
+    now: Date.now,
+    webhookUrl: `${base}/gcalWebhook`,
+    adminBaseUrl: `${base}/gcalAdmin`,
+    redirectUri: `${base}/gcalAdmin/oauth/callback`,
+  };
+}
+
+// 구글이 일정 변경 알림을 보내는 주소. 채널 ID/토큰/리소스 ID 헤더를 검증한 뒤 증분 동기화.
+export const gcalWebhook = onRequest(
+  { region: REGION, secrets: GCAL_SECRETS, timeoutSeconds: 120, memory: "256MiB" },
+  async (req, res) => {
+    if (req.method !== "POST") { res.status(405).send(""); return; }
+    try {
+      const r = await handleWebhook(gcalDeps(), req.headers);
+      res.status(r.httpStatus).send("");
+    } catch (e) {
+      // 검증·동기화 밖의 예기치 못한 오류 — 500이면 구글이 잠시 뒤 재시도한다
+      console.error("[gcalWebhook] 오류:", e?.message || e);
+      res.status(500).send("");
+    }
+  }
+);
+
+// 운영자용 관리 페이지(구글 계정 연결, 켜기/끄기, 상태 확인). 패스프레이즈로 보호.
+export const gcalAdmin = onRequest(
+  { region: REGION, secrets: [...GCAL_SECRETS, GCAL_ADMIN_PASSPHRASE], timeoutSeconds: 300 },
+  async (req, res) => {
+    const r = await handleAdmin({ ...gcalDeps(), passphrase: GCAL_ADMIN_PASSPHRASE.value() }, {
+      method: req.method, path: req.path, body: req.body, query: req.query,
+    });
+    res.set("Cache-Control", "no-store");
+    res.set("X-Frame-Options", "DENY");
+    if (r.redirect) { res.redirect(r.status || 303, r.redirect); return; }
+    res.status(r.status).type("html").send(r.html);
+  }
+);
+
+// 매시간: 채널 만료 전 자동 갱신 + 알림 누락 대비 안전망 동기화(하루 1번은 전체 재동기화).
+export const gcalMaintenance = onSchedule(
+  { region: REGION, schedule: "15 * * * *", timeZone: "Asia/Seoul", secrets: GCAL_SECRETS, timeoutSeconds: 540 },
+  async () => { await runMaintenance(gcalDeps()); }
 );
