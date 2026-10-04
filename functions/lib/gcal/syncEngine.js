@@ -84,16 +84,21 @@ export function planWrites({ items, existingMap, calId, calendarId, mode, nowMs,
     stats.deleted++;
   };
 
+  // 구글은 취소(삭제)된 일정을 증분 동기화로 보낼 때 id/status 만 주고 iCalUID 를 빼므로,
+  // 문서 ID(iCalUID 기반)를 계산할 수 없다 → 저장해 둔 gcalSync.eventId 로 기존 문서를 찾는다.
+  const docIdByEventId = new Map();
+  for (const [id, ex] of existingMap) if (ex.gcalSync?.eventId) docIdByEventId.set(ex.gcalSync.eventId, id);
+
   for (const ev of items) {
-    const docId = docIdFor(ev);
     if (ev.status === "cancelled") {
-      softDelete(docId);
+      softDelete(docIdByEventId.get(ev.id) || docIdFor(ev));
       // 반복 시리즈 전체가 삭제된 경우 — 이 시리즈로 만들어 둔 회차 문서도 함께 정리
       if (!ev.recurringEventId) {
         for (const [id, ex] of existingMap) if (ex.gcalSync?.recurringEventId === ev.id) softDelete(id);
       }
       continue;
     }
+    const docId = docIdFor(ev);
     const mapped = mapEvent(ev);
     if (!mapped) continue;
     seen.add(docId);

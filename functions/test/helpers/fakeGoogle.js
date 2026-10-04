@@ -17,7 +17,10 @@ export function createFakeGoogle() {
     cancel(id) {
       version++;
       const cur = events.get(id);
-      events.set(id, { ev: { ...(cur?.ev || { id }), id, status: "cancelled", updated: new Date(1700000000000 + version * 1000).toISOString() }, ver: version });
+      // 실제 구글처럼 취소된 일정은 id/status(+반복 회차면 recurringEventId)만 준다 — iCalUID 등 나머지는 없음(실서버 검증에서 확인)
+      const slim = { id, status: "cancelled", updated: new Date(1700000000000 + version * 1000).toISOString() };
+      if (cur?.ev?.recurringEventId) slim.recurringEventId = cur.ev.recurringEventId;
+      events.set(id, { ev: slim, ver: version });
     },
 
     async refreshAccessToken() {
