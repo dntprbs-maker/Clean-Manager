@@ -50,7 +50,8 @@ export function Provider({ children, loginUser, onLogout }) {
 
   useEffect(() => {
     const unsubEvents = onSnapshot(collection(companyRef, "events"), snap => {
-      setEvents(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      // 동기화(ICS·구글 실시간)가 지운 일정은 문서를 지우지 않고 status:"deleted"로 표시만 한다 → 화면에서는 숨김
+      setEvents(snap.docs.filter(d => d.data().status !== "deleted").map(d => ({ ...d.data(), id: d.id })));
     });
     const unsubCompanyDoc = onSnapshot(companyRef, snap => {
       if (snap.exists()) setCompanyDoc(snap.data());
