@@ -77,7 +77,8 @@ export function ImportCalendarScreen() {
       if (!url) { setSubSyncing(false); return; } // URL만 지운 경우 동기화는 건너뜀
       const sync = httpsCallable(functions, "syncIcsSubscriptionNow");
       const res = await sync({ companyId, calId: subCal.id });
-      const { imported, removed, skippedOld } = res.data || {};
+      const { imported, removed, skippedOld, skippedByPush } = res.data || {};
+      if (skippedByPush) { setSubResult("구글 실시간 동기화가 켜져 있는 팀이라 ICS 동기화는 건너뛰었어요."); return; }
       setSubResult(
         `${imported ?? 0}개 가져옴` +
         (removed ? `, ${removed}개는 구독 쪽에서 사라져 삭제목록으로 정리` : "") +
@@ -482,6 +483,18 @@ export function ImportCalendarScreen() {
               {subCal.icsSubscriptionLastSyncAt && (
                 <p className="text-[11px] text-gray-400">
                   마지막 자동 동기화: {new Date(subCal.icsSubscriptionLastSyncAt).toLocaleString("ko-KR")}
+                </p>
+              )}
+              {/* 구글 실시간(push) 동기화 상태 — 서버(gcal 함수)가 써주는 표시용 값, 켜진 팀만 보임 */}
+              {subCal.gcalPushStatus?.enabled && (
+                <p className="text-[11px] text-blue-500 font-semibold">
+                  ⚡ 구글 실시간 동기화 사용 중
+                  {subCal.gcalPushStatus.lastSuccessAt && ` · 마지막 성공: ${new Date(subCal.gcalPushStatus.lastSuccessAt).toLocaleString("ko-KR")}`}
+                </p>
+              )}
+              {subCal.gcalPushStatus?.enabled && (subCal.gcalPushStatus.needsReauth || subCal.gcalPushStatus.lastError) && (
+                <p className="text-xs text-red-500 font-semibold">
+                  ⚠️ 실시간 동기화: {subCal.gcalPushStatus.needsReauth ? "구글 계정 재연결이 필요합니다." : subCal.gcalPushStatus.lastError}
                 </p>
               )}
               {subResult && <p className="text-xs text-green-600 font-semibold">✓ {subResult}</p>}
