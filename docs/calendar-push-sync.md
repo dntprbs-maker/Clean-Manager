@@ -134,26 +134,55 @@ firebase functions:secrets:access GCAL_TOKEN_KEY >/dev/null && echo OK   # 존�
 
 ---
 
-## 4. Firestore 보안 규칙
+## 4. Firestore 보안 규칙 (2026-10-04 적용 완료)
 
-이 저장소에는 `firestore.rules` 파일이 없습니다(`firebase.json`에 firestore 항목 없음) → 규칙은 **Firebase 콘솔에서 직접 관리** 중인 것으로 보입니다. 그래서 규칙 파일을 새로 만들어 넣지 않았습니다(파일을 추가하면 다음 `firebase deploy` 때 콘솔 규칙을 덮어써서 앱이 깨질 위험).
+이 저장소에는 `firestore.rules` 파일이 없습니다(`firebase.json`에 firestore 항목 없음) → 규칙은 **Firebase 콘솔/CLI로 직접 관리**합니다. 저장소에 규칙 파일을 넣고 `firebase.json`에 연결하면 다음 `firebase deploy` 때 규칙이 덮어써질 수 있으니 주의하세요.
 
-콘솔(https://console.firebase.google.com/project/clean-manager-60bc9/firestore/rules)에서 **기존 규칙 맨 위 `match /databases/{database}/documents {` 안에** 아래를 추가하세요:
+### 왜 "gcal 컬렉션만 막는 규칙을 추가"하는 방식이 안 되나
+
+이 앱은 Firebase 로그인을 쓰지 않고 자체 로그인을 써서, 원래 규칙이 **전체 허용 한 줄**이었습니다.
 
 ```
-    // 구글 캘린더 실시간 동기화 — 서버(Cloud Functions, Admin SDK) 전용. 클라이언트는 전부 금지.
-    match /gcalConfig/{doc=**}      { allow read, write: if false; }
-    match /gcalCalendars/{doc=**}   { allow read, write: if false; }
-    match /gcalCredentials/{doc=**} { allow read, write: if false; }
-    match /gcalChannels/{doc=**}    { allow read, write: if false; }
-    match /gcalOAuthStates/{doc=**} { allow read, write: if false; }
+match /{document=**} { allow read, write: if true; }
 ```
 
-- Admin SDK는 규칙을 우회하므로 함수 동작에는 영향 없습니다.
-- 주의: 기존 규칙에 `match /{document=**} { allow read, write: if true; }` 같은 **전체 허용 규칙이 있으면**, Firestore 규칙은 "하나라도 허용하면 허용"이라 위 금지 규칙이 무시됩니다. 그 경우에도 refresh token은 `GCAL_TOKEN_KEY`로 암호화돼 있어 유출돼도 바로 쓸 수는 없지만, 전체 허용 규칙을 정리하는 것을 권장합니다.
-- 앱(클라이언트)은 `companies/{c}/cals/{calId}.gcalPushStatus`(표시용)만 읽습니다 — 기존 cals 규칙 그대로면 됩니다.
+Firestore 규칙은 "하나라도 허용하면 허용"이라서, 그 위에 `gcal*` 금지 규칙을 따로 추가해도 **무시됩니다**(실제로 비로그인 조회가 200으로 열려 있었음).
 
----
+### 실제로 적용한 규칙
+
+전체 허용 한 줄을 아래로 **교체**했습니다. `gcal`로 시작하지 않는 컬렉션은 예전과 똑같이 허용하고, `gcal*`만 서버 전용(Admin SDK)으로 막습니다.
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{col}/{document=**} {
+      allow read, write: if !col.matches('gcal.*');
+    }
+  }
+}
+```
+
+- 서버 함수(Admin SDK)는 규칙을 우회하므로 동작에 영향이 없습니다.
+- 앱·출퇴근 앱·안드로이드 위젯은 `collectionGroup` 조회를 쓰지 않고 `gcal*` 컬렉션을 읽지 않아 영향이 없음을 코드 검색으로 확인했습니다. 앱이 읽는 `companies/{c}/cals/{calId}.gcalPushStatus`(표시용)는 다른 경로입니다.
+- 앱에서 `gcal`로 시작하는 이름의 컬렉션을 새로 쓰면 막히니 주의하세요.
+
+### 적용 방법(참고)과 복원
+
+- CLI로 적용: 임시 폴더에 `firestore.rules`(위 규칙)와 `firebase.json`(`{"firestore":{"rules":"firestore.rules"}}`)을 만들고 `npx firebase-tools deploy --only firestore:rules --project clean-manager-60bc9`. 먼저 `--dry-run`으로 컴파일 검사.
+- 콘솔: https://console.firebase.google.com/project/clean-manager-60bc9/firestore/databases/-default-/security/rules 에서 직접 붙여넣기도 가능.
+- **원복**(이상이 있을 때): 이전 전체 허용 규칙으로 되돌려 다시 게시. 콘솔 규칙 화면의 **버전 기록**에서 이전 버전을 선택해 복원할 수도 있습니다.
+
+### 적용 후 확인 결과
+
+| 확인 | 결과 |
+|---|---|
+| 비로그인으로 `gcalConfig`, `gcalCredentials`, `gcalCalendars`, `gcalChannels`, `gcalOAuthStates` 조회 | 403 (차단) |
+| 비로그인으로 `companies/...`, `events`, `cals`, `users`, `staffs`, `attendance_*` 조회 | 200 (기존과 동일) |
+| 앱에서 기존 일정 조회·일정 추가 | 정상 |
+| 구글 일정 생성·삭제 → 앱 반영 | 정상 |
+
+※ 앱 전체가 로그인 없이 열려 있는 근본 문제(그 외 컬렉션은 여전히 누구나 읽기·쓰기 가능)는 이번 범위가 아닙니다.
 
 ## 5. 배포 (감독 작업자 환경에서)
 
