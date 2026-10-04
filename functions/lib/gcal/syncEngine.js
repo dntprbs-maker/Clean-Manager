@@ -208,7 +208,7 @@ export async function syncCalendar(deps, key, { forceFull = false, allowMassDele
   let state = lock.state;
   // 스위치가 꺼져 있으면 아무것도 쓰지 않는다(ICS 경로와 동시에 쓰면 서로의 일정을 지울 수 있음)
   if (!state.enabled || !(await isGlobalPushEnabled(db))) {
-    await releaseLockOrContinue(db, key, lockId, now());
+    await calRef(db, key).set({ syncLockUntil: 0, syncLockId: null, pendingResync: false }, { merge: true });
     return { status: "disabled" };
   }
 

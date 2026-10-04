@@ -199,8 +199,10 @@ test("대량 삭제 방지: 전체 재동기화에서 한꺼번에 많이 사라
 test("스위치가 꺼져 있으면(전역 또는 팀별) 아무것도 쓰지 않음", async () => {
   await seedConnected({ enabled: false });
   google.upsert(ev("a"));
+  await db.doc(`gcalCalendars/${KEY}`).set({ pendingResync: true }, { merge: true });
   assert.equal((await syncCalendar(deps, KEY)).status, "disabled");
   assert.equal(doc("a_google_com"), undefined);
+  assert.equal(st().syncLockId, null); // 잠금이 남지 않음
   await db.doc(`gcalCalendars/${KEY}`).set({ enabled: true }, { merge: true });
   await setGlobalPush(db, false);
   assert.equal((await syncCalendar(deps, KEY, { forceFull: true })).status, "disabled");
