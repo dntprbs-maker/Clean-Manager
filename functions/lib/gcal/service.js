@@ -90,7 +90,14 @@ export async function disableCalendar(deps, key) {
 }
 
 export async function setGlobalPush(db, enabled) {
+  const wasOn = await isGlobalPushEnabled(db);
   await db.collection(COL.config).doc("global").set({ pushEnabled: enabled === true, updatedAt: new Date().toISOString() }, { merge: true });
+  if (enabled === true && !wasOn) {
+    // 꺼져 있던 동안 ICS가 대신 동기화하며 바꾼 것(반복 회차 정리 등)을 바로잡도록
+    // 다음 정기 점검에서 모든 팀을 전체 재동기화하게 표시
+    const snap = await db.collection(COL.calendars).get();
+    await Promise.all(snap.docs.map((d) => d.ref.set({ lastFullSyncAt: null }, { merge: true })));
+  }
 }
 
 // ── 구글 비공개 iCal 주소에서 캘린더 ID 추출 ────────────────────────────

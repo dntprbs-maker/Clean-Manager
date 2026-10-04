@@ -401,3 +401,14 @@ test("관리 페이지: 패스프레이즈 없거나 틀리면 거부, 맞으면
   assert.match(page.html, /<base href="https:\/\/x\/gcalAdmin\/">/);
   assert.ok(!page.html.includes("rt-secret-value") && !page.html.includes(TOKEN_KEY));
 });
+
+test("전역 스위치를 껐다 켜면 다음 정기 점검에서 전체 재동기화(ICS가 정리한 회차 복구)", async () => {
+  await enabledWithChannel();
+  await db.doc(`${EVENTS}/a_google_com`).update({ status: "deleted", deletedBy: "ics_subscription" }); // 꺼진 동안 ICS가 정리했다고 가정
+  await setGlobalPush(db, false);
+  await setGlobalPush(db, true);
+  clock += 3600 * 1000;
+  await runMaintenance(deps);
+  assert.equal(st().lastSyncReason, "safety_full");
+  assert.equal(doc("a_google_com").status, "active");
+});
