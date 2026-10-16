@@ -16,6 +16,7 @@ final class WidgetConfig {
     static final String PREF_KEY_CACHE_BLOB = "cache_blob";
     static final String PREF_KEY_WEEK_OFFSET_PREFIX = "week_offset_";
     static final String PREF_KEY_MONTH_OFFSET_PREFIX = "month_offset_";
+    static final String PREF_KEY_TWOWEEK_OFFSET_PREFIX = "twoweek_offset_";
 
     private WidgetConfig() {}
 }

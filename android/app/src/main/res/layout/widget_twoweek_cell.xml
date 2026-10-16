@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/tw_cell_root"
+    android:layout_width="0dp"
+    android:layout_height="match_parent"
+    android:layout_weight="1"
+    android:layout_margin="1dp"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg_day_cell">
+
+    <TextView
+        android:id="@+id/tw_cell_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
+        android:textStyle="bold"
+        android:textSize="12sp"
+        android:textColor="@color/widget_weekday_text" />
+
+    <TextView android:id="@+id/tw_cell_line1" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
+    <TextView android:id="@+id/tw_cell_line2" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
+    <TextView android:id="@+id/tw_cell_line3" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
+    <TextView android:id="@+id/tw_cell_line4" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
+    <TextView android:id="@+id/tw_cell_line5" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
+    <TextView android:id="@+id/tw_cell_line6" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/tw_cell_more"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingLeft="2dp"
+        android:paddingRight="2dp"
+        android:textSize="8sp"
+        android:textColor="#FF6B7280"
+        android:visibility="gone" />
+</LinearLayout>

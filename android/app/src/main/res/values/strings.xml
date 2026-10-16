@@ -8,4 +8,8 @@
     <string name="widget_weekly_description">한 주 일정을 요일별로 보여줍니다. 날짜를 누르면 그 날짜의 클린매니저 웹앱이 열립니다.</string>
     <string name="widget_monthly_label">클린매니저 월간</string>
     <string name="widget_monthly_description">한 달 일정을 달력으로 보여줍니다. 날짜를 누르면 그 날짜의 클린매니저가 열립니다.</string>
+    <string name="widget_twoweek_label">클린매니저 2주</string>
+    <string name="widget_twoweek_description">이번 주와 다음 주 일정을 위아래로 보여줍니다. 날짜를 누르면 그 날짜의 클린매니저가 열립니다.</string>
+    <string name="widget_twoweek2_label">클린매니저 2주(주간형)</string>
+    <string name="widget_twoweek2_description">주간 위젯 모양으로 이번 주를 위에, 다음 주를 아래에 보여줍니다. 날짜를 누르면 그 날짜의 클린매니저가 열립니다.</string>
 </resources>
