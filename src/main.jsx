@@ -12,6 +12,23 @@ const isSuperAdmin = window.location.hash === "#superadmin";
 const isLocal = window.location.hostname === "localhost";
 const isVercel = window.location.hostname.includes("vercel.app");
 const isPcClaudePreview = isVercel && window.location.hostname.includes("pc-claude");
+
+// 대표 도메인 통일 — clean-manager-60bc9.web.app / clean-manager.com(www 없음)으로
+// 들어온 요청은 www.clean-manager.com으로 보낸다. 세 주소가 같은 Firebase Hosting
+// 사이트를 같은 화면으로 서빙하다 보니, 직원이 예전 주소(.web.app)와 새 주소(www)를
+// 둘 다 열어본 적이 있으면 푸시 알림 토큰이 주소별로 따로 등록돼 같은 일정에
+// 알림이 2통씩 오는 문제가 있었다(2026-10-16). 대표 주소 하나로만 들어오게 하면
+// 새로 발급되는 토큰이 앞으로는 하나로 모인다.
+const CANONICAL_HOST = "www.clean-manager.com";
+const isCanonicalCandidate =
+  !isLocal && !isVercel &&
+  (window.location.hostname === "clean-manager-60bc9.web.app" ||
+    window.location.hostname === "clean-manager.com");
+if (isCanonicalCandidate) {
+  window.location.replace(
+    `https://${CANONICAL_HOST}${window.location.pathname}${window.location.search}${window.location.hash}`
+  );
+}
 document.title = isLocal ? "클린메니져-로컬서버" : isPcClaudePreview ? "클린메니져-피씨클로드" : isVercel ? "클린메니져-개발" : "클린메니져";
 
 // 로컬/피씨클로드 미리보기는 구분하기 쉽게 색만 다른 임시 아이콘(SVG)을 쓰고,
@@ -40,8 +57,12 @@ const blockPinch = (e) => {
 document.addEventListener("touchstart", blockPinch, { passive: false, capture: true });
 document.addEventListener("touchmove", blockPinch, { passive: false, capture: true });
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    {isSuperAdmin ? <SuperAdmin /> : <App />}
-  </StrictMode>,
-)
+// 리다이렉트 중에는 화면을 그리지 않음 — 옛 주소에서 잠깐이라도 앱이 뜨면
+// 그 주소에서 푸시 토큰이 다시 등록될 수 있다.
+if (!isCanonicalCandidate) {
+  createRoot(document.getElementById('root')).render(
+    <StrictMode>
+      {isSuperAdmin ? <SuperAdmin /> : <App />}
+    </StrictMode>,
+  )
+}

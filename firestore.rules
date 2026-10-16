@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // gcal*: 구글 캘린더 동기화 서버 전용 / mcp*: 공용 MCP 서버 전용 (Admin SDK는 규칙 무시)
+    match /{col}/{document=**} {
+      allow read, write: if !col.matches('(gcal|mcp).*');
+    }
+  }
+}
