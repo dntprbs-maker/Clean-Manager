@@ -60,7 +60,10 @@ export class McpOAuthProvider {
     if (token.startsWith(AGENT_KEY_PREFIX)) {
       const agent = await findAgentByKey(token);
       if (!agent) throw new InvalidTokenError("invalid or disabled agent key");
-      return { token, clientId: `agent:${agent.agentId}`, scopes: agent.scopes, extra: { agent } };
+      // 접속키 자체엔 만료가 없지만 SDK 미들웨어(requireBearerAuth)가 expiresAt 없는 토큰을
+      // 거부하므로, 매 요청 검증 시점 기준 5분 뒤로 넣는다(키를 끄면 다음 요청부터 바로 막힘).
+      const expiresAt = Math.floor(Date.now() / 1000) + 300;
+      return { token, clientId: `agent:${agent.agentId}`, scopes: agent.scopes, expiresAt, extra: { agent } };
     }
     const data = await tokens.verifyAccessTokenHash(sha256Hex(token));
     if (!data) {

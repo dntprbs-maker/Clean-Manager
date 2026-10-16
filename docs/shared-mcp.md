@@ -31,14 +31,33 @@
 
 ## 3. 배포 전 필수 — Firestore 규칙 (승인 필요)
 
-현재 운영 규칙은 `gcal*`만 막고 나머지 컬렉션은 **비로그인 클라이언트도 읽기/쓰기 허용**입니다. 그래서 `mcpAgents`(접속키 해시), `mcpOAuthTokens`(토큰 해시)에 누군가 문서를 직접 써 넣으면 **스스로 접속 권한을 만들 수 있습니다** (기존 MCP도 이미 같은 위험 상태).
-콘솔에서 아래처럼 바꿔야 합니다 (`mcp`로 시작하는 컬렉션은 서버(Admin SDK) 전용 — 앱은 `mcp*`를 쓰지 않음):
+### 실측 결과 (2026-10-16, 비인증 REST 집계 쿼리 — 읽기만, 문서 내용은 조회 안 함)
+| 컬렉션 | 비인증 접근 |
+|---|---|
+| `mcpOAuthTokens` (10건) · `mcpOAuthClients` (9건) · `mcpOAuthCodes` (1건) · `mcpAgents` | **읽기 허용** |
+| `gcalConfig` · `gcalCredentials` | 403 차단 (정상) |
 
+쓰기는 시험하지 않았지만 같은 규칙 줄이 적용되므로 쓰기도 열려 있다고 봐야 합니다. 그러면 누구나 `mcpOAuthTokens/{임의값의 SHA-256}` 문서를 만들어 **owner 권한 MCP 토큰을 스스로 만들 수 있습니다**(직원·팀 관리 포함). 기존 MCP에서도 이미 같은 상태입니다.
+
+### 바꿀 규칙 (전체)
 ```
-match /{col}/{document=**} {
-  allow read, write: if !col.matches('(gcal|mcp).*');
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // gcal*: 구글 캘린더 동기화 서버 전용 / mcp*: 공용 MCP 서버 전용 (Admin SDK는 규칙 무시)
+    match /{col}/{document=**} {
+      allow read, write: if !col.matches('(gcal|mcp).*');
+    }
+  }
 }
 ```
+- 영향: 앱 본체·`attendance/`·위젯 코드는 `mcp*` 컬렉션을 쓰지 않음(코드 검색 확인). Cloud Functions(MCP·동기화)는 Admin SDK라 규칙 영향 없음.
+- **남는 위험(이번 범위 밖):** `companies/*`, `staffs`, `admins` 등 업무 데이터 전체가 여전히 비로그인 읽기·쓰기 허용입니다. 앱이 Firebase 로그인을 안 쓰는 구조라 생긴 문제로, 막으려면 앱 인증 구조 변경이 필요합니다.
+
+### 백업·복구
+1. 변경 전: Firebase 콘솔 → Firestore → 규칙 탭의 현재 규칙 전체를 복사해 보관 (콘솔 "규칙 기록"에도 이전 버전이 남음)
+2. 변경 후 확인: 앱 일정 조회·등록·수정·삭제 1회씩, 그리고 아래 명령이 `mcp*`는 403, `companies` 조회는 계속 200인지 확인
+3. 문제 시: 규칙 기록에서 이전 버전 선택 → 게시 (즉시 원복)
 
 ## 4. 배포 · 검증 순서
 

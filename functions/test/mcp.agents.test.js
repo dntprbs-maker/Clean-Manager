@@ -131,3 +131,31 @@ test("리다이렉트 허용 목록: Claude·ChatGPT·루프백만", () => {
   assert.ok(!isAllowedRedirectUri("https://chatgpt.com.evil.com/connector/oauth/x"));
   assert.ok(!isAllowedRedirectUri("https://chatgpt.com/connector/oauth/x/../../steal"));
 });
+
+// 실제 운영 경로와 같은 SDK 미들웨어(requireBearerAuth)를 통과하는지 — 단위 검증만으로는
+// "만료 시각 없는 토큰 거부" 같은 미들웨어 규칙을 놓쳐서 별도로 확인한다.
+test("SDK 인증 미들웨어 통과: 접속키·OAuth 토큰 OK, 잘못된 키·꺼진 AI는 401", async () => {
+  const { requireBearerAuth } = await import("@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js");
+  const mw = requireBearerAuth({ verifier: new McpOAuthProvider() });
+  const run = (token) => new Promise((resolve) => {
+    const req = { headers: { authorization: `Bearer ${token}` } };
+    const res = {
+      statusCode: 200, set() { return this; }, status(c) { this.statusCode = c; return this; },
+      json() { resolve({ status: this.statusCode, req }); return this; },
+    };
+    mw(req, res, () => resolve({ status: 200, req }));
+  });
+  const key = generateAgentKey();
+  await db.doc("mcpAgents/dexd").set({ label: "덱스D", keyHash: sha256Hex(key), scopes: DEFAULT_AGENT_SCOPES, enabled: true });
+  const okKey = await run(key);
+  assert.equal(okKey.status, 200);
+  assert.equal(okKey.req.auth.extra.agent.agentId, "dexd");
+
+  await db.doc("mcpOAuthTokens/" + sha256Hex("tokA")).set({ type: "access", clientId: "c", agentId: "dexd", expiresAt: Math.floor(Date.now() / 1000) + 60 });
+  assert.equal((await run("tokA")).status, 200);
+  assert.equal((await run("cmk_nope")).status, 401);
+  assert.equal((await run("random")).status, 401);
+  await db.doc("mcpAgents/dexd").update({ enabled: false });
+  assert.equal((await run(key)).status, 401);
+  assert.equal((await run("tokA")).status, 401);
+});
