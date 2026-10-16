@@ -123,6 +123,7 @@ public class CleanManagerMonthlyWidgetProvider extends AppWidgetProvider {
                 }
                 // 공용 캐시를 갱신했으니 주간 위젯도 캐시로 다시 그린다 (네트워크 재요청 없음).
                 CleanManagerWeeklyWidgetProvider.redrawAll(appContext);
+                CleanManagerTwoWeekWidgetProvider.redrawAll(appContext);
             } finally {
                 pendingResult.finish();
             }

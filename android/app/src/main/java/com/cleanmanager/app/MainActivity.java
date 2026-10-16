@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.os.Bundle;
 
 import com.cleanmanager.app.widget.CleanManagerMonthlyWidgetProvider;
+import com.cleanmanager.app.widget.CleanManagerTwoWeekWidgetProvider;
 import com.cleanmanager.app.widget.CleanManagerWeeklyWidgetProvider;
 import com.getcapacitor.BridgeActivity;
 
@@ -20,6 +21,7 @@ public class MainActivity extends BridgeActivity {
         super.onResume();
         CleanManagerWeeklyWidgetProvider.requestRefresh(this);
         CleanManagerMonthlyWidgetProvider.requestRefresh(this);
+        CleanManagerTwoWeekWidgetProvider.requestRefresh(this);
     }
 
     @Override
@@ -27,6 +29,7 @@ public class MainActivity extends BridgeActivity {
         super.onPause();
         CleanManagerWeeklyWidgetProvider.requestRefresh(this);
         CleanManagerMonthlyWidgetProvider.requestRefresh(this);
+        CleanManagerTwoWeekWidgetProvider.requestRefresh(this);
     }
 
     @Override
