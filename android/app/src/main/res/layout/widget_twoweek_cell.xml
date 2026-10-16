@@ -25,6 +25,12 @@
     <TextView android:id="@+id/tw_cell_line4" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
     <TextView android:id="@+id/tw_cell_line5" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
     <TextView android:id="@+id/tw_cell_line6" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
+    <TextView android:id="@+id/tw_cell_line7" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
+    <TextView android:id="@+id/tw_cell_line8" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
+    <TextView android:id="@+id/tw_cell_line9" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
+    <TextView android:id="@+id/tw_cell_line10" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
+    <TextView android:id="@+id/tw_cell_line11" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
+    <TextView android:id="@+id/tw_cell_line12" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="2dp" android:paddingRight="2dp" android:singleLine="true" android:ellipsize="end" android:textSize="9sp" android:visibility="gone" />
 
     <TextView
         android:id="@+id/tw_cell_more"
