@@ -33,8 +33,50 @@ const REPEAT_FIELDS = {
   repeatYearlyWeekday: z.number().int().min(0).max(6).optional(),
 };
 
+export const TEST_TITLE_PREFIX = "[MCP시험] ";
+
+const audit = (agent) => ({ agentId: agent?.agentId || "unknown", label: agent?.label || "", at: new Date().toISOString() });
+
+function toView(ev, teamByCal) {
+  return {
+    id: ev.id,
+    title: ev.title,
+    start: ev.start,
+    end: ev.end,
+    allDay: !!ev.allDay,
+    startTime: ev.startTime,
+    endTime: ev.endTime,
+    place: ev.place,
+    contact: ev.contact,
+    description: ev.description,
+    team: ev.team || teamByCal[ev.calId] || null,
+    calId: ev.calId || null,
+    repeat: ev.repeat && ev.repeat !== "none" ? ev.repeat : undefined,
+    mcpTest: ev.mcpTest ? true : undefined,
+    createdBy: ev.mcpCreatedBy?.label || undefined,
+  };
+}
+
 export function registerEventTools(server, companyId) {
   const eventsCol = () => getDb().collection(`companies/${companyId}/events`);
+
+  // 기간 안의 (반복 전개된) 일정 + 팀 필터
+  async function eventsInRange({ start, end, team }) {
+    const snap = await eventsCol().get();
+    const events = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((e) => e.status !== "deleted");
+    const expanded = expandRecurringForFeed(events);
+    const teamByCal = await loadTeamNameByCalId(companyId);
+    const inRange = expanded.filter((ev) => {
+      const evEnd = ev.end || ev.start;
+      return ev.start <= end && evEnd >= start;
+    });
+    const filtered = team
+      ? inRange.filter((ev) => ev.team === team || teamByCal[ev.calId] === team)
+      : inRange;
+    return filtered.map((ev) => toView(ev, teamByCal));
+  }
 
   server.registerTool(
     "list_events",
@@ -47,38 +89,50 @@ export function registerEventTools(server, companyId) {
         team: z.string().optional().describe("팀 이름으로 필터링 (선택)"),
       },
     },
-    async ({ start, end, team }) => {
-      const snap = await eventsCol().get();
-      const events = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((e) => e.status !== "deleted");
-      const expanded = expandRecurringForFeed(events);
+    async ({ start, end, team }) => ok(await eventsInRange({ start, end, team }))
+  );
+
+  server.registerTool(
+    "search_events",
+    {
+      title: "날짜별 일정 검색",
+      description: "날짜(date 하루 또는 start~end 기간)와 검색어(제목·장소·메모·연락처에 포함)로 일정을 찾는다. date만 주면 그날 일정 전체.",
+      inputSchema: {
+        date: z.string().optional().describe("특정 날짜 YYYY-MM-DD (start/end 대신)"),
+        start: z.string().optional().describe("기간 시작 YYYY-MM-DD"),
+        end: z.string().optional().describe("기간 끝 YYYY-MM-DD (생략 시 start와 동일)"),
+        query: z.string().optional().describe("검색어 (선택)"),
+        team: z.string().optional().describe("팀 이름 (선택)"),
+        onlyTest: z.boolean().optional().describe("true면 MCP 시험 일정만"),
+      },
+    },
+    async ({ date, start, end, query, team, onlyTest }) => {
+      const s0 = date || start;
+      if (!s0) return err("date 또는 start가 필요합니다.");
+      const e0 = date || end || s0;
+      if (e0 < s0) return err("end는 start보다 빠를 수 없습니다.");
+      let list = await eventsInRange({ start: s0, end: e0, team });
+      if (query) {
+        const q = query.toLowerCase();
+        list = list.filter((ev) => [ev.title, ev.place, ev.description, ev.contact].some((v) => (v || "").toLowerCase().includes(q)));
+      }
+      if (onlyTest) list = list.filter((ev) => ev.mcpTest);
+      return ok(list);
+    }
+  );
+
+  server.registerTool(
+    "get_event",
+    {
+      title: "일정 상세",
+      description: "일정 id로 원본 일정 1건을 조회한다.",
+      inputSchema: { eventId: z.string().describe("일정 id") },
+    },
+    async ({ eventId }) => {
+      const snap = await eventsCol().doc(eventId).get();
+      if (!snap.exists || snap.data().status === "deleted") return err(`일정 ${eventId}을 찾을 수 없습니다.`);
       const teamByCal = await loadTeamNameByCalId(companyId);
-
-      const inRange = expanded.filter((ev) => {
-        const evEnd = ev.end || ev.start;
-        return ev.start <= end && evEnd >= start;
-      });
-      const filtered = team
-        ? inRange.filter((ev) => ev.team === team || teamByCal[ev.calId] === team)
-        : inRange;
-
-      const result = filtered.map((ev) => ({
-        id: ev.id,
-        title: ev.title,
-        start: ev.start,
-        end: ev.end,
-        allDay: !!ev.allDay,
-        startTime: ev.startTime,
-        endTime: ev.endTime,
-        place: ev.place,
-        contact: ev.contact,
-        description: ev.description,
-        team: ev.team || teamByCal[ev.calId] || null,
-        calId: ev.calId || null,
-        repeat: ev.repeat && ev.repeat !== "none" ? ev.repeat : undefined,
-      }));
-      return ok(result);
+      return ok(toView({ id: eventId, ...snap.data() }, teamByCal));
     }
   );
 
@@ -98,11 +152,13 @@ export function registerEventTools(server, companyId) {
         contact: z.string().optional().describe("연락처"),
         description: z.string().optional().describe("메모/특이사항"),
         team: z.string().optional().describe("담당 팀 이름 (기존에 있는 팀이어야 함)"),
+        test: z.boolean().optional().describe("시험용 일정이면 true — 제목 앞에 [MCP시험]이 붙고 직원 알림이 가지 않는다"),
         ...REPEAT_FIELDS,
       },
     },
-    async (input) => {
-      const { title, start, team, ...rest } = input;
+    async (input, extra) => {
+      const { title: rawTitle, start, team, test, ...rest } = input;
+      const title = test && !rawTitle.startsWith(TEST_TITLE_PREFIX) ? TEST_TITLE_PREFIX + rawTitle : rawTitle;
       const end = rest.end || start;
       if (end < start) return err("end는 start보다 빠를 수 없습니다.");
       if (!rest.allDay && rest.startTime && rest.endTime && rest.endTime <= rest.startTime) {
@@ -112,7 +168,8 @@ export function registerEventTools(server, companyId) {
       if (team && !calId) return err(`팀 "${team}"을 찾을 수 없습니다. list_teams로 존재하는 팀 이름을 확인하세요.`);
 
       const docRef = eventsCol().doc();
-      const data = { title, start, end, team: team || "", calId: calId || "", ...rest };
+      const data = { title, start, end, team: team || "", calId: calId || "", ...rest, mcpCreatedBy: audit(extra?.agent) };
+      if (test) data.mcpTest = true;
       await docRef.set(data);
       return ok({ id: docRef.id, ...data });
     }
@@ -148,12 +205,19 @@ export function registerEventTools(server, companyId) {
         }, z.object(PATCH_SHAPE)).describe("바꿀 필드만 담아서 전달 (객체 또는 JSON 문자열 모두 허용)"),
       },
     },
-    async ({ eventId, patch }) => {
+    async ({ eventId, patch }, extra) => {
       const docRef = eventsCol().doc(eventId);
       const snap = await docRef.get();
-      if (!snap.exists) return err(`일정 ${eventId}을 찾을 수 없습니다.`);
+      if (!snap.exists || snap.data().status === "deleted") return err(`일정 ${eventId}을 찾을 수 없습니다.`);
+      const cur = snap.data();
+      const nStart = patch.start ?? cur.start;
+      const nEnd = patch.end ?? cur.end ?? nStart;
+      if (nEnd < nStart) return err("end는 start보다 빠를 수 없습니다.");
+      if (cur.mcpTest && patch.title !== undefined && !patch.title.startsWith(TEST_TITLE_PREFIX)) {
+        patch.title = TEST_TITLE_PREFIX + patch.title; // 시험 일정 표시는 수정해도 유지
+      }
 
-      const next = { ...patch };
+      const next = { ...patch, mcpUpdatedBy: audit(extra?.agent) };
       if (patch.team !== undefined) {
         const calId = await resolveCalId(companyId, patch.team);
         if (patch.team && !calId) return err(`팀 "${patch.team}"을 찾을 수 없습니다.`);
@@ -164,29 +228,33 @@ export function registerEventTools(server, companyId) {
     }
   );
 
+  // 삭제는 AI가 직접 하지 않는다. 요청만 남기고, 실제 삭제는 관리자가 확인 후 처리한다.
+  // (구글 캘린더에서 온 일정은 앱에서 지워도 다음 동기화 때 되살아날 수 있어 더더욱 사람 확인이 필요)
   server.registerTool(
-    "delete_event",
+    "request_event_deletion",
     {
-      title: "일정 삭제",
-      description: "일정을 삭제한다. 반복 일정의 특정 1회차만 지우려면 scope=instance와 date를 함께 지정한다.",
+      title: "일정 삭제 요청",
+      description: "일정을 바로 지우지 않고 삭제 요청만 등록한다. 관리자가 승인해야 실제로 삭제된다. 일정은 그대로 남는다.",
       inputSchema: {
-        eventId: z.string().describe("삭제할 일정 id"),
-        scope: z.enum(["all", "instance"]).default("all").describe("all=전체 삭제, instance=특정 회차만 삭제"),
-        date: z.string().optional().describe("scope=instance일 때 삭제할 회차의 날짜 YYYY-MM-DD"),
+        eventId: z.string().describe("삭제를 요청할 일정 id"),
+        scope: z.enum(["all", "instance"]).default("all").describe("all=전체, instance=반복 일정의 특정 회차"),
+        date: z.string().optional().describe("scope=instance일 때 회차 날짜 YYYY-MM-DD"),
+        reason: z.string().min(1).describe("삭제 사유"),
       },
     },
-    async ({ eventId, scope, date }) => {
-      const docRef = eventsCol().doc(eventId);
-      const snap = await docRef.get();
-      if (!snap.exists) return err(`일정 ${eventId}을 찾을 수 없습니다.`);
-
-      if (scope === "instance") {
-        if (!date) return err("scope=instance일 때는 date가 필요합니다.");
-        await docRef.update({ [`exceptions.${date}`]: { _deleted: true } });
-        return ok({ id: eventId, deleted: "instance", date });
-      }
-      await docRef.delete();
-      return ok({ id: eventId, deleted: "all" });
+    async ({ eventId, scope, date, reason }, extra) => {
+      const snap = await eventsCol().doc(eventId).get();
+      if (!snap.exists || snap.data().status === "deleted") return err(`일정 ${eventId}을 찾을 수 없습니다.`);
+      if (scope === "instance" && !date) return err("scope=instance일 때는 date가 필요합니다.");
+      const ev = snap.data();
+      const ref = getDb().collection("mcpDeletionRequests").doc();
+      const req = {
+        companyId, eventId, scope, date: date || null, reason,
+        eventTitle: ev.title || "", eventStart: ev.start || "",
+        status: "pending", requestedBy: audit(extra?.agent),
+      };
+      await ref.set(req);
+      return ok({ requestId: ref.id, status: "pending", message: "삭제 요청을 등록했습니다. 관리자 승인 전까지 일정은 그대로 유지됩니다." });
     }
   );
 }

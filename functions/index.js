@@ -79,6 +79,8 @@ async function resolveTeamName(companyId, ev) {
 // action: "created" | "updated" | "deleted"
 async function notifyTeam(companyId, eventId, ev, action) {
   if (!ev) return;
+  // MCP 시험 일정(create_event test=true)은 직원에게 알림을 보내지 않는다
+  if (ev.mcpTest) return;
 
   // 1) 담당 팀명 알아내기
   const teamName = await resolveTeamName(companyId, ev);

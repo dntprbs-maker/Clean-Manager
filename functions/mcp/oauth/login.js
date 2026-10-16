@@ -1,6 +1,7 @@
 import express from "express";
 import { createCode } from "./codes.js";
 import { MCP_PASSPHRASE } from "../lib/db.js";
+import { findAgentByKey, OWNER_AGENT } from "../lib/agents.js";
 
 export const loginRouter = express.Router();
 loginRouter.use(express.urlencoded({ extended: false }));
@@ -29,7 +30,7 @@ function renderForm({ client_id, redirect_uri, code_challenge, state, scope, res
 </style></head>
 <body><div class="card">
   <h1>크린매니저 연결 승인</h1>
-  <p>Claude가 이 회사의 일정·직원·팀 데이터에 접근하도록 허용하려면 패스프레이즈를 입력하세요.</p>
+  <p>이 AI에 발급된 접속키(cmk_로 시작)를 입력하세요. 관리자는 기존 패스프레이즈로도 승인할 수 있습니다.</p>
   <form method="post" action="/oauth/login">
     ${hidden("client_id", client_id)}
     ${hidden("redirect_uri", redirect_uri)}
@@ -38,7 +39,7 @@ function renderForm({ client_id, redirect_uri, code_challenge, state, scope, res
     ${hidden("scope", scope)}
     ${hidden("resource", resource)}
     ${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
-    <input type="password" name="passphrase" placeholder="패스프레이즈" autofocus required>
+    <input type="password" name="passphrase" placeholder="접속키 또는 패스프레이즈" autofocus required>
     <button type="submit">승인</button>
   </form>
 </div></body></html>`;
@@ -62,9 +63,11 @@ loginRouter.post("/oauth/login", async (req, res) => {
   }
   res.set("Cache-Control", "no-store");
 
-  if (passphrase !== MCP_PASSPHRASE.value()) {
+  // 접속키가 맞으면 그 AI로, 기존 패스프레이즈면 owner(하위 호환)로 승인
+  const agent = (await findAgentByKey(passphrase)) || (passphrase === MCP_PASSPHRASE.value() ? OWNER_AGENT : null);
+  if (!agent) {
     res.status(401).type("html").send(
-      renderForm({ client_id, redirect_uri, code_challenge, state, scope, resource, error: "패스프레이즈가 올바르지 않습니다." })
+      renderForm({ client_id, redirect_uri, code_challenge, state, scope, resource, error: "접속키가 올바르지 않습니다." })
     );
     return;
   }
@@ -75,6 +78,7 @@ loginRouter.post("/oauth/login", async (req, res) => {
     redirectUri: redirect_uri,
     scopes: scope ? scope.split(" ") : [],
     resource: resource ? new URL(resource) : undefined,
+    agentId: agent.agentId,
   });
 
   const redirectUrl = new URL(redirect_uri);

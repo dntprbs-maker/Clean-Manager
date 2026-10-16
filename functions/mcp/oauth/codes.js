@@ -5,7 +5,7 @@ const CODE_TTL_MS = 5 * 60 * 1000; // 5분
 
 // 인가 코드는 짧고 값 자체가 민감하지 않은 1회용 토큰이라(짧은 TTL + 1회 소모) 원문 그대로 저장.
 // (액세스/리프레시 토큰은 수명이 길어서 tokens.js에서 해시로 저장하는 것과 대조적)
-export async function createCode({ clientId, codeChallenge, redirectUri, scopes, resource }) {
+export async function createCode({ clientId, codeChallenge, redirectUri, scopes, resource, agentId }) {
   const code = randomBytes(32).toString("base64url");
   await getDb().doc(`mcpOAuthCodes/${code}`).set({
     clientId,
@@ -13,6 +13,7 @@ export async function createCode({ clientId, codeChallenge, redirectUri, scopes,
     redirectUri,
     scopes: scopes || [],
     resource: resource ? resource.href : null,
+    agentId: agentId || "owner",
     createdAt: Date.now(),
     expiresAt: Date.now() + CODE_TTL_MS,
   });

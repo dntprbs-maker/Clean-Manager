@@ -19,6 +19,11 @@ export const MCP_PASSPHRASE = defineSecret("MCP_PASSPHRASE");
 // 로드 시점) 딱 한 번만 호출해야 하므로 지연 초기화하지 않고 여기서 즉시 실행.
 const _db = getFirestore();
 _db.settings({ ignoreUndefinedProperties: true });
+let _override = null;
 export function getDb() {
-  return _db;
+  return _override || _db;
+}
+// 테스트 전용: 메모리 Firestore로 바꿔 끼우기 (운영 코드에서 호출 금지)
+export function __setDbForTest(db) {
+  _override = db;
 }

@@ -5,13 +5,17 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 // 이 커넥터에 접속을 허용할 리다이렉트 URI만 화이트리스트:
 // - claude.ai (Claude.ai web/Desktop/mobile/Cowork 공식 콜백)
-// - 루프백(localhost/127.0.0.1) + path === "/callback" — Claude Code CLI 셀프테스트용
-//   (RFC 8252 루프백 포트는 SDK의 redirectUriMatches가 알아서 완화 처리하므로 여기선 포트 체크 안 함)
-function isAllowedRedirectUri(uriStr) {
+// - chatgpt.com/connector/oauth/{id} (ChatGPT 앱/커넥터 현재 방식) + 예전 고정 주소
+// - 루프백(localhost/127.0.0.1) — Claude Code CLI·Codex(`codex mcp login`)·Hermes(`hermes mcp login`)
+//   처럼 PC에서 브라우저 로그인 후 로컬 포트로 받는 클라이언트. 경로는 클라이언트마다 달라 제한하지 않음.
+//   (RFC 8252 루프백 포트는 SDK의 redirectUriMatches가 알아서 완화 처리)
+export function isAllowedRedirectUri(uriStr) {
   if (uriStr === "https://claude.ai/api/mcp/auth_callback") return true;
+  if (uriStr === "https://chatgpt.com/connector_platform_oauth_redirect") return true;
   try {
     const u = new URL(uriStr);
-    return LOOPBACK_HOSTS.has(u.hostname) && u.pathname === "/callback";
+    if (u.protocol === "https:" && u.hostname === "chatgpt.com" && /^\/connector\/oauth\/[A-Za-z0-9_-]+$/.test(u.pathname)) return true;
+    return u.protocol === "http:" && LOOPBACK_HOSTS.has(u.hostname);
   } catch {
     return false;
   }
@@ -29,7 +33,7 @@ export const clientsStore = {
     const uris = clientInfo.redirect_uris || [];
     if (!uris.some(isAllowedRedirectUri)) {
       throw new InvalidClientMetadataError(
-        "redirect_uris must include https://claude.ai/api/mcp/auth_callback or a loopback http://localhost|127.0.0.1/callback URI"
+        "redirect_uris must include a claude.ai / chatgpt.com connector callback or a loopback http://localhost|127.0.0.1 URI"
       );
     }
     await getDb().doc(`mcpOAuthClients/${clientInfo.client_id}`).set(clientInfo);
