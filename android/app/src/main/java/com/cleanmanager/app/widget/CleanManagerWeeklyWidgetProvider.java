@@ -7,6 +7,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.os.Bundle;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.style.StyleSpan;
@@ -30,6 +31,9 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
     static final String ACTION_REFRESH = "com.cleanmanager.app.widget.ACTION_REFRESH";
 
     private static final String[] WEEKDAY_KO = {"일", "월", "화", "수", "목", "금", "토"};
+    // 위젯 높이를 알 수 없을 때 쓰는 기존 상수값 (기존 동작 유지). 슬롯은 이미 10개다.
+    private static final int FALLBACK_LINES_PER_CELL = 10;
+    private static final int MORE_TEXT_COLOR = 0xFF6B7280;
     // 그리드 순서(월요일 자리에 보조칸이 아니라 일요일부터): sun, mon, tue, wed / aux, thu, fri, sat
     private static final int[] HEADER_IDS = {
             R.id.cell_sun_header, R.id.cell_mon_header, R.id.cell_tue_header, R.id.cell_wed_header,
@@ -103,6 +107,14 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
         for (int id : appWidgetIds) {
             WidgetCache.clearWeekOffset(context, id);
         }
+    }
+
+    @Override
+    public void onAppWidgetOptionsChanged(Context context, AppWidgetManager appWidgetManager,
+                                          int appWidgetId, Bundle newOptions) {
+        super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions);
+        // 위젯 크기가 바뀌면 새 높이로 줄 수를 다시 계산해 캐시만으로 다시 그린다 (네트워크 호출 없음).
+        applyWeekViews(context, appWidgetManager, appWidgetId);
     }
 
     /** 앱이 포그라운드/백그라운드를 오갈 때 호출해 위젯이 최신 일정을 다시 읽도록 한다. */
@@ -186,6 +198,11 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
         views.setOnClickPendingIntent(R.id.widget_prev_btn, navPendingIntent(context, ACTION_PREV_WEEK, appWidgetId, 1));
         views.setOnClickPendingIntent(R.id.widget_next_btn, navPendingIntent(context, ACTION_NEXT_WEEK, appWidgetId, 2));
 
+        // 칸 본문 높이·줄 높이는 위젯 렌더 시작 때 한 번만 계산해 모든 칸에 넘긴다.
+        int availablePx = cellBodyHeightPx(context, appWidgetId);
+        int linePx = WidgetSizing.textLinePx(context, 10f) + WidgetSizing.dp(context, 2);
+        int maxSlots = LINE_IDS[0].length;
+
         for (int dayIdx = 0; dayIdx < 7; dayIdx++) {
             Calendar day = (Calendar) sunday.clone();
             day.add(Calendar.DAY_OF_MONTH, dayIdx);
@@ -214,14 +231,37 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
             }
             Collections.sort(dayEvents, Comparator.comparing(e -> e.startTime == null ? "" : e.startTime));
 
+            int eventCount = dayEvents.size();
+            int shown;
+            boolean overflow;
+            if (availablePx < 0) {
+                // 높이를 모르면 기존 동작 유지 (+N 없음)
+                shown = Math.min(eventCount, FALLBACK_LINES_PER_CELL);
+                overflow = false;
+            } else {
+                int fit = WidgetSizing.fitLines(availablePx, linePx, linePx, eventCount, maxSlots);
+                if (fit >= eventCount) {
+                    shown = eventCount;
+                    overflow = false;
+                } else {
+                    // "+N" 전용 뷰가 없으니 마지막으로 보이는 줄 슬롯을 "+N" 줄로 재사용한다.
+                    shown = Math.max(0, fit - 1);
+                    overflow = true;
+                }
+            }
+
             int[] lineIds = LINE_IDS[dayIdx];
             for (int lineIdx = 0; lineIdx < lineIds.length; lineIdx++) {
-                if (lineIdx < dayEvents.size()) {
+                if (lineIdx < shown) {
                     WidgetEvent e = dayEvents.get(lineIdx);
                     int color = snapshot.calendars.containsKey(e.calId)
                             ? snapshot.calendars.get(e.calId)
                             : Color.parseColor("#9CA3AF");
                     views.setTextViewText(lineIds[lineIdx], buildEventLine(e, color));
+                    views.setViewVisibility(lineIds[lineIdx], android.view.View.VISIBLE);
+                } else if (overflow && lineIdx == shown) {
+                    views.setTextViewText(lineIds[lineIdx], "+" + (eventCount - shown));
+                    views.setTextColor(lineIds[lineIdx], MORE_TEXT_COLOR);
                     views.setViewVisibility(lineIds[lineIdx], android.view.View.VISIBLE);
                 } else {
                     views.setViewVisibility(lineIds[lineIdx], android.view.View.GONE);
@@ -253,6 +293,33 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
                     Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         return spannable;
+    }
+
+    /**
+     * 이 위젯 한 칸의 일정 줄 영역 높이(px). widget_week_grid.xml / widget_day_cell_*.xml 의
+     * padding·margin·textSize 를 그대로 반영하고, 안전 여유 dp(4) 를 뺀다. 위젯 높이를 모르면 -1.
+     */
+    private static int cellBodyHeightPx(Context ctx, int appWidgetId) {
+        int widgetH = WidgetSizing.widgetHeightPx(ctx, appWidgetId);
+        if (widgetH < 0) return -1;
+
+        // 카드 padding 8dp×2
+        // 1행: 브랜드13 / 연도21 / 오늘버튼(12sp+6+6dp) 중 최대 + 행 paddingBottom 4dp
+        int row1 = Math.max(Math.max(WidgetSizing.textLinePx(ctx, 13f), WidgetSizing.textLinePx(ctx, 21f)),
+                WidgetSizing.textLinePx(ctx, 12f) + WidgetSizing.dp(ctx, 12));
+        // 2행: 이동 버튼(12sp+6+6dp) + 행 paddingBottom 6dp
+        int row2 = WidgetSizing.textLinePx(ctx, 12f) + WidgetSizing.dp(ctx, 12);
+
+        int remaining = widgetH
+                - WidgetSizing.dp(ctx, 16)
+                - row1 - WidgetSizing.dp(ctx, 4)
+                - row2 - WidgetSizing.dp(ctx, 6)
+                - WidgetSizing.dp(ctx, 4); // 둘째 칸 행 marginTop 4dp
+
+        int cellH = remaining / 2;
+        // 칸: 머리글(15sp + padding 6dp×2), 칸 안 구분선 2dp, 일정 영역 paddingTop 2dp
+        int headerH = WidgetSizing.textLinePx(ctx, 15f) + WidgetSizing.dp(ctx, 12);
+        return cellH - headerH - WidgetSizing.dp(ctx, 2) - WidgetSizing.dp(ctx, 2) - WidgetSizing.dp(ctx, 4);
     }
 
     private static PendingIntent navPendingIntent(Context context, String action, int appWidgetId, int actionCode) {

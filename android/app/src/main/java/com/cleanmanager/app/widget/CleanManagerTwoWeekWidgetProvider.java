@@ -7,6 +7,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.os.Bundle;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
@@ -31,12 +32,15 @@ public class CleanManagerTwoWeekWidgetProvider extends AppWidgetProvider {
     static final String ACTION_REFRESH_TWOWEEK = "com.cleanmanager.app.widget.ACTION_REFRESH_TWOWEEK";
 
     private static final String[] WEEKDAY_KO = {"일", "월", "화", "수", "목", "금", "토"};
-    private static final int MAX_LINES_PER_CELL = 6;
+    // 위젯 높이를 알 수 없을 때 쓰는 기존 상수값 (기존 동작 유지)
+    private static final int FALLBACK_LINES_PER_CELL = 6;
     private static final int[] ROW_IDS = { R.id.twoweek_row_top, R.id.twoweek_row_bottom };
     private static final int[] LABEL_IDS = { R.id.twoweek_label_top, R.id.twoweek_label_bottom };
     private static final int[] CELL_LINE_IDS = {
             R.id.tw_cell_line1, R.id.tw_cell_line2, R.id.tw_cell_line3,
-            R.id.tw_cell_line4, R.id.tw_cell_line5, R.id.tw_cell_line6
+            R.id.tw_cell_line4, R.id.tw_cell_line5, R.id.tw_cell_line6,
+            R.id.tw_cell_line7, R.id.tw_cell_line8, R.id.tw_cell_line9,
+            R.id.tw_cell_line10, R.id.tw_cell_line11, R.id.tw_cell_line12
     };
 
     @Override
@@ -79,6 +83,14 @@ public class CleanManagerTwoWeekWidgetProvider extends AppWidgetProvider {
         for (int id : appWidgetIds) {
             WidgetCache.clearTwoWeekOffset(context, id);
         }
+    }
+
+    @Override
+    public void onAppWidgetOptionsChanged(Context context, AppWidgetManager appWidgetManager,
+                                          int appWidgetId, Bundle newOptions) {
+        super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions);
+        // 위젯 크기가 바뀌면 새 높이로 줄 수를 다시 계산해 캐시만으로 다시 그린다 (네트워크 호출 없음).
+        applyTwoWeekViews(context, appWidgetManager, appWidgetId);
     }
 
     /** 앱이 포그라운드/백그라운드를 오갈 때 호출해 위젯이 최신 일정을 다시 읽도록 한다. */
@@ -152,6 +164,11 @@ public class CleanManagerTwoWeekWidgetProvider extends AppWidgetProvider {
         views.setOnClickPendingIntent(R.id.twoweek_prev_btn, navPendingIntent(context, ACTION_PREV_TWOWEEK, appWidgetId, 1));
         views.setOnClickPendingIntent(R.id.twoweek_next_btn, navPendingIntent(context, ACTION_NEXT_TWOWEEK, appWidgetId, 2));
 
+        // 칸 본문 높이·줄 높이는 위젯 렌더 시작 때 한 번만 계산해 모든 칸에 넘긴다.
+        int availablePx = cellBodyHeightPx(context, appWidgetId);
+        int linePx = WidgetSizing.textLinePx(context, 9f);
+        int moreLinePx = WidgetSizing.textLinePx(context, 8f);
+
         for (int block = 0; block < ROW_IDS.length; block++) {
             int weekOffset = twoWeekOffset + block;
             Calendar sunday = startOfWeek(weekOffset);
@@ -177,7 +194,8 @@ public class CleanManagerTwoWeekWidgetProvider extends AppWidgetProvider {
                 Calendar day = (Calendar) sunday.clone();
                 day.add(Calendar.DAY_OF_MONTH, col);
                 int cellIndex = block * 7 + col;
-                views.addView(rowId, buildCell(context, appWidgetId, cellIndex, day, todayIso, snapshot));
+                views.addView(rowId, buildCell(context, appWidgetId, cellIndex, day, todayIso, snapshot,
+                        availablePx, linePx, moreLinePx));
             }
         }
 
@@ -185,7 +203,8 @@ public class CleanManagerTwoWeekWidgetProvider extends AppWidgetProvider {
     }
 
     private static RemoteViews buildCell(Context context, int appWidgetId, int cellIndex, Calendar day,
-                                         String todayIso, WidgetCache.Snapshot snapshot) {
+                                         String todayIso, WidgetCache.Snapshot snapshot,
+                                         int availablePx, int linePx, int moreLinePx) {
         RemoteViews cell = new RemoteViews(context.getPackageName(), R.layout.widget_twoweek_cell);
 
         String dayIso = isoDate(day, 0);
@@ -217,8 +236,14 @@ public class CleanManagerTwoWeekWidgetProvider extends AppWidgetProvider {
         }
         Collections.sort(dayEvents, Comparator.comparing(e -> e.startTime == null ? "" : e.startTime));
 
+        int eventCount = dayEvents.size();
+        int maxSlots = CELL_LINE_IDS.length;
+        int shown = availablePx < 0
+                ? Math.min(eventCount, FALLBACK_LINES_PER_CELL)
+                : WidgetSizing.fitLines(availablePx, linePx, moreLinePx, eventCount, maxSlots);
+
         for (int i = 0; i < CELL_LINE_IDS.length; i++) {
-            if (i < dayEvents.size()) {
+            if (i < shown) {
                 WidgetEvent e = dayEvents.get(i);
                 int color = snapshot.calendars.containsKey(e.calId)
                         ? snapshot.calendars.get(e.calId)
@@ -230,8 +255,8 @@ public class CleanManagerTwoWeekWidgetProvider extends AppWidgetProvider {
             }
         }
 
-        if (dayEvents.size() > MAX_LINES_PER_CELL) {
-            cell.setTextViewText(R.id.tw_cell_more, "+" + (dayEvents.size() - MAX_LINES_PER_CELL));
+        if (eventCount > shown) {
+            cell.setTextViewText(R.id.tw_cell_more, "+" + (eventCount - shown));
             cell.setViewVisibility(R.id.tw_cell_more, android.view.View.VISIBLE);
         } else {
             cell.setViewVisibility(R.id.tw_cell_more, android.view.View.GONE);
@@ -261,6 +286,36 @@ public class CleanManagerTwoWeekWidgetProvider extends AppWidgetProvider {
                     Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         return spannable;
+    }
+
+    /**
+     * 이 위젯 한 칸의 일정 줄 영역 높이(px). widget_twoweek_grid.xml / widget_twoweek_cell.xml 의
+     * padding·margin·textSize 를 그대로 반영하고, 안전 여유 dp(4) 를 뺀다. 위젯 높이를 모르면 -1.
+     */
+    private static int cellBodyHeightPx(Context ctx, int appWidgetId) {
+        int widgetH = WidgetSizing.widgetHeightPx(ctx, appWidgetId);
+        if (widgetH < 0) return -1;
+
+        // 카드 padding 8dp×2
+        // 1행: 브랜드13 / 연월18 / 오늘버튼(12sp+6+6dp) 중 최대 + 행 paddingBottom 4dp
+        int row1 = Math.max(Math.max(WidgetSizing.textLinePx(ctx, 13f), WidgetSizing.textLinePx(ctx, 18f)),
+                WidgetSizing.textLinePx(ctx, 12f) + WidgetSizing.dp(ctx, 12));
+        // 2행: 이동 버튼(12sp+6+6dp) + 행 paddingBottom 4dp
+        int row2 = WidgetSizing.textLinePx(ctx, 12f) + WidgetSizing.dp(ctx, 12);
+        // 각 주 블록 라벨 줄(12sp + paddingBottom 2dp) × 2, 아래 블록 marginTop 4dp
+        int labelH = WidgetSizing.textLinePx(ctx, 12f) + WidgetSizing.dp(ctx, 2);
+
+        int remaining = widgetH
+                - WidgetSizing.dp(ctx, 16)
+                - row1 - WidgetSizing.dp(ctx, 4)
+                - row2 - WidgetSizing.dp(ctx, 4)
+                - labelH * 2
+                - WidgetSizing.dp(ctx, 4);
+
+        int cellH = remaining / 2;
+        // 칸: margin 1dp×2, 머리글(12sp + padding 3dp×2)
+        int headerH = WidgetSizing.textLinePx(ctx, 12f) + WidgetSizing.dp(ctx, 6);
+        return cellH - WidgetSizing.dp(ctx, 2) - headerH - WidgetSizing.dp(ctx, 4);
     }
 
     private static PendingIntent navPendingIntent(Context context, String action, int appWidgetId, int actionCode) {

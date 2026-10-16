@@ -7,6 +7,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.os.Bundle;
 import android.widget.RemoteViews;
 
 import com.cleanmanager.app.R;
@@ -26,13 +27,16 @@ public class CleanManagerMonthlyWidgetProvider extends AppWidgetProvider {
     static final String ACTION_TODAY_MONTH = "com.cleanmanager.app.widget.ACTION_TODAY_MONTH";
     static final String ACTION_REFRESH_MONTH = "com.cleanmanager.app.widget.ACTION_REFRESH_MONTH";
 
-    private static final int MAX_LINES_PER_CELL = 3;
+    // 위젯 높이를 알 수 없을 때 쓰는 기존 상수값 (기존 동작 유지)
+    private static final int FALLBACK_LINES_PER_CELL = 3;
     private static final int[] ROW_IDS = {
             R.id.month_row1, R.id.month_row2, R.id.month_row3,
             R.id.month_row4, R.id.month_row5, R.id.month_row6
     };
     private static final int[] CELL_LINE_IDS = {
-            R.id.month_cell_line1, R.id.month_cell_line2, R.id.month_cell_line3
+            R.id.month_cell_line1, R.id.month_cell_line2, R.id.month_cell_line3,
+            R.id.month_cell_line4, R.id.month_cell_line5, R.id.month_cell_line6,
+            R.id.month_cell_line7, R.id.month_cell_line8
     };
 
     @Override
@@ -75,6 +79,14 @@ public class CleanManagerMonthlyWidgetProvider extends AppWidgetProvider {
         for (int id : appWidgetIds) {
             WidgetCache.clearMonthOffset(context, id);
         }
+    }
+
+    @Override
+    public void onAppWidgetOptionsChanged(Context context, AppWidgetManager appWidgetManager,
+                                          int appWidgetId, Bundle newOptions) {
+        super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions);
+        // 위젯 크기가 바뀌면 새 높이로 줄 수를 다시 계산해 캐시만으로 다시 그린다 (네트워크 호출 없음).
+        applyMonthViews(context, appWidgetManager, appWidgetId);
     }
 
     /** 앱이 포그라운드/백그라운드를 오갈 때 호출해 위젯이 최신 일정을 다시 읽도록 한다. */
@@ -156,6 +168,11 @@ public class CleanManagerMonthlyWidgetProvider extends AppWidgetProvider {
 
         String todayIso = isoDate(Calendar.getInstance(), 0);
 
+        // 칸 본문 높이·줄 높이는 위젯 렌더 시작 때 한 번만 계산해 모든 칸에 넘긴다.
+        int availablePx = cellBodyHeightPx(context, appWidgetId);
+        int linePx = WidgetSizing.textLinePx(context, 9f);
+        int moreLinePx = WidgetSizing.textLinePx(context, 8f);
+
         for (int row = 0; row < ROW_IDS.length; row++) {
             int rowId = ROW_IDS[row];
             views.removeAllViews(rowId);
@@ -164,7 +181,8 @@ public class CleanManagerMonthlyWidgetProvider extends AppWidgetProvider {
                 Calendar day = (Calendar) gridStart.clone();
                 day.add(Calendar.DAY_OF_MONTH, cellIndex);
                 views.addView(rowId,
-                        buildCell(context, appWidgetId, cellIndex, day, todayIso, dispYear, dispMonth, snapshot));
+                        buildCell(context, appWidgetId, cellIndex, day, todayIso, dispYear, dispMonth, snapshot,
+                                availablePx, linePx, moreLinePx));
             }
         }
 
@@ -172,7 +190,8 @@ public class CleanManagerMonthlyWidgetProvider extends AppWidgetProvider {
     }
 
     private static RemoteViews buildCell(Context context, int appWidgetId, int cellIndex, Calendar day,
-                                         String todayIso, int dispYear, int dispMonth, WidgetCache.Snapshot snapshot) {
+                                         String todayIso, int dispYear, int dispMonth, WidgetCache.Snapshot snapshot,
+                                         int availablePx, int linePx, int moreLinePx) {
         RemoteViews cell = new RemoteViews(context.getPackageName(), R.layout.widget_month_cell);
 
         String dayIso = isoDate(day, 0);
@@ -205,8 +224,14 @@ public class CleanManagerMonthlyWidgetProvider extends AppWidgetProvider {
         }
         Collections.sort(dayEvents, Comparator.comparing(e -> e.startTime == null ? "" : e.startTime));
 
+        int eventCount = dayEvents.size();
+        int maxSlots = CELL_LINE_IDS.length;
+        int shown = availablePx < 0
+                ? Math.min(eventCount, FALLBACK_LINES_PER_CELL)
+                : WidgetSizing.fitLines(availablePx, linePx, moreLinePx, eventCount, maxSlots);
+
         for (int i = 0; i < CELL_LINE_IDS.length; i++) {
-            if (i < dayEvents.size()) {
+            if (i < shown) {
                 WidgetEvent e = dayEvents.get(i);
                 int color = snapshot.calendars.containsKey(e.calId)
                         ? snapshot.calendars.get(e.calId)
@@ -219,8 +244,8 @@ public class CleanManagerMonthlyWidgetProvider extends AppWidgetProvider {
             }
         }
 
-        if (dayEvents.size() > MAX_LINES_PER_CELL) {
-            cell.setTextViewText(R.id.month_cell_more, "+" + (dayEvents.size() - MAX_LINES_PER_CELL));
+        if (eventCount > shown) {
+            cell.setTextViewText(R.id.month_cell_more, "+" + (eventCount - shown));
             cell.setViewVisibility(R.id.month_cell_more, android.view.View.VISIBLE);
         } else {
             cell.setViewVisibility(R.id.month_cell_more, android.view.View.GONE);
@@ -237,6 +262,36 @@ public class CleanManagerMonthlyWidgetProvider extends AppWidgetProvider {
         cell.setOnClickPendingIntent(R.id.month_cell_root, openPending);
 
         return cell;
+    }
+
+    /**
+     * 이 위젯 한 칸의 일정 줄 영역 높이(px). widget_month_grid.xml / widget_month_cell.xml 의
+     * padding·margin·textSize 를 그대로 반영하고, 안전 여유 dp(4) 를 뺀다. 위젯 높이를 모르면 -1.
+     */
+    private static int cellBodyHeightPx(Context ctx, int appWidgetId) {
+        int widgetH = WidgetSizing.widgetHeightPx(ctx, appWidgetId);
+        if (widgetH < 0) return -1;
+
+        // 카드 padding 8dp×2
+        // 1행: 브랜드13 / 연월18 / 오늘버튼(12sp+6+6dp) 중 최대 + 행 paddingBottom 4dp
+        int row1 = Math.max(Math.max(WidgetSizing.textLinePx(ctx, 13f), WidgetSizing.textLinePx(ctx, 18f)),
+                WidgetSizing.textLinePx(ctx, 12f) + WidgetSizing.dp(ctx, 12));
+        // 2행: 이동 버튼(12sp+6+6dp) + 행 paddingBottom 4dp
+        int row2 = WidgetSizing.textLinePx(ctx, 12f) + WidgetSizing.dp(ctx, 12);
+        // 3행: 요일 머리글 11sp + 행 paddingBottom 2dp
+        int row3 = WidgetSizing.textLinePx(ctx, 11f);
+
+        int remaining = widgetH
+                - WidgetSizing.dp(ctx, 16)
+                - row1 - WidgetSizing.dp(ctx, 4)
+                - row2 - WidgetSizing.dp(ctx, 4)
+                - row3 - WidgetSizing.dp(ctx, 2)
+                - WidgetSizing.dp(ctx, 12); // 6행 × marginTop 2dp
+
+        int cellH = remaining / 6;
+        // 칸: margin 1dp×2, 날짜 숫자 줄(11sp + padding 1dp×2)
+        int dateH = WidgetSizing.textLinePx(ctx, 11f) + WidgetSizing.dp(ctx, 2);
+        return cellH - WidgetSizing.dp(ctx, 2) - dateH - WidgetSizing.dp(ctx, 4);
     }
 
     private static PendingIntent navPendingIntent(Context context, String action, int appWidgetId, int actionCode) {
