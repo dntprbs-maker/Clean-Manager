@@ -161,6 +161,44 @@ test("반복 일정 회차: 회차별 문서, 시리즈 삭제 시 회차도 정
   assert.equal(doc("gcal_r1_20261017").status, "deleted");
 });
 
+test("ICS가 만든 반복 시리즈 문서의 앱 수정값을 같은 날짜 회차 문서가 이어받고, 이후 동기화에서도 유지", async () => {
+  await seedConnected();
+  const raw = { title: "일정 r1", start: "2026-10-10", startTime: "10:00", end: "2026-10-10", endTime: "11:00", allDay: false, place: "", description: "" };
+  await db.doc(`${EVENTS}/r1_google_com`).set({ id: "r1_google_com", calId: "cal1", source: "ics_import", icsRaw: raw, ...raw, startTime: "11:00", endTime: "11:30", team: "1팀" });
+  const inst = (d, over = {}) => ev(`r1_${d}`, { iCalUID: "r1@google.com", recurringEventId: "r1", start: { dateTime: `2026-10-${d}T01:00:00Z` }, end: { dateTime: `2026-10-${d}T02:00:00Z` }, summary: "일정 r1", ...over });
+  google.upsert(inst("10")); google.upsert(inst("17"));
+  await syncCalendar(deps, KEY);
+  assert.equal(doc("gcal_r1_10").startTime, "11:00");
+  assert.equal(doc("gcal_r1_10").endTime, "11:30");
+  assert.equal(doc("gcal_r1_10").team, "1팀");
+  assert.equal(doc("gcal_r1_10").icsRaw.startTime, "10:00"); // 기준값은 구글 원본
+  assert.equal(doc("gcal_r1_17").startTime, "10:00"); // 다른 회차는 구글 값
+  assert.equal(doc("gcal_r1_17").team, undefined);
+  assert.equal(doc("r1_google_com").status, "deleted"); // 옛 문서는 지우지 않고 삭제 표시로 보존
+  assert.equal(doc("r1_google_com").startTime, "11:00");
+  google.upsert(inst("10", { summary: "구글에서 바꾼 제목" }));
+  await syncCalendar(deps, KEY);
+  await syncCalendar(deps, KEY, { forceFull: true });
+  assert.equal(doc("gcal_r1_10").startTime, "11:00");
+  assert.equal(doc("gcal_r1_10").title, "구글에서 바꾼 제목");
+});
+
+test("반복 회차·일반 일정 모두: 앱 수정값이 증분·전체 동기화를 여러 번 거쳐도 유지", async () => {
+  await seedConnected();
+  const inst = ev("r2_1010", { iCalUID: "r2@google.com", recurringEventId: "r2" });
+  google.upsert(inst); google.upsert(ev("s"));
+  await syncCalendar(deps, KEY);
+  await db.doc(`${EVENTS}/gcal_r2_1010`).update({ title: "앱에서 고친 회차" });
+  await db.doc(`${EVENTS}/s_google_com`).update({ start: "2026-10-11", end: "2026-10-11" });
+  google.upsert({ ...inst, location: "새 장소" }); google.upsert(ev("s", { summary: "구글 새 제목" }));
+  await syncCalendar(deps, KEY);
+  await syncCalendar(deps, KEY, { forceFull: true });
+  assert.equal(doc("gcal_r2_1010").title, "앱에서 고친 회차");
+  assert.equal(doc("gcal_r2_1010").place, "새 장소");
+  assert.equal(doc("s_google_com").start, "2026-10-11");
+  assert.equal(doc("s_google_com").title, "구글 새 제목");
+});
+
 test("쓰기 실패 시 syncToken을 저장하지 않아 다음 동기화가 같은 변경을 다시 받음", async () => {
   await seedConnected();
   google.upsert(ev("a"));

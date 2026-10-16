@@ -11,6 +11,8 @@ import { fmtDate, addDays, expandRecurringForFeed } from "./lib/recurring.js";
 import { parseIcs } from "./lib/ics.js";
 import { createGoogleClient } from "./lib/gcal/googleApi.js";
 import { isPushActive } from "./lib/gcal/store.js";
+import { inheritUserEdits } from "./lib/gcal/syncEngine.js";
+import { sanitizeId } from "./lib/gcal/mapEvent.js";
 import { handleWebhook, runMaintenance } from "./lib/gcal/service.js";
 import { handleAdmin } from "./lib/gcal/adminPage.js";
 import process from "node:process";
@@ -587,6 +589,13 @@ async function syncIcsForCal(companyId, calId, rawUrl) {
       // patch에 넣지 않아 merge 시 기존 값을 보존한다. 그 외엔 incoming 값으로 갱신.
       const userEdited = existing && prevRaw && existing[field] !== prevRaw[field];
       if (!userEdited) patch[field] = incoming[field];
+    }
+    if (!existing) {
+      // 실시간(push) 동기화는 반복 일정을 회차별 문서(gcal_…)로 저장한다. ICS로 돌아와 시리즈 문서를
+      // 새로 만들 때, 같은 날짜 회차 문서에 앱에서 고친 값이 있으면 이어받는다(전환 때 사용자 수정 유실 방지).
+      const inst = [...prevMap.values()].find(d =>
+        d.gcalSync?.recurringEventId && d.icsRaw && sanitizeId(d.gcalSync.iCalUID) === docId && d.icsRaw.start === incoming.start);
+      if (inst) inheritUserEdits(patch, inst);
     }
     // 구글 실시간(push) 동기화가 지웠던 일정이 ICS로 돌아왔을 때 다시 보이게(push를 끄고 ICS로 복귀하는 경우)
     if (existing?.status === "deleted" && existing.deletedBy === "gcal_push") {

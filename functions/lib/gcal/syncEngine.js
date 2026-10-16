@@ -9,11 +9,24 @@ import crypto from "node:crypto";
 import {
   EVENT_SOURCE, DELETED_BY, REVIVABLE_DELETED_BY, SYNC_LOCK_MS, MASS_DELETE_GUARD, MAX_PAGES,
 } from "./config.js";
-import { mapEvent, docIdFor, isInCreateWindow } from "./mapEvent.js";
+import { mapEvent, docIdFor, isInCreateWindow, sanitizeId } from "./mapEvent.js";
 import { getAccessToken, patchState, calRef, isGlobalPushEnabled } from "./store.js";
 
 const TRACKED_FIELDS = ["title", "start", "startTime", "end", "endTime", "allDay", "place", "description"];
 const BATCH_LIMIT = 400;
+// 동기화가 관리하는 값 — 옛 문서에서 새 문서로 이어받지 않는다
+const SYSTEM_FIELDS = new Set(["id", "calId", "source", "icsRaw", "gcalSync", "status", "deletedAt", "deletedBy"]);
+
+// 옛 문서(source)의 사용자 수정값을 새 문서 patch에 옮긴다. patch.icsRaw는 구글 값 그대로라
+// 옮긴 필드는 이후 동기화에서도 "사용자가 고친 필드"로 보존된다. 앱 전용 필드(팀·사진·코멘트 등)도 함께.
+export function inheritUserEdits(patch, source) {
+  for (const f of TRACKED_FIELDS) {
+    if (source[f] !== undefined && source[f] !== source.icsRaw[f]) patch[f] = source[f];
+  }
+  for (const [k, v] of Object.entries(source)) {
+    if (!SYSTEM_FIELDS.has(k) && !TRACKED_FIELDS.includes(k) && !(k in patch)) patch[k] = v;
+  }
+}
 
 async function acquireLock(db, key, nowMs) {
   const ref = calRef(db, key);
@@ -74,7 +87,7 @@ export function planWrites({ items, existingMap, calId, calendarId, mode, nowMs,
   const nowIso = new Date(nowMs).toISOString();
   const writes = new Map(); // docId → data (같은 동기화 안에서 같은 문서가 두 번 나오면 나중 것만)
   const seen = new Set();
-  const stats = { upserted: 0, deleted: 0, revived: 0, skippedOld: 0, skippedStale: 0 };
+  const stats = { upserted: 0, deleted: 0, revived: 0, skippedOld: 0, skippedStale: 0, inherited: 0 };
 
   const softDelete = (docId) => {
     const ex = existingMap.get(docId);
@@ -127,6 +140,16 @@ export function planWrites({ items, existingMap, calId, calendarId, mode, nowMs,
       // 사용자가 마지막 동기화 이후 앱에서 직접 고친 필드는 보존(기존 ICS 동기화와 같은 규칙)
       const userEdited = existing && prevRaw && existing[f] !== prevRaw[f];
       if (!userEdited) patch[f] = incoming[f];
+    }
+    if (!existing && ev.recurringEventId) {
+      // 반복 회차 문서를 처음 만들 때: ICS 구독은 반복 시리즈를 iCalUID 문서 하나로 저장했으므로,
+      // 그 문서가 같은 날짜 회차였고 앱에서 고친 값이 있으면 새 회차 문서로 이어받는다
+      // (안 그러면 ICS→실시간 동기화 전환 때 옛 문서만 지워지고 사용자 수정이 사라진다).
+      const legacy = existingMap.get(sanitizeId(ev.iCalUID));
+      if (legacy?.icsRaw && !legacy.gcalSync?.recurringEventId && legacy.icsRaw.start === incoming.start) {
+        inheritUserEdits(patch, legacy);
+        stats.inherited++;
+      }
     }
     if (existing?.status === "deleted") {
       // 동기화가 지웠던 일정이 구글에 다시 나타남(휴지통 복원 등) → 되살림. 사람이 지운 건 그대로 둔다.
