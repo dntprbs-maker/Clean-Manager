@@ -117,6 +117,17 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
         context.sendBroadcast(intent);
     }
 
+    /** 네트워크 재요청 없이 캐시만으로 설치된 주간 위젯을 다시 그린다 (공용 캐시 갱신 후 호출용). */
+    static void redrawAll(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        ComponentName provider = new ComponentName(context, CleanManagerWeeklyWidgetProvider.class);
+        int[] ids = mgr.getAppWidgetIds(provider);
+        if (ids == null) return;
+        for (int id : ids) {
+            applyWeekViews(context, mgr, id);
+        }
+    }
+
     /** goAsync()로 브로드캐스트 우선순위를 유지한 채 백그라운드에서 최신 데이터를 받아온다. */
     private void refreshDataInBackground(Context context, int[] appWidgetIds) {
         Context appContext = context.getApplicationContext();
@@ -138,20 +149,22 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
                 for (int id : appWidgetIds) {
                     applyWeekViews(appContext, mgr, id);
                 }
+                // 공용 캐시를 갱신했으니 월간 위젯도 캐시로 다시 그린다 (네트워크 재요청 없음).
+                CleanManagerMonthlyWidgetProvider.redrawAll(appContext);
             } finally {
                 pendingResult.finish();
             }
         }).start();
     }
 
-    private void applyWeekViews(Context context, AppWidgetManager appWidgetManager, int appWidgetId) {
+    private static void applyWeekViews(Context context, AppWidgetManager appWidgetManager, int appWidgetId) {
         int weekOffset = WidgetCache.getWeekOffset(context, appWidgetId);
         WidgetCache.Snapshot snapshot = WidgetCache.load(context);
         RemoteViews views = buildViews(context, appWidgetId, weekOffset, snapshot);
         appWidgetManager.updateAppWidget(appWidgetId, views);
     }
 
-    private RemoteViews buildViews(Context context, int appWidgetId, int weekOffset, WidgetCache.Snapshot snapshot) {
+    private static RemoteViews buildViews(Context context, int appWidgetId, int weekOffset, WidgetCache.Snapshot snapshot) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_week_grid);
 
         Calendar sunday = startOfWeek(weekOffset);
@@ -227,7 +240,7 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
         return views;
     }
 
-    private CharSequence buildEventLine(WidgetEvent e, int color) {
+    private static CharSequence buildEventLine(WidgetEvent e, int color) {
         String time = (e.allDay ? "종일" : (e.startTime == null ? "" : e.startTime));
         String text = time.isEmpty() ? e.title : time + " " + e.title;
         SpannableString spannable = new SpannableString(text);
@@ -240,7 +253,7 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
         return spannable;
     }
 
-    private PendingIntent navPendingIntent(Context context, String action, int appWidgetId, int actionCode) {
+    private static PendingIntent navPendingIntent(Context context, String action, int appWidgetId, int actionCode) {
         Intent intent = new Intent(context, CleanManagerWeeklyWidgetProvider.class);
         intent.setAction(action);
         intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
@@ -250,7 +263,7 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
-    private Calendar startOfWeek(int weekOffset) {
+    private static Calendar startOfWeek(int weekOffset) {
         Calendar cal = Calendar.getInstance();
         cal.set(Calendar.HOUR_OF_DAY, 0);
         cal.set(Calendar.MINUTE, 0);
@@ -262,14 +275,14 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
         return cal;
     }
 
-    private String isoDate(Calendar base, int dayOffset) {
+    private static String isoDate(Calendar base, int dayOffset) {
         Calendar cal = (Calendar) base.clone();
         cal.add(Calendar.DAY_OF_MONTH, dayOffset);
         return String.format(Locale.US, "%04d-%02d-%02d",
                 cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH));
     }
 
-    private int res(Context context, int colorResId) {
+    private static int res(Context context, int colorResId) {
         return context.getResources().getColor(colorResId, context.getTheme());
     }
 }

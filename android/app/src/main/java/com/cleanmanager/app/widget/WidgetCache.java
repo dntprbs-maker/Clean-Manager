@@ -118,4 +118,19 @@ final class WidgetCache {
         SharedPreferences prefs = context.getSharedPreferences(WidgetConfig.PREFS_NAME, Context.MODE_PRIVATE);
         prefs.edit().remove(WidgetConfig.PREF_KEY_WEEK_OFFSET_PREFIX + appWidgetId).apply();
     }
+
+    static int getMonthOffset(Context context, int appWidgetId) {
+        SharedPreferences prefs = context.getSharedPreferences(WidgetConfig.PREFS_NAME, Context.MODE_PRIVATE);
+        return prefs.getInt(WidgetConfig.PREF_KEY_MONTH_OFFSET_PREFIX + appWidgetId, 0);
+    }
+
+    static void setMonthOffset(Context context, int appWidgetId, int offset) {
+        SharedPreferences prefs = context.getSharedPreferences(WidgetConfig.PREFS_NAME, Context.MODE_PRIVATE);
+        prefs.edit().putInt(WidgetConfig.PREF_KEY_MONTH_OFFSET_PREFIX + appWidgetId, offset).apply();
+    }
+
+    static void clearMonthOffset(Context context, int appWidgetId) {
+        SharedPreferences prefs = context.getSharedPreferences(WidgetConfig.PREFS_NAME, Context.MODE_PRIVATE);
+        prefs.edit().remove(WidgetConfig.PREF_KEY_MONTH_OFFSET_PREFIX + appWidgetId).apply();
+    }
 }
