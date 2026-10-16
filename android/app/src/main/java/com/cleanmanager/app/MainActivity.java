@@ -39,7 +39,8 @@ public class MainActivity extends BridgeActivity {
         String widgetDate = intent.getStringExtra("widgetDate");
         if (widgetDate == null || widgetDate.isEmpty()) return;
 
+        String base = getBridge().getAppUrl().replaceAll("/+$", "");
         getBridge().getWebView().post(() ->
-                getBridge().getWebView().loadUrl("https://localhost/index.html?widgetDate=" + widgetDate));
+                getBridge().getWebView().loadUrl(base + "/?widgetDate=" + widgetDate));
     }
 }
