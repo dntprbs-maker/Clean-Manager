@@ -3,6 +3,8 @@
   "appName": "클린매니저 앱",
   "webDir": "dist",
   "server": {
+    "url": "https://clean-manager-60bc9.web.app",
+    "cleartext": false,
     "androidScheme": "https"
   }
 }
