@@ -73,7 +73,7 @@
             android:textSize="12sp"
             android:textColor="@color/widget_button_text_green" />
 
-        <View
+        <TextView
             android:layout_width="0dp"
             android:layout_height="1dp"
             android:layout_weight="1" />
