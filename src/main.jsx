@@ -1,8 +1,12 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { onAuthStateChanged } from 'firebase/auth'
+import { doc, getDoc, updateDoc, arrayRemove } from 'firebase/firestore'
+import { getToken } from 'firebase/messaging'
 import './index.css'
 import App from './App.jsx'
 import SuperAdmin from './SuperAdmin.jsx'
+import { auth, db, fcmVapidKey, getMessagingIfSupported } from './firebase'
 
 // 주소창에 #superadmin 이 붙어있으면 마스터 관리자 페이지로 분기
 // #demo 또는 ?demo=true 는 App 내부에서 처리
@@ -24,10 +28,45 @@ const isCanonicalCandidate =
   !isLocal && !isVercel &&
   (window.location.hostname === "clean-manager-60bc9.web.app" ||
     window.location.hostname === "clean-manager.com");
+
+// 이 수정 이전에 이미 구 주소에서 등록된 푸시 토큰은 리다이렉트만으로는 안 지워진다
+// (서버가 실제로 발송 대상을 읽는 곳은 companies/{회사}/users 문서의 fcmTokens — 그
+// 토큰이 남아있으면 그 주소의 서비스워커가 계속 살아서 알림을 계속 받는다). 로그인
+// 세션이 이 구 주소에 아직 남아있다면(그래서 중복이 생겼던 경우), 떠나기 전에 딱 이
+// 기기·이 주소의 토큰만 지워서 자가 치유되게 한다. 2초 넘게 걸리면 포기하고 그냥 이동.
+async function cleanupStaleTokenThenLeave() {
+  const to = `https://${CANONICAL_HOST}${window.location.pathname}${window.location.search}${window.location.hash}`;
+  const timeout = new Promise((resolve) => setTimeout(resolve, 2000));
+  const cleanup = (async () => {
+    try {
+      if (!("Notification" in window) || Notification.permission !== "granted") return;
+      if (!("serviceWorker" in navigator)) return;
+      const user = await new Promise((resolve) => {
+        const unsub = onAuthStateChanged(auth, (u) => { unsub(); resolve(u); });
+      });
+      if (!user) return;
+      const messaging = await getMessagingIfSupported();
+      if (!messaging) return;
+      const swReg = await navigator.serviceWorker.getRegistration(`${import.meta.env.BASE_URL}firebase-messaging-sw.js`);
+      if (!swReg) return;
+      const staleToken = await getToken(messaging, { vapidKey: fcmVapidKey, serviceWorkerRegistration: swReg });
+      if (!staleToken) return;
+
+      const staffRef = doc(db, "staffs", user.uid);
+      const staffSnap = await getDoc(staffRef);
+      if (!staffSnap.exists()) return; // 직원 문서가 없으면(예: 최고관리자) 안전하게 건너뜀
+      const companyId = staffSnap.data().companyId;
+      await updateDoc(staffRef, { fcmTokens: arrayRemove(staleToken) }).catch(() => {});
+      if (companyId) {
+        await updateDoc(doc(db, "companies", companyId, "users", user.uid), { fcmTokens: arrayRemove(staleToken) }).catch(() => {});
+      }
+    } catch { /* 자가 치유 실패해도 이동은 계속 */ }
+  })();
+  await Promise.race([cleanup, timeout]);
+  window.location.replace(to);
+}
 if (isCanonicalCandidate) {
-  window.location.replace(
-    `https://${CANONICAL_HOST}${window.location.pathname}${window.location.search}${window.location.hash}`
-  );
+  cleanupStaleTokenThenLeave();
 }
 document.title = isLocal ? "클린메니져-로컬서버" : isPcClaudePreview ? "클린메니져-피씨클로드" : isVercel ? "클린메니져-개발" : "클린메니져";
 
