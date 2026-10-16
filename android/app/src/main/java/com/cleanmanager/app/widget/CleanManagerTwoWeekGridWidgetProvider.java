@@ -31,7 +31,7 @@ public class CleanManagerTwoWeekGridWidgetProvider extends AppWidgetProvider {
     static final String ACTION_REFRESH_TWOWEEK = "com.cleanmanager.app.widget.ACTION_REFRESH_TWOWEEKGRID";
 
     private static final String[] WEEKDAY_KO = {"일", "월", "화", "수", "목", "금", "토"};
-    private static final int MAX_LINES_PER_CELL = 6;
+    private static final int MAX_LINES_PER_CELL = 5;
     // 각 주를 2줄(위: 일~수 / 아래: 보조칸·목~토)로 그린다.
     private static final int[][] ROW_IDS = {
             { R.id.twoweek_row_top_a, R.id.twoweek_row_top_b },
@@ -39,7 +39,7 @@ public class CleanManagerTwoWeekGridWidgetProvider extends AppWidgetProvider {
     };
     private static final int[] CELL_LINE_IDS = {
             R.id.tw_cell_line1, R.id.tw_cell_line2, R.id.tw_cell_line3,
-            R.id.tw_cell_line4, R.id.tw_cell_line5, R.id.tw_cell_line6
+            R.id.tw_cell_line4, R.id.tw_cell_line5
     };
 
     @Override
