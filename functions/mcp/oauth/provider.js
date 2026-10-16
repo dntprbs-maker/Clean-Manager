@@ -2,6 +2,7 @@ import { clientsStore } from "./clientsStore.js";
 import * as codes from "./codes.js";
 import * as tokens from "./tokens.js";
 import { sha256Hex } from "../lib/hash.js";
+import { findAgentByKey, loadAgent, AGENT_KEY_PREFIX } from "../lib/agents.js";
 import { InvalidGrantError, InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 
 // OAuthServerProvider 구현 — mcpAuthRouter가 /authorize, /token, /register, /revoke를
@@ -44,7 +45,7 @@ export class McpOAuthProvider {
       throw new InvalidGrantError("redirect_uri mismatch");
     }
     await codes.consumeCode(authorizationCode);
-    return tokens.issueTokenPair({ clientId: client.client_id, scopes: code.scopes, resource });
+    return tokens.issueTokenPair({ clientId: client.client_id, scopes: code.scopes, resource, agentId: code.agentId });
   }
 
   async exchangeRefreshToken(client, refreshToken, _scopes, _resource) {
@@ -53,16 +54,29 @@ export class McpOAuthProvider {
     return result;
   }
 
+  // 두 종류의 토큰을 받는다: OAuth 액세스 토큰, 또는 에이전트 접속키(cmk_…, Hermes·Codex 고정 헤더용).
+  // 어느 쪽이든 agent(누구인지·권한)를 extra에 실어 도구 핸들러가 권한을 확인하게 한다.
   async verifyAccessToken(token) {
+    if (token.startsWith(AGENT_KEY_PREFIX)) {
+      const agent = await findAgentByKey(token);
+      if (!agent) throw new InvalidTokenError("invalid or disabled agent key");
+      // 접속키 자체엔 만료가 없지만 SDK 미들웨어(requireBearerAuth)가 expiresAt 없는 토큰을
+      // 거부하므로, 매 요청 검증 시점 기준 5분 뒤로 넣는다(키를 끄면 다음 요청부터 바로 막힘).
+      const expiresAt = Math.floor(Date.now() / 1000) + 300;
+      return { token, clientId: `agent:${agent.agentId}`, scopes: agent.scopes, expiresAt, extra: { agent } };
+    }
     const data = await tokens.verifyAccessTokenHash(sha256Hex(token));
     if (!data) {
       throw new InvalidTokenError("invalid or expired access token");
     }
+    const agent = await loadAgent(data.agentId);
+    if (!agent) throw new InvalidTokenError("agent disabled");
     return {
       token,
       clientId: data.clientId,
-      scopes: data.scopes || [],
+      scopes: agent.scopes,
       expiresAt: data.expiresAt,
+      extra: { agent },
     };
   }
 

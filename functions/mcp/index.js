@@ -54,7 +54,7 @@ const loggingVerifier = {
   async verifyAccessToken(token) {
     try {
       const info = await provider.verifyAccessToken(token);
-      console.log(`[mcp] verifyAccessToken OK clientId=${info.clientId}`);
+      console.log(`[mcp] verifyAccessToken OK agent=${info.extra?.agent?.agentId}`);
       return info;
     } catch (e) {
       console.log(`[mcp] verifyAccessToken FAILED: ${e?.message || e}`);
@@ -69,7 +69,12 @@ app.all(
   requireBearerAuth({ verifier: loggingVerifier, resourceMetadataUrl }),
   async (req, res) => {
     const companyId = MCP_COMPANY_ID.value();
-    const server = createMcpServer(companyId);
+    const agent = req.auth?.extra?.agent;
+    if (!agent) {
+      res.status(403).json({ error: "agent not resolved" });
+      return;
+    }
+    const server = createMcpServer(companyId, agent);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on("close", () => {
       transport.close();

@@ -16,7 +16,7 @@ function randomToken() {
 // 그대로 쓰면 조용히 500이 난다 — 문자열로 정규화해서 저장.
 const resourceToString = (resource) => (resource ? (resource.href ?? String(resource)) : null);
 
-async function writePair(db, { clientId, scopes, resource, accessToken, refreshToken }) {
+async function writePair(db, { clientId, scopes, resource, accessToken, refreshToken, agentId }) {
   const nowSec = Math.floor(Date.now() / 1000);
   const accessHash = sha256Hex(accessToken);
   const refreshHash = sha256Hex(refreshToken);
@@ -25,6 +25,7 @@ async function writePair(db, { clientId, scopes, resource, accessToken, refreshT
   batch.set(db.doc(`mcpOAuthTokens/${accessHash}`), {
     type: "access",
     clientId,
+    agentId: agentId || "owner",
     scopes: scopes || [],
     resource: resourceStr,
     expiresAt: nowSec + ACCESS_TOKEN_TTL_SEC,
@@ -33,6 +34,7 @@ async function writePair(db, { clientId, scopes, resource, accessToken, refreshT
   batch.set(db.doc(`mcpOAuthTokens/${refreshHash}`), {
     type: "refresh",
     clientId,
+    agentId: agentId || "owner",
     scopes: scopes || [],
     resource: resourceStr,
     expiresAt: nowSec + REFRESH_TOKEN_TTL_SEC,
@@ -41,11 +43,11 @@ async function writePair(db, { clientId, scopes, resource, accessToken, refreshT
   await batch.commit();
 }
 
-export async function issueTokenPair({ clientId, scopes, resource }) {
+export async function issueTokenPair({ clientId, scopes, resource, agentId }) {
   const db = getDb();
   const accessToken = randomToken();
   const refreshToken = randomToken();
-  await writePair(db, { clientId, scopes, resource, accessToken, refreshToken });
+  await writePair(db, { clientId, scopes, resource, accessToken, refreshToken, agentId });
   return {
     access_token: accessToken,
     token_type: "bearer",
@@ -75,6 +77,7 @@ export async function rotateRefreshToken(refreshTokenPlain, expectedClientId) {
   const newRefreshToken = randomToken();
   await writePair(db, {
     clientId: data.clientId,
+    agentId: data.agentId,
     scopes: data.scopes,
     resource: data.resource,
     accessToken,

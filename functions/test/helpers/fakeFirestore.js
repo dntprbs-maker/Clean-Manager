@@ -41,7 +41,7 @@ export function createFakeDb() {
         });
         if (ok) docs.push(snap(p));
       }
-      return { docs, size: docs.length, empty: docs.length === 0 };
+      return { docs, size: docs.length, empty: docs.length === 0, forEach: (fn) => docs.forEach(fn) };
     },
   });
 
