@@ -1,13 +1,12 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { onAuthStateChanged } from 'firebase/auth'
 import { doc, getDoc, updateDoc, arrayRemove } from 'firebase/firestore'
 import { getToken } from 'firebase/messaging'
 import { httpsCallable } from 'firebase/functions'
 import './index.css'
 import App from './App.jsx'
 import SuperAdmin from './SuperAdmin.jsx'
-import { auth, db, functions, fcmVapidKey, getMessagingIfSupported } from './firebase'
+import { db, functions, fcmVapidKey, getMessagingIfSupported } from './firebase'
 
 // 주소창에 #superadmin 이 붙어있으면 마스터 관리자 페이지로 분기
 // #demo 또는 ?demo=true 는 App 내부에서 처리
@@ -42,10 +41,12 @@ async function cleanupStaleTokenThenLeave() {
     try {
       if (!("Notification" in window) || Notification.permission !== "granted") return;
       if (!("serviceWorker" in navigator)) return;
-      const user = await new Promise((resolve) => {
-        const unsub = onAuthStateChanged(auth, (u) => { unsub(); resolve(u); });
-      });
-      if (!user) return;
+      // 로그인은 Firebase Auth가 아니라 localStorage "loginUser"로 유지된다(AuthScreens).
+      // 예전엔 onAuthStateChanged로 사용자를 찾아서 항상 null → 아무것도 안 지우고 떠났다.
+      // localStorage는 주소(origin)별이라 여기 남은 값이 곧 이 구 주소에서 로그인했던 사람이다.
+      let user = null;
+      try { user = JSON.parse(localStorage.getItem("loginUser") || "null"); } catch { /* 무시 */ }
+      if (!user?.uid) return;
       const messaging = await getMessagingIfSupported();
       if (!messaging) return;
       const swReg = await navigator.serviceWorker.getRegistration(`${import.meta.env.BASE_URL}firebase-messaging-sw.js`);
@@ -53,18 +54,18 @@ async function cleanupStaleTokenThenLeave() {
       const staleToken = await getToken(messaging, { vapidKey: fcmVapidKey, serviceWorkerRegistration: swReg });
       if (!staleToken) return;
 
-      const staffRef = doc(db, "staffs", user.uid);
-      const staffSnap = await getDoc(staffRef);
-      if (staffSnap.exists()) {
-        const companyId = staffSnap.data().companyId;
+      if (user.role === "최고관리자") {
+        // 최고관리자(admins 컬렉션)는 클라이언트 직접 쓰기가 규칙으로 막혀있어서
+        // fcm.js의 disablePush와 같은 콜러블 함수를 그대로 쓴다.
+        await httpsCallable(functions, "syncAdminPushToken")({ uid: user.uid, token: staleToken, action: "remove" }).catch(() => {});
+      } else {
+        const staffRef = doc(db, "staffs", user.uid);
+        const staffSnap = await getDoc(staffRef).catch(() => null);
+        const companyId = user.companyId || staffSnap?.data()?.companyId;
         await updateDoc(staffRef, { fcmTokens: arrayRemove(staleToken) }).catch(() => {});
         if (companyId) {
           await updateDoc(doc(db, "companies", companyId, "users", user.uid), { fcmTokens: arrayRemove(staleToken) }).catch(() => {});
         }
-      } else {
-        // staffs 문서가 없으면 최고관리자(admins 컬렉션) — 거긴 클라이언트 직접 쓰기가
-        // 규칙으로 막혀있어서 fcm.js의 disablePush와 같은 콜러블 함수를 그대로 쓴다.
-        await httpsCallable(functions, "syncAdminPushToken")({ uid: user.uid, token: staleToken, action: "remove" }).catch(() => {});
       }
     } catch { /* 자가 치유 실패해도 이동은 계속 */ }
   })();
