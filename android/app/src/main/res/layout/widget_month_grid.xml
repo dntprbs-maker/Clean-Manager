@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg_card"
+    android:padding="8dp">
+
+    <!-- 1행: 브랜드 / 연월 / 오늘 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:id="@+id/month_brand"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="클린매니저"
+            android:textStyle="bold"
+            android:textSize="13sp"
+            android:textColor="@color/widget_brand_green" />
+
+        <TextView
+            android:id="@+id/month_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="2"
+            android:gravity="center"
+            android:textStyle="bold"
+            android:textSize="18sp"
+            android:textColor="@color/widget_brand_green" />
+
+        <TextView
+            android:id="@+id/month_today_btn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:background="@drawable/widget_bg_pill_button"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:text="오늘"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:textColor="@color/widget_button_text_green" />
+    </LinearLayout>
+
+    <!-- 2행: 지난달 / 빈 공간 / 다음달 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:id="@+id/month_prev_btn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/widget_bg_pill_button"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:text="‹ 지난달"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:textColor="@color/widget_button_text_green" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/month_next_btn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/widget_bg_pill_button"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:text="다음달 ›"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:textColor="@color/widget_button_text_green" />
+    </LinearLayout>
+
+    <!-- 3행: 요일 머리글 (일 월 화 수 목 금 토) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingBottom="2dp">
+
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="일" android:textStyle="bold" android:textSize="11sp" android:textColor="@color/widget_sunday_text" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="월" android:textStyle="bold" android:textSize="11sp" android:textColor="@color/widget_weekday_text" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="화" android:textStyle="bold" android:textSize="11sp" android:textColor="@color/widget_weekday_text" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="수" android:textStyle="bold" android:textSize="11sp" android:textColor="@color/widget_weekday_text" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="목" android:textStyle="bold" android:textSize="11sp" android:textColor="@color/widget_weekday_text" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="금" android:textStyle="bold" android:textSize="11sp" android:textColor="@color/widget_weekday_text" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="토" android:textStyle="bold" android:textSize="11sp" android:textColor="@color/widget_saturday_text" />
+    </LinearLayout>
+
+    <!-- 6주 그리드: 각 행은 렌더링 시 셀 7개를 동적으로 채운다 -->
+    <LinearLayout android:id="@+id/month_row1" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal" android:layout_marginTop="2dp" />
+    <LinearLayout android:id="@+id/month_row2" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal" android:layout_marginTop="2dp" />
+    <LinearLayout android:id="@+id/month_row3" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal" android:layout_marginTop="2dp" />
+    <LinearLayout android:id="@+id/month_row4" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal" android:layout_marginTop="2dp" />
+    <LinearLayout android:id="@+id/month_row5" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal" android:layout_marginTop="2dp" />
+    <LinearLayout android:id="@+id/month_row6" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal" android:layout_marginTop="2dp" />
+
+</LinearLayout>

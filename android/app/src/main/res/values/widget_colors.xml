@@ -9,6 +9,7 @@
     <color name="widget_today_bg">#FF166534</color>
     <color name="widget_date_range_text">#FF1F2937</color>
     <color name="widget_weekday_text">#FF1F2937</color>
+    <color name="widget_other_month_text">#FFC4C9D0</color>
     <color name="widget_sunday_text">#FFDC2626</color>
     <color name="widget_saturday_text">#FF2563EB</color>
     <color name="widget_divider">#FFE5E7EB</color>

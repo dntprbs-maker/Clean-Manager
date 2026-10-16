@@ -52,6 +52,9 @@ final class FirestoreEventFetcher {
                 JSONObject fields = entry.getJSONObject("document").optJSONObject("fields");
                 if (fields == null) continue;
 
+                // 웹앱과 동일하게 삭제 처리된 일정은 위젯에서도 숨긴다.
+                if ("deleted".equals(getString(fields, "status", ""))) continue;
+
                 String title = getString(fields, "title", "(제목 없음)");
                 String start = getString(fields, "start", "");
                 String end = getString(fields, "end", start);
@@ -136,7 +139,7 @@ final class FirestoreEventFetcher {
                 .put("from", new JSONArray().put(fromClause))
                 .put("where", where)
                 .put("orderBy", new JSONArray().put(orderBy))
-                .put("limit", 300);
+                .put("limit", 1500);
 
         return new JSONObject().put("structuredQuery", structuredQuery);
     }
