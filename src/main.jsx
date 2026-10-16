@@ -3,10 +3,11 @@ import { createRoot } from 'react-dom/client'
 import { onAuthStateChanged } from 'firebase/auth'
 import { doc, getDoc, updateDoc, arrayRemove } from 'firebase/firestore'
 import { getToken } from 'firebase/messaging'
+import { httpsCallable } from 'firebase/functions'
 import './index.css'
 import App from './App.jsx'
 import SuperAdmin from './SuperAdmin.jsx'
-import { auth, db, fcmVapidKey, getMessagingIfSupported } from './firebase'
+import { auth, db, functions, fcmVapidKey, getMessagingIfSupported } from './firebase'
 
 // 주소창에 #superadmin 이 붙어있으면 마스터 관리자 페이지로 분기
 // #demo 또는 ?demo=true 는 App 내부에서 처리
@@ -54,11 +55,16 @@ async function cleanupStaleTokenThenLeave() {
 
       const staffRef = doc(db, "staffs", user.uid);
       const staffSnap = await getDoc(staffRef);
-      if (!staffSnap.exists()) return; // 직원 문서가 없으면(예: 최고관리자) 안전하게 건너뜀
-      const companyId = staffSnap.data().companyId;
-      await updateDoc(staffRef, { fcmTokens: arrayRemove(staleToken) }).catch(() => {});
-      if (companyId) {
-        await updateDoc(doc(db, "companies", companyId, "users", user.uid), { fcmTokens: arrayRemove(staleToken) }).catch(() => {});
+      if (staffSnap.exists()) {
+        const companyId = staffSnap.data().companyId;
+        await updateDoc(staffRef, { fcmTokens: arrayRemove(staleToken) }).catch(() => {});
+        if (companyId) {
+          await updateDoc(doc(db, "companies", companyId, "users", user.uid), { fcmTokens: arrayRemove(staleToken) }).catch(() => {});
+        }
+      } else {
+        // staffs 문서가 없으면 최고관리자(admins 컬렉션) — 거긴 클라이언트 직접 쓰기가
+        // 규칙으로 막혀있어서 fcm.js의 disablePush와 같은 콜러블 함수를 그대로 쓴다.
+        await httpsCallable(functions, "syncAdminPushToken")({ uid: user.uid, token: staleToken, action: "remove" }).catch(() => {});
       }
     } catch { /* 자가 치유 실패해도 이동은 계속 */ }
   })();
