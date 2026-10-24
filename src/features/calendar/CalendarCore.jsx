@@ -1666,7 +1666,7 @@ function NativeDateTimeField({ type, value, onChange, ariaLabel, min, step, disp
       <input ref={ref} type={type} value={value||""} min={min} step={step}
         aria-label={ariaLabel}
         onChange={e=>onChange(e.target.value)}
-        onClick={e=>e.stopPropagation()}
+        onClick={e=>{ e.stopPropagation(); openPicker(); }}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
     </label>
   );
