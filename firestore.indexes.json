@@ -1,0 +1,21 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "calId", "order": "ASCENDING" },
+        { "fieldPath": "start", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "calId", "order": "ASCENDING" },
+        { "fieldPath": "repeat", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": [{ "collectionGroup": "mcpHubChanges", "fieldPath": "value", "indexes": [] }]
+}

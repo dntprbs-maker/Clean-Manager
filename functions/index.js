@@ -8,6 +8,7 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { getMemberships } from "./lib/membership.js";
 import { fmtDate, addDays, expandRecurringForFeed } from "./lib/recurring.js";
+import { loadFeedEvents } from "./lib/calendarFeedQuery.js";
 import { parseIcs } from "./lib/ics.js";
 import { createGoogleClient } from "./lib/gcal/googleApi.js";
 import { isPushActive } from "./lib/gcal/store.js";
@@ -17,6 +18,8 @@ import { handleWebhook, runMaintenance } from "./lib/gcal/service.js";
 import { handleAdmin } from "./lib/gcal/adminPage.js";
 import process from "node:process";
 export { mcp } from "./mcp/index.js";
+export { hubEventChanged, hubCalendarChanged, hubReportChanged } from './lib/hubChangeTriggers.js';
+export { widgetEventChanged, widgetCalChanged } from './lib/widgetPush.js';
 // mcp/index.js가 (ESM import 순서상 이 줄보다 먼저 평가되며) lib/db.js를 통해
 // initializeApp()을 이미 호출했을 수 있으므로 중복 호출 방지 체크.
 if (getApps().length === 0) initializeApp();
@@ -446,15 +449,12 @@ export const calendarFeed = onRequest({ region: REGION, cors: true }, async (req
       res.status(403).send("접근 권한이 없습니다.");
       return;
     }
-    const evSnap = await db.collection(`companies/${company}/events`).where("calId", "==", cal).get();
-    const events = evSnap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(e => e.status !== "deleted");
-    const expanded = expandRecurringForFeed(events);
+    // 팀 전체 일정을 다 읽지 않고, 피드에 필요한 기간만 Firestore 에서 가져온다.
+    const { events, cutoff, horizon } = await loadFeedEvents(db, company, cal, Date.now());
+    const expanded = expandRecurringForFeed(events, { end: horizon });
 
     // 지난 7일 이전 회차는 굳이 개인 캘린더에 안 보여줘도 됨 (앞으로의 일정 위주)
-    const cutoff = fmtDate(new Date(Date.now() - 7*864e5));
-    const visible = expanded.filter(ev => ev.start >= cutoff);
+    const visible = expanded.filter(ev => ev.start >= cutoff && ev.start <= horizon);
 
     const now = new Date();
     const dtstamp = `${now.getUTCFullYear()}${String(now.getUTCMonth()+1).padStart(2,"0")}${String(now.getUTCDate()).padStart(2,"0")}T${String(now.getUTCHours()).padStart(2,"0")}${String(now.getUTCMinutes()).padStart(2,"0")}${String(now.getUTCSeconds()).padStart(2,"0")}Z`;

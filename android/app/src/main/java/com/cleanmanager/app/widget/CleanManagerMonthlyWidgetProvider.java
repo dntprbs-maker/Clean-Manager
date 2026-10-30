@@ -18,7 +18,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 public class CleanManagerMonthlyWidgetProvider extends AppWidgetProvider {
 
@@ -41,6 +40,8 @@ public class CleanManagerMonthlyWidgetProvider extends AppWidgetProvider {
 
     @Override
     public void onUpdate(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
+        // 위젯이 처음 깔리거나 주기 갱신될 때 푸시 토픽 구독을 보장한다.
+        WidgetPushService.ensureSubscribed(context);
         // 캐시로 즉시 렌더링 (네트워크 대기 없음). 최신화는 onReceive의 goAsync 구간에서 한다.
         for (int id : appWidgetIds) {
             applyMonthViews(context, appWidgetManager, id);
@@ -66,6 +67,8 @@ public class CleanManagerMonthlyWidgetProvider extends AppWidgetProvider {
             }
             // 달 이동은 캐시만으로 즉시 반영 (네트워크 호출 없음 — 빠른 반응성 우선)
             applyMonthViews(context, AppWidgetManager.getInstance(context), appWidgetId);
+            // 새로 보이는 달이 캐시 범위 밖이면 그 달만 백그라운드로 읽어 다시 그린다.
+            refreshVisibleInBackground(context, appWidgetId);
 
         } else if (ACTION_REFRESH_MONTH.equals(action) || AppWidgetManager.ACTION_APPWIDGET_UPDATE.equals(action)) {
             int[] ids = intent.getIntArrayExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS);
@@ -78,6 +81,14 @@ public class CleanManagerMonthlyWidgetProvider extends AppWidgetProvider {
     public void onDeleted(Context context, int[] appWidgetIds) {
         for (int id : appWidgetIds) {
             WidgetCache.clearMonthOffset(context, id);
+        }
+    }
+
+    @Override
+    public void onDisabled(Context context) {
+        // 이 종류의 마지막 위젯이 제거됨 — 4종 모두 없으면 푸시 토픽 구독을 해제한다.
+        if (!WidgetRefresher.hasAnyWidget(context)) {
+            WidgetPushService.unsubscribe(context);
         }
     }
 
@@ -118,25 +129,35 @@ public class CleanManagerMonthlyWidgetProvider extends AppWidgetProvider {
         PendingResult pendingResult = goAsync();
         new Thread(() -> {
             try {
-                Calendar today = Calendar.getInstance();
-                String from = isoDate(today, -WidgetConfig.FETCH_DAYS_BEFORE);
-                String to = isoDate(today, WidgetConfig.FETCH_DAYS_AFTER);
-
-                List<WidgetEvent> events = FirestoreEventFetcher.fetchRange(from, to);
-                Map<String, Integer> cals = FirestoreEventFetcher.fetchCalendars();
-
-                if (events != null) {
-                    WidgetCache.save(appContext, events, cals != null ? cals : WidgetCache.load(appContext).calendars);
-                }
+                // 설치된 위젯들이 보이는 기간을 한 번에 덮는 범위로 조회한다 (4종이 겹쳐도 5분 내 1회).
+                String[] range = WidgetRefresher.refreshRange(appContext);
+                WidgetRefresher.ensureRange(appContext, range[0], range[1], false);
 
                 AppWidgetManager mgr = AppWidgetManager.getInstance(appContext);
                 for (int id : appWidgetIds) {
                     applyMonthViews(appContext, mgr, id);
                 }
-                // 공용 캐시를 갱신했으니 주간 위젯도 캐시로 다시 그린다 (네트워크 재요청 없음).
+                // 공용 캐시를 갱신했으니 나머지 위젯도 캐시로 다시 그린다 (네트워크 재요청 없음).
                 CleanManagerWeeklyWidgetProvider.redrawAll(appContext);
                 CleanManagerTwoWeekWidgetProvider.redrawAll(appContext);
                 CleanManagerTwoWeekGridWidgetProvider.redrawAll(appContext);
+            } finally {
+                pendingResult.finish();
+            }
+        }).start();
+    }
+
+    /** 새로 보이는 달이 캐시 범위 밖이면 그 달만 백그라운드로 읽어 다시 그린다. */
+    private void refreshVisibleInBackground(Context context, int appWidgetId) {
+        String[] range = WidgetRefresher.monthRange(context, appWidgetId);
+        if (WidgetRefresher.isRangeCovered(context, range[0], range[1])) return;
+
+        Context appContext = context.getApplicationContext();
+        PendingResult pendingResult = goAsync();
+        new Thread(() -> {
+            try {
+                WidgetRefresher.ensureRange(appContext, range[0], range[1], false);
+                applyMonthViews(appContext, AppWidgetManager.getInstance(appContext), appWidgetId);
             } finally {
                 pendingResult.finish();
             }
