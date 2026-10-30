@@ -81,7 +81,7 @@ export function TextBar({ item, onClick }) {
         paddingLeft: isMulti&&!isS ? 2 : 3,
       }}
       className="text-[8px] leading-none py-[1px] pr-0.5 mb-[1px] overflow-hidden whitespace-nowrap cursor-pointer select-none font-medium">
-      {isS ? ev.title : ""}
+      {isS ? (ev._recurring ? `↻ ${ev.title}` : ev.title) : ""}
     </div>
   );
 }
@@ -115,8 +115,10 @@ export function FullMonthCell({ ds, isCm, items, onDate, onEvt }) {
         opacity: isCm ? 1 : 0.35
       }}
       className="min-h-[100px] pt-1 pb-1 border-b border-r border-gray-100 cursor-pointer">
-      {/* 날짜 */}
-      <div className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full mx-auto mb-0.5
+      {/* 날짜 — 오늘(채워진 원)은 일반 숫자보다 시각적으로 꽉 차 보여 바로 아래 일정 바와
+          맞닿아 보이던 문제(민원)가 있었다. mb-0.5(2px)로는 원 바깥 여백이 없어서였고,
+          mb-1.5(6px)로 늘려 오늘·평소 모두 일정 바와의 체감 간격이 비슷해지도록 맞췄다. */}
+      <div className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full mx-auto mb-1.5
         ${isToday?"bg-gray-900 text-white":`${nc}`}`}>
         {d.getDate()}
       </div>
@@ -311,11 +313,17 @@ export function ScheduleList({ selDate, compact=false }) {
               onClick={()=>handleCardClick(ev)}
               className="flex items-center px-4 py-1.5 border-b border-gray-50 cursor-pointer">
               {isMulti
-                ? <span className="text-sm px-2 py-0.5 rounded text-white font-medium mr-2 truncate max-w-[80%]"
-                    style={{background:c.color}}>{ev.title}{ev._mergedCount ? ` (${ev._mergedCount}명)` : ""}</span>
+                ? <span className="text-sm px-2 py-0.5 rounded text-white font-medium mr-2 truncate max-w-[80%] inline-flex items-center gap-1"
+                    style={{background:c.color}}>
+                    {ev._recurring && <RotateCcw size={10} className="shrink-0"/>}
+                    {ev.title}{ev._mergedCount ? ` (${ev._mergedCount}명)` : ""}
+                  </span>
                 : <>
                     <div className="w-1 h-5 rounded-full mr-3" style={{background:c.color}}/>
-                    <span className="text-sm text-gray-800" style={{color: progressTextColor(ev)}}>{ev.title}{ev._mergedCount ? ` (${ev._mergedCount}명)` : ""}</span>
+                    <span className="text-sm text-gray-800 inline-flex items-center gap-1" style={{color: progressTextColor(ev)}}>
+                      {ev._recurring && <RotateCcw size={11} className="shrink-0 text-gray-400"/>}
+                      {ev.title}{ev._mergedCount ? ` (${ev._mergedCount}명)` : ""}
+                    </span>
                   </>
               }
             </div>
@@ -351,7 +359,10 @@ export function ScheduleList({ selDate, compact=false }) {
                   {/* 제목 + 장소 + 썸네일 */}
                   <div className="flex-1 flex flex-col justify-center min-w-0">
                     <div className="flex items-start justify-between gap-1">
-                      <p className="text-sm font-semibold text-gray-900 leading-snug" style={{color: progressTextColor(ev)}}>{ev.title}{ev._mergedCount ? ` (${ev._mergedCount}명)` : ""}</p>
+                      <p className="text-sm font-semibold text-gray-900 leading-snug inline-flex items-center gap-1" style={{color: progressTextColor(ev)}}>
+                        {ev._recurring && <RotateCcw size={11} className="shrink-0 text-gray-400"/>}
+                        {ev.title}{ev._mergedCount ? ` (${ev._mergedCount}명)` : ""}
+                      </p>
                       {(ev.photos||[]).length > 0 && (
                         <span className="text-xs text-gray-400 shrink-0 flex items-center gap-0.5">
                           📎{(ev.photos||[]).length}
@@ -2643,7 +2654,10 @@ export function SearchModal() {
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor: cal?.color||"#333"}}/>
-                  <span className="font-bold text-gray-900 text-[15px]">{ev.title}</span>
+                  <span className="font-bold text-gray-900 text-[15px] inline-flex items-center gap-1">
+                    {(ev._recurring || (ev.repeat && ev.repeat !== "none")) && <RotateCcw size={11} className="shrink-0 text-gray-400"/>}
+                    {ev.title}
+                  </span>
                 </div>
                 <span className="text-[11px] font-semibold" style={{color: cal?.color||"#333"}}>{cal?.label}</span>
               </div>
