@@ -1,6 +1,7 @@
 import { defineSecret } from "firebase-functions/params";
 import { getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 
 // index.js가 항상 먼저 initializeApp()을 호출하지만, 이 모듈이 단독으로(테스트 등) 로드될
 // 가능성을 대비해 방어적으로 한 번 더 체크 (Firebase Admin SDK는 중복 호출을 허용하지 않음).
@@ -26,4 +27,17 @@ export function getDb() {
 // 테스트 전용: 메모리 Firestore로 바꿔 끼우기 (운영 코드에서 호출 금지)
 export function __setDbForTest(db) {
   _override = db;
+}
+
+// 앱(클라이언트)과 같은 기본 Storage 버킷 — 사진 첨부용. 지연 초기화(콜드 스타트 중
+// initializeApp() 직후 바로 호출되지 않도록) + 테스트에서 오버라이드 가능하게 분리.
+let _bucket = null;
+let _bucketOverride = null;
+export function getBucket() {
+  if (_bucketOverride) return _bucketOverride;
+  if (!_bucket) _bucket = getStorage().bucket();
+  return _bucket;
+}
+export function __setBucketForTest(bucket) {
+  _bucketOverride = bucket;
 }

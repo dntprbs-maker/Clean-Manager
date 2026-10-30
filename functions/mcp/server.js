@@ -7,6 +7,8 @@ import { err } from "./lib/toolResult.js";
 
 // 도구별 필요 권한. 여기 없는 도구(직원·팀 관리)는 전부 admin 권한이 필요하다.
 export const TOOL_SCOPES = {
+  export_hub_changes: SCOPES.READ,
+  export_hub_events: SCOPES.READ,
   list_events: SCOPES.READ,
   search_events: SCOPES.READ,
   get_event: SCOPES.READ,
@@ -35,3 +37,4 @@ export function createMcpServer(companyId, agent) {
   registerTeamTools(server, companyId);
   return server;
 }
+
