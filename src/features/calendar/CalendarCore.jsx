@@ -841,6 +841,7 @@ export function DetailSheet() {
   const [vis,setVis]=useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [savedComment, setSavedComment] = useState("");
+  const [financeOpen, setFinanceOpen] = useState(false);
   const commentRef = useRef(null);
   // 훅 순서 유지를 위해 이른 리턴(!detEv) 전에 계산 — detEv 없으면 null
   const cal = detEv ? (cals.find(c=>c.id===detEv.calId) || { id:"unassigned", label:"미배정", name:"미배정", color:"#9ca3af" }) : null;
@@ -848,6 +849,7 @@ export function DetailSheet() {
   useEffect(()=>{
     // 새 항목 입력칸은 항상 비운 채로 시작 — 기존 기록은 savedComment(누적본)로 따로 보관
     setCommentDraft(""); setSavedComment(detEv?.leaderComment || "");
+    setFinanceOpen(false);
   },[detEv?.id]);
   // 이 일정 담당팀의 팀장이면 열리자마자 특이사항 입력칸에 커서가 깜빡이도록 자동 포커스
   useEffect(()=>{
@@ -999,6 +1001,63 @@ export function DetailSheet() {
               )}
             </div>
           )}
+
+          {/* 정산 정보 — 사장·관리팀만, 이 일정에 금액 정보(finance)가 입력돼 있을 때만 표시.
+              기본은 접힘(최종 손익 1줄만) — 매출액은 접힌 상태에서 안 보이게 숨겨 달라는
+              요청(2026-10-30)에 따라 펼쳐야만 상세 금액이 보인다. */}
+          {detEv.finance && (isSuperAdmin(currentUser) || isAdminStaff(currentUser)) && (() => {
+            const fin = detEv.finance;
+            const costsSum = (fin.extraCosts||[]).reduce((s,c)=>s+Number(c.amount||0),0);
+            const payOut = fin.payMethod === "member_direct"
+              ? (fin.memberPays||[]).reduce((s,p)=>s+Number(p.amount||0),0)
+              : Number(fin.leaderPay?.amount||0);
+            const profit = Number(fin.revenue||0) - payOut - costsSum;
+            const won = n => `${Number(n||0).toLocaleString()}원`;
+            return (
+              <div className="mx-5 my-4 rounded-2xl border-[1.5px] border-blue-500 overflow-hidden">
+                <button onClick={()=>setFinanceOpen(o=>!o)}
+                  className="w-full flex items-center gap-1.5 bg-blue-50 px-3.5 py-2.5 text-left">
+                  <span className="text-[13px] font-extrabold text-blue-900">정산 정보</span>
+                  <span className="ml-auto text-[11px] font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">🔒 사장·관리팀만</span>
+                  <ChevronDown size={16} className={`text-blue-600 transition-transform ${financeOpen?"rotate-180":""}`}/>
+                </button>
+                {!financeOpen && (
+                  <div className="flex items-center justify-between px-3.5 py-3.5">
+                    <span className="text-[13px] font-bold text-gray-500">오늘 현장 손익</span>
+                    <span className="text-[17px] font-black text-green-700">{won(profit)}</span>
+                  </div>
+                )}
+                {financeOpen && (
+                  <div className="px-3.5 py-3.5 flex flex-col gap-2.5">
+                    <div className="flex justify-between text-sm"><span className="text-gray-500">청소비(매출)</span><span className="font-bold">{won(fin.revenue)}</span></div>
+                    <div className="flex justify-between text-sm"><span className="text-gray-500">지급 방식</span><span className="font-bold bg-gray-100 px-2 py-0.5 rounded-full text-xs">{fin.payMethod==="member_direct"?"팀원 직접 지급":"팀장 일괄 지급"}</span></div>
+                    {fin.payMethod==="member_direct" ? (
+                      (fin.memberPays||[]).map((p,i)=>(
+                        <div key={i} className="flex justify-between text-sm"><span className="text-gray-500">{p.employeeName||"팀원"}</span><span className="font-bold">{won(p.amount)}</span></div>
+                      ))
+                    ) : (
+                      <div className="flex justify-between text-sm"><span className="text-gray-500">팀장 지급액</span><span className="font-bold">{won(fin.leaderPay?.amount)}{fin.leaderPay?.status==="paid" && <span className="text-[11px] text-green-600 font-bold"> · 지급완료</span>}</span></div>
+                    )}
+                    {costsSum > 0 && (
+                      <div className="flex justify-between text-sm"><span className="text-gray-500">기타 비용</span><span className="font-bold">{won(costsSum)}</span></div>
+                    )}
+                    {(fin.workers||[]).length > 0 && (
+                      <div className="flex justify-between text-sm border-t border-dashed border-gray-200 pt-2.5">
+                        <span className="text-gray-500">참여 작업자</span>
+                        <span className="font-bold">{fin.workers.map(w=>w.name+(w.role==="leader"?"(팀장)":"")).join(", ")}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center bg-green-50 rounded-xl px-3 py-2.5">
+                      <span className="text-green-800 font-extrabold text-[15px]">현장 손익(최종)</span>
+                      <span className="text-green-800 font-black">{won(profit)}</span>
+                    </div>
+                    <button onClick={()=>alert("금액 입력 화면은 아직 준비 중입니다.")}
+                      className="mt-0.5 w-full py-2.5 rounded-xl bg-gray-900 text-white text-[13px] font-bold">금액 정보 수정</button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* 메모 */}
           {detEv.description && (
@@ -1862,6 +1921,7 @@ export function EventModal() {
   // step: "paste"=입력단계, "form"=일정폼단계
   const [step,setStep]=useState("paste");
   const [exitConfirm,setExitConfirm]=useState(false);
+  const [financeOpen,setFinanceOpen]=useState(false);
   const origForm=useRef(null);
   const tRef=useRef(null);
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
@@ -1899,6 +1959,7 @@ export function EventModal() {
       setImgFile(null);
       setImgPreview(null);
       setCalDropOpen(false);
+      setFinanceOpen(false);
       // 복사/수정은 이미 채워진 폼을 바로 손보는 흐름이라 입력방법 선택(paste) 단계를 건너뛴다.
       // 순수 신규 등록일 때만, 마지막으로 쓴 입력방법이 "직접"이었으면 매번 탭을 다시
       // 고르지 않도록 곧장 입력폼으로 진입한다(처음 쓰는 기기는 저장된 값이 없어
@@ -2310,6 +2371,64 @@ export function EventModal() {
             </a>
           )}
         </div>
+
+        {/* 정산 정보 — 사장/관리팀이 수정 화면으로 바로 들어오므로(상세보기를 거치지 않음)
+            여기가 금액을 보는 실제 화면이다. 상세보기(DetailSheet)에도 같은 섹션을 넣어뒀다.
+            새 일정을 만드는 중(editId 없음)이거나 이 일정에 아직 금액 정보가 없으면 숨김 —
+            입력 화면이 아직 없어 여기선 읽기 전용으로만 보여준다(2026-10-30). */}
+        {editId && form.finance && (isSuperAdmin(currentUser) || isAdminStaff(currentUser)) && (() => {
+          const fin = form.finance;
+          const costsSum = (fin.extraCosts||[]).reduce((s,c)=>s+Number(c.amount||0),0);
+          const payOut = fin.payMethod === "member_direct"
+            ? (fin.memberPays||[]).reduce((s,p)=>s+Number(p.amount||0),0)
+            : Number(fin.leaderPay?.amount||0);
+          const profit = Number(fin.revenue||0) - payOut - costsSum;
+          const won = n => `${Number(n||0).toLocaleString()}원`;
+          return (
+            <div className="mx-4 my-4 rounded-2xl border-[1.5px] border-blue-500 overflow-hidden">
+              <button onClick={()=>setFinanceOpen(o=>!o)}
+                className="w-full flex items-center gap-1.5 bg-blue-50 px-3.5 py-2.5 text-left">
+                <span className="text-[13px] font-extrabold text-blue-900">정산 정보</span>
+                <span className="ml-auto text-[11px] font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">🔒 사장·관리팀만</span>
+                <ChevronDown size={16} className={`text-blue-600 transition-transform ${financeOpen?"rotate-180":""}`}/>
+              </button>
+              {!financeOpen && (
+                <div className="flex items-center justify-between px-3.5 py-3.5">
+                  <span className="text-[13px] font-bold text-gray-500">오늘 현장 손익</span>
+                  <span className="text-[17px] font-black text-green-700">{won(profit)}</span>
+                </div>
+              )}
+              {financeOpen && (
+                <div className="px-3.5 py-3.5 flex flex-col gap-2.5">
+                  <div className="flex justify-between text-sm"><span className="text-gray-500">청소비(매출)</span><span className="font-bold">{won(fin.revenue)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-gray-500">지급 방식</span><span className="font-bold bg-gray-100 px-2 py-0.5 rounded-full text-xs">{fin.payMethod==="member_direct"?"팀원 직접 지급":"팀장 일괄 지급"}</span></div>
+                  {fin.payMethod==="member_direct" ? (
+                    (fin.memberPays||[]).map((p,i)=>(
+                      <div key={i} className="flex justify-between text-sm"><span className="text-gray-500">{p.employeeName||"팀원"}</span><span className="font-bold">{won(p.amount)}</span></div>
+                    ))
+                  ) : (
+                    <div className="flex justify-between text-sm"><span className="text-gray-500">팀장 지급액</span><span className="font-bold">{won(fin.leaderPay?.amount)}{fin.leaderPay?.status==="paid" && <span className="text-[11px] text-green-600 font-bold"> · 지급완료</span>}</span></div>
+                  )}
+                  {costsSum > 0 && (
+                    <div className="flex justify-between text-sm"><span className="text-gray-500">기타 비용</span><span className="font-bold">{won(costsSum)}</span></div>
+                  )}
+                  {(fin.workers||[]).length > 0 && (
+                    <div className="flex justify-between text-sm border-t border-dashed border-gray-200 pt-2.5">
+                      <span className="text-gray-500">참여 작업자</span>
+                      <span className="font-bold">{fin.workers.map(w=>w.name+(w.role==="leader"?"(팀장)":"")).join(", ")}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center bg-green-50 rounded-xl px-3 py-2.5">
+                    <span className="text-green-800 font-extrabold text-[15px]">현장 손익(최종)</span>
+                    <span className="text-green-800 font-black">{won(profit)}</span>
+                  </div>
+                  <button onClick={()=>alert("금액 입력 화면은 아직 준비 중입니다.")}
+                    className="mt-0.5 w-full py-2.5 rounded-xl bg-gray-900 text-white text-[13px] font-bold">금액 정보 수정</button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* 내용 */}
         <div className="flex gap-3 px-4 py-4 border-b border-gray-100">
