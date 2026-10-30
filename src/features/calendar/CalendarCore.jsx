@@ -302,8 +302,10 @@ export function ScheduleList({ selDate, compact=false }) {
         <div className="w-10"/>
       </div>
 
-      {/* 이벤트 목록 */}
-      <div className="flex-1 overflow-y-auto pb-16">
+      {/* 이벤트 목록 — 하단 여백(pb-48)은 우측 하단에 떠 있는 '오늘'·'일정추가' 버튼
+          묶음(bottom-20 + 버튼 높이 + 간격 ≈ 178px)에 맨 아래 일정이 가려지지 않도록
+          버튼 전체 높이보다 넉넉히 잡은 값이다. */}
+      <div className="flex-1 overflow-y-auto pb-48">
         {/* 종일 */}
         {allDayEvts.map(ev=>{
           const c=calByIdLocal(ev.calId);
