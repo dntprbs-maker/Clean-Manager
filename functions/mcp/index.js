@@ -75,7 +75,7 @@ app.all(
       return;
     }
     const server = createMcpServer(companyId, agent);
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on("close", () => {
       transport.close();
       server.close();
@@ -86,3 +86,4 @@ app.all(
 );
 
 export const mcp = onRequest({ region: REGION, secrets: [MCP_PASSPHRASE, MCP_COMPANY_ID] }, app);
+

@@ -17,7 +17,7 @@ export const nthWeekdayOfMonthF = (year, monthIndex, weekday, ordinal) => {
   return new Date(year, monthIndex, 1 + fwd + (ordinal-1)*7);
 };
 
-export function expandRecurringForFeed(events) {
+export function expandRecurringForFeed(events, window = {}) {
   const HARD_CAP = 400;
   const now = new Date();
   const defaultUntil = fmtDate(new Date(now.getFullYear(), now.getMonth() + 6, now.getDate()));
@@ -25,7 +25,7 @@ export function expandRecurringForFeed(events) {
   for (const ev of events) {
     if (!ev.repeat || ev.repeat === "none") { out.push(ev); continue; }
     const dur      = diffDays(ev.start, ev.end || ev.start);
-    const until    = ev.repeatUntil || defaultUntil;
+    const until    = window.end && (!ev.repeatUntil || window.end < ev.repeatUntil) ? window.end : (ev.repeatUntil || defaultUntil);
     const untilD   = parseDate(until);
     const startD   = parseDate(ev.start);
     const interval = Math.max(1, Number(ev.repeatInterval) || 1);
@@ -35,16 +35,18 @@ export function expandRecurringForFeed(events) {
       const merged = ex ? { ...ev, ...ex } : ev;
       const outStart = ex?.start || dStr;
       const outEnd   = ex?.end   || addDays(outStart, dur);
-      out.push({ ...merged, _origDate: dStr, start: outStart, end: outEnd });
+      if (!window.start || outEnd >= window.start) out.push({ ...merged, _origDate: dStr, start: outStart, end: outEnd });
     };
     let count = 0;
     if (ev.repeat === "daily") {
       let cur = ev.start;
+      if (window.start && cur < window.start) cur = addDays(cur, Math.max(0, Math.floor((diffDays(cur, window.start) - dur) / interval)) * interval);
       while (cur <= until && count < HARD_CAP) { push(cur); count++; cur = addDays(cur, interval); }
     } else if (ev.repeat === "weekly") {
       const weekdays  = (ev.repeatWeekdays && ev.repeatWeekdays.length) ? ev.repeatWeekdays : [startD.getDay()];
       const weekStart = new Date(startD); weekStart.setDate(weekStart.getDate() - weekStart.getDay());
       let cur = new Date(startD);
+      if (window.start && fmtDate(cur) < window.start) cur = parseDate(addDays(window.start, -Math.max(0,dur)));
       while (cur <= untilD && count < HARD_CAP) {
         const weekIdx = Math.floor((cur - weekStart) / (7*864e5));
         if (weekIdx % interval === 0 && weekdays.includes(cur.getDay())) { push(fmtDate(cur)); count++; }
@@ -81,3 +83,4 @@ export function expandRecurringForFeed(events) {
   }
   return out;
 }
+

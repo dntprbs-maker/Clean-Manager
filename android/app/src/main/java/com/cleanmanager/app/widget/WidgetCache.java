@@ -20,10 +20,23 @@ final class WidgetCache {
     static final class Snapshot {
         final List<WidgetEvent> events;
         final Map<String, Integer> calendars;
+        final String rangeFrom;        // 조회한 기간 시작(YYYY-MM-DD), 없으면 null
+        final String rangeTo;          // 조회한 기간 끝(YYYY-MM-DD), 없으면 null
+        final long eventsFetchedAt;    // 일정 조회 시각(ms), 없으면 0
+        final long calendarsFetchedAt; // 캘린더 조회 시각(ms), 없으면 0
 
         Snapshot(List<WidgetEvent> events, Map<String, Integer> calendars) {
+            this(events, calendars, null, null, 0L, 0L);
+        }
+
+        Snapshot(List<WidgetEvent> events, Map<String, Integer> calendars,
+                 String rangeFrom, String rangeTo, long eventsFetchedAt, long calendarsFetchedAt) {
             this.events = events;
             this.calendars = calendars;
+            this.rangeFrom = rangeFrom;
+            this.rangeTo = rangeTo;
+            this.eventsFetchedAt = eventsFetchedAt;
+            this.calendarsFetchedAt = calendarsFetchedAt;
         }
     }
 
@@ -43,6 +56,7 @@ final class WidgetCache {
                 for (int i = 0; i < evArr.length(); i++) {
                     JSONObject o = evArr.getJSONObject(i);
                     events.add(new WidgetEvent(
+                            o.optString("id", ""),
                             o.optString("title", ""),
                             o.optString("start", ""),
                             o.optString("end", ""),
@@ -64,7 +78,13 @@ final class WidgetCache {
                     cals.put(k, calObj.optInt(k));
                 }
             }
-            return new Snapshot(events, cals);
+
+            // 예전 캐시(이 값이 없던 시절)에는 범위·시각이 없으므로 null/0 으로 취급한다.
+            String rangeFrom = root.isNull("rangeFrom") ? null : root.optString("rangeFrom", null);
+            String rangeTo = root.isNull("rangeTo") ? null : root.optString("rangeTo", null);
+            long eventsFetchedAt = root.optLong("eventsFetchedAt", 0L);
+            long calendarsFetchedAt = root.optLong("calendarsFetchedAt", 0L);
+            return new Snapshot(events, cals, rangeFrom, rangeTo, eventsFetchedAt, calendarsFetchedAt);
         } catch (Exception e) {
             Log.w(TAG, "캐시 읽기 실패", e);
             return new Snapshot(new ArrayList<>(), new HashMap<>());
@@ -72,10 +92,19 @@ final class WidgetCache {
     }
 
     static void save(Context context, List<WidgetEvent> events, Map<String, Integer> calendars) {
+        // 범위 정보 없이 저장 요청이 오면 기존 범위·시각을 유지한다.
+        Snapshot current = load(context);
+        save(context, events, calendars, current.rangeFrom, current.rangeTo,
+                current.eventsFetchedAt, current.calendarsFetchedAt);
+    }
+
+    static void save(Context context, List<WidgetEvent> events, Map<String, Integer> calendars,
+                     String rangeFrom, String rangeTo, long eventsFetchedAt, long calendarsFetchedAt) {
         try {
             JSONArray evArr = new JSONArray();
             for (WidgetEvent e : events) {
                 JSONObject o = new JSONObject();
+                o.put("id", e.id);
                 o.put("title", e.title);
                 o.put("start", e.start);
                 o.put("end", e.end);
@@ -96,6 +125,10 @@ final class WidgetCache {
             root.put("events", evArr);
             root.put("calendars", calObj);
             root.put("fetchedAt", System.currentTimeMillis());
+            root.put("rangeFrom", rangeFrom);
+            root.put("rangeTo", rangeTo);
+            root.put("eventsFetchedAt", eventsFetchedAt);
+            root.put("calendarsFetchedAt", calendarsFetchedAt);
 
             SharedPreferences prefs = context.getSharedPreferences(WidgetConfig.PREFS_NAME, Context.MODE_PRIVATE);
             prefs.edit().putString(WidgetConfig.PREF_KEY_CACHE_BLOB, root.toString()).apply();

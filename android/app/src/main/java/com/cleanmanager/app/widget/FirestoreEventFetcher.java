@@ -49,12 +49,15 @@ final class FirestoreEventFetcher {
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject entry = arr.getJSONObject(i);
                 if (!entry.has("document")) continue;
-                JSONObject fields = entry.getJSONObject("document").optJSONObject("fields");
+                JSONObject doc = entry.getJSONObject("document");
+                JSONObject fields = doc.optJSONObject("fields");
                 if (fields == null) continue;
 
                 // 웹앱과 동일하게 삭제 처리된 일정은 위젯에서도 숨긴다.
                 if ("deleted".equals(getString(fields, "status", ""))) continue;
 
+                String name = doc.optString("name", "");
+                String id = name.substring(name.lastIndexOf('/') + 1);
                 String title = getString(fields, "title", "(제목 없음)");
                 String start = getString(fields, "start", "");
                 String end = getString(fields, "end", start);
@@ -65,11 +68,60 @@ final class FirestoreEventFetcher {
                 boolean allDay = getBool(fields, "allDay", false);
 
                 if (start.isEmpty()) continue;
-                result.add(new WidgetEvent(title, start, end, startTime, endTime, allDay, place, calId));
+                result.add(new WidgetEvent(id, title, start, end, startTime, endTime, allDay, place, calId));
             }
             return result;
         } catch (Exception e) {
             Log.w(TAG, "일정 조회 실패", e);
+            return null;
+        }
+    }
+
+    /** 단건 조회 결과. deleted=true 면 위젯 캐시에서 지워야 한다. */
+    static final class FetchOne {
+        final boolean deleted;
+        final WidgetEvent event;
+
+        FetchOne(boolean deleted, WidgetEvent event) {
+            this.deleted = deleted;
+            this.event = event;
+        }
+    }
+
+    /**
+     * 푸시로 알려온 eventId 하나만 읽는다. 위젯에 보이는 필드만 쓰고 description 은 안 건드린다.
+     * 문서 있음 → (deleted 상태면 삭제로 취급) / HTTP 404 → 삭제 / 그 외 오류 → null(호출자가 전체 재조회).
+     */
+    static FetchOne fetchById(String id) {
+        try {
+            String urlStr = "https://firestore.googleapis.com/v1/projects/"
+                    + WidgetConfig.FIRESTORE_PROJECT_ID
+                    + "/databases/(default)/documents/companies/"
+                    + WidgetConfig.COMPANY_ID
+                    + "/events/" + id
+                    + "?key=" + WidgetConfig.FIRESTORE_API_KEY;
+
+            HttpResult r = httpGet(urlStr);
+            if (r.code == 404) return new FetchOne(true, null);          // 문서 없음 → 삭제
+            if (r.code < 200 || r.code >= 300) return null;              // 그 외 오류 → null
+
+            JSONObject doc = new JSONObject(r.body);
+            JSONObject fields = doc.optJSONObject("fields");
+            if (fields == null) return new FetchOne(true, null);
+            if ("deleted".equals(getString(fields, "status", ""))) return new FetchOne(true, null);
+
+            String title = getString(fields, "title", "(제목 없음)");
+            String start = getString(fields, "start", "");
+            if (start.isEmpty()) return new FetchOne(true, null);
+            String end = getString(fields, "end", start);
+            String startTime = getString(fields, "startTime", "");
+            String endTime = getString(fields, "endTime", "");
+            String place = getString(fields, "place", "");
+            String calId = getString(fields, "calId", "");
+            boolean allDay = getBool(fields, "allDay", false);
+            return new FetchOne(false, new WidgetEvent(id, title, start, end, startTime, endTime, allDay, place, calId));
+        } catch (Exception e) {
+            Log.w(TAG, "일정 단건 조회 실패", e);
             return null;
         }
     }
@@ -139,7 +191,7 @@ final class FirestoreEventFetcher {
                 .put("from", new JSONArray().put(fromClause))
                 .put("where", where)
                 .put("orderBy", new JSONArray().put(orderBy))
-                .put("limit", 1500);
+                .put("limit", 500);
 
         return new JSONObject().put("structuredQuery", structuredQuery);
     }
@@ -169,7 +221,18 @@ final class FirestoreEventFetcher {
         return response;
     }
 
-    private static String getJson(String urlStr) throws IOException {
+    /** HTTP 상태코드와 응답 본문. 404 를 "삭제"로 구분하기 위해 코드가 필요하다. */
+    private static final class HttpResult {
+        final int code;
+        final String body;
+
+        HttpResult(int code, String body) {
+            this.code = code;
+            this.body = body;
+        }
+    }
+
+    private static HttpResult httpGet(String urlStr) throws IOException {
         URL url = new URL(urlStr);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
@@ -180,12 +243,16 @@ final class FirestoreEventFetcher {
         InputStream is = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
         String response = readAll(is);
         conn.disconnect();
+        return new HttpResult(code, response);
+    }
 
-        if (code < 200 || code >= 300) {
-            Log.w(TAG, "요청 실패: " + code + " " + response);
+    private static String getJson(String urlStr) throws IOException {
+        HttpResult r = httpGet(urlStr);
+        if (r.code < 200 || r.code >= 300) {
+            Log.w(TAG, "요청 실패: " + r.code + " " + r.body);
             return null;
         }
-        return response;
+        return r.body;
     }
 
     private static String getString(JSONObject fields, String key, String fallback) {

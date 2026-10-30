@@ -1,6 +1,9 @@
 import { z } from "zod";
-import { getDb } from "../lib/db.js";
+import { randomUUID } from "node:crypto";
+import { getDb, getBucket } from "../lib/db.js";
 import { expandRecurringForFeed } from "../../lib/recurring.js";
+import { buildHubFeed } from "../../lib/hubFeed.js";
+import { exportHubChanges } from "../../lib/hubChanges.js";
 import { ok, err } from "../lib/toolResult.js";
 
 async function loadTeamNameByCalId(companyId) {
@@ -54,12 +57,56 @@ function toView(ev, teamByCal) {
     repeat: ev.repeat && ev.repeat !== "none" ? ev.repeat : undefined,
     mcpTest: ev.mcpTest ? true : undefined,
     createdBy: ev.mcpCreatedBy?.label || undefined,
+    // 앱 화면과 같은 모양(name/url)만 내보낸다 — Storage 내부 path는 비공개 정보라 뺀다.
+    photos: (ev.photos || []).length > 0 ? ev.photos.map((p) => ({ name: p.name, url: p.url })) : undefined,
+    finance: ev.finance || undefined,
   };
 }
 
+// 사진 입력 — 이미 업로드된 것은 url로, 새로 올릴 것은 base64(dataBase64)로 받는다.
+// 앱 화면(CalendarCore.jsx)이 올릴 때 쓰는 것과 같은 경로 규칙(companies/{cid}/events/{eid}/...)
+// 에 저장해 같은 Storage 버킷·권한 규칙을 그대로 탄다.
+const PHOTO_SHAPE = z.object({
+  name: z.string().min(1).describe("파일 이름 (확장자 포함)"),
+  url: z.string().optional().describe("이미 업로드돼 있는 사진이면 그 URL"),
+  dataBase64: z.string().optional().describe("새로 올릴 사진의 base64 인코딩 데이터(데이터 URI 접두어 없이)"),
+  mimeType: z.string().optional().describe("dataBase64일 때 MIME 타입(예: image/jpeg). 생략 시 image/jpeg로 처리"),
+});
+
+async function uploadPhotos(companyId, eventId, photos) {
+  if (!photos || photos.length === 0) return undefined;
+  const bucket = getBucket();
+  return Promise.all(photos.map(async (p) => {
+    if (p.url) return { name: p.name, url: p.url };
+    if (!p.dataBase64) throw new Error(`사진 "${p.name}"에 url도 dataBase64도 없습니다.`);
+    const buffer = Buffer.from(p.dataBase64, "base64");
+    const path = `companies/${companyId}/events/${eventId}/${Date.now()}_${p.name}`;
+    const file = bucket.file(path);
+    const token = randomUUID();
+    await file.save(buffer, {
+      metadata: { contentType: p.mimeType || "image/jpeg", metadata: { firebaseStorageDownloadTokens: token } },
+    });
+    const url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+    return { name: p.name, url, path };
+  }));
+}
+
 export function registerEventTools(server, companyId) {
+  server.registerTool('export_hub_changes', {
+    title: '허브 원본 변경분 조회',
+    description: '최초 원본 전체, 이후 회사별 확정 순번 변경분. cursor는 허브 원본·회차와 함께 원자 저장한다.',
+    inputSchema: { cursor: z.number().int().nonnegative().optional(), through: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(200).optional() },
+  }, args => exportHubChanges(getDb(), companyId, args).then(ok));
   const eventsCol = () => getDb().collection(`companies/${companyId}/events`);
 
+  server.registerTool("export_hub_events", {
+    title: "통합 허브용 자체 일정 조회",
+    description: "읽기 전용. 구글/ICS 유입을 제외한 자체 일정 회차·상태·팀·반복 정보를 반환. 모든 페이지가 성공한 뒤에만 허브 reconcile. snapshot_changed면 처음부터 재조회.",
+    inputSchema: { start: z.string(), end: z.string(), offset: z.number().int().min(0).optional(), snapshot: z.string().optional() },
+  }, async args => {
+    const [snap, teams, reports] = await Promise.all([eventsCol().get(), loadTeamNameByCalId(companyId), getDb().collection(`companies/${companyId}/reports`).get()]);
+    return ok(buildHubFeed(snap.docs.map(d=>({id:d.id,...d.data(),__hubUpdatedAt:d.updateTime?.toDate().toISOString() || null})), teams, args, reports.docs.map(d=>d.data())));
+  });
   // 기간 안의 (반복 전개된) 일정 + 팀 필터
   async function eventsInRange({ start, end, team }) {
     const snap = await eventsCol().get();
@@ -153,11 +200,12 @@ export function registerEventTools(server, companyId) {
         description: z.string().optional().describe("메모/특이사항"),
         team: z.string().optional().describe("담당 팀 이름 (기존에 있는 팀이어야 함)"),
         test: z.boolean().optional().describe("시험용 일정이면 true — 제목 앞에 [MCP시험]이 붙고 직원 알림이 가지 않는다"),
+        photos: z.array(PHOTO_SHAPE).optional().describe("첨부 사진 목록"),
         ...REPEAT_FIELDS,
       },
     },
     async (input, extra) => {
-      const { title: rawTitle, start, team, test, ...rest } = input;
+      const { title: rawTitle, start, team, test, photos, ...rest } = input;
       const title = test && !rawTitle.startsWith(TEST_TITLE_PREFIX) ? TEST_TITLE_PREFIX + rawTitle : rawTitle;
       const end = rest.end || start;
       if (end < start) return err("end는 start보다 빠를 수 없습니다.");
@@ -168,7 +216,14 @@ export function registerEventTools(server, companyId) {
       if (team && !calId) return err(`팀 "${team}"을 찾을 수 없습니다. list_teams로 존재하는 팀 이름을 확인하세요.`);
 
       const docRef = eventsCol().doc();
+      let uploadedPhotos;
+      try {
+        uploadedPhotos = await uploadPhotos(companyId, docRef.id, photos);
+      } catch (e) {
+        return err(`사진 업로드 실패: ${e.message}`);
+      }
       const data = { title, start, end, team: team || "", calId: calId || "", ...rest, mcpCreatedBy: audit(extra?.agent) };
+      if (uploadedPhotos) data.photos = uploadedPhotos;
       if (test) data.mcpTest = true;
       await docRef.set(data);
       return ok({ id: docRef.id, ...data });
@@ -186,6 +241,7 @@ export function registerEventTools(server, companyId) {
     contact: z.string().optional(),
     description: z.string().optional(),
     team: z.string().optional(),
+    photos: z.array(PHOTO_SHAPE).optional().describe("전체 교체 — 기존 사진을 유지하려면 그 사진도 url로 함께 포함해서 보낼 것"),
     ...REPEAT_FIELDS,
   };
 
@@ -223,8 +279,66 @@ export function registerEventTools(server, companyId) {
         if (patch.team && !calId) return err(`팀 "${patch.team}"을 찾을 수 없습니다.`);
         next.calId = calId || "";
       }
+      if (patch.photos !== undefined) {
+        try {
+          next.photos = await uploadPhotos(companyId, eventId, patch.photos) || [];
+        } catch (e) {
+          return err(`사진 업로드 실패: ${e.message}`);
+        }
+      }
       await docRef.update(next);
       return ok({ id: eventId, updated: next });
+    }
+  );
+
+  server.registerTool(
+    "set_event_finance",
+    {
+      title: "정산 정보 입력",
+      description:
+        "일정 1건의 정산(금액) 정보를 전체 교체한다 — 부분 수정이 아니라 매번 전체 값을 다시 보낸다. " +
+        "앱 상세 화면의 '정산 정보' 섹션(접으면 최종 손익 1줄, 펼치면 전체)과 같은 데이터다. " +
+        "사장·관리팀만 보이는 민감 정보라 이 도구는 admin 권한이 필요하다. " +
+        "손익 = revenue − (payMethod가 leader_lump면 leaderPay.amount, member_direct면 memberPays 합) − extraCosts 합.",
+      inputSchema: {
+        eventId: z.string().describe("정산 정보를 넣을 일정 id"),
+        revenue: z.number().nonnegative().describe("청소비(매출), 원"),
+        payMethod: z.enum(["leader_lump", "member_direct"]).describe("leader_lump=팀장 일괄 지급, member_direct=팀원 직접 지급"),
+        leaderPay: z.object({
+          amount: z.number().nonnegative(),
+          status: z.enum(["pending", "paid"]).optional(),
+        }).optional().describe("payMethod=leader_lump일 때 팀장에게 지급할(한) 금액"),
+        memberPays: z.array(z.object({
+          employeeName: z.string(),
+          amount: z.number().nonnegative(),
+        })).optional().describe("payMethod=member_direct일 때 팀원별 지급액"),
+        extraCosts: z.array(z.object({
+          label: z.string(),
+          amount: z.number().nonnegative(),
+        })).optional().describe("기타 현장 비용(주차비 등), 항목+금액"),
+        workers: z.array(z.object({
+          name: z.string(),
+          role: z.enum(["leader", "member"]).optional(),
+        })).optional().describe("이 현장에 참여한 작업자 목록"),
+      },
+    },
+    async ({ eventId, ...finance }, extra) => {
+      const docRef = eventsCol().doc(eventId);
+      const snap = await docRef.get();
+      if (!snap.exists || snap.data().status === "deleted") return err(`일정 ${eventId}을 찾을 수 없습니다.`);
+      if (finance.payMethod === "leader_lump" && !finance.leaderPay) {
+        return err("payMethod가 leader_lump면 leaderPay가 필요합니다.");
+      }
+      if (finance.payMethod === "member_direct" && !(finance.memberPays?.length)) {
+        return err("payMethod가 member_direct면 memberPays가 1건 이상 필요합니다.");
+      }
+      await docRef.update({ finance, mcpUpdatedBy: audit(extra?.agent) });
+      const payOut = finance.payMethod === "member_direct"
+        ? finance.memberPays.reduce((s, p) => s + p.amount, 0)
+        : finance.leaderPay.amount;
+      const costsSum = (finance.extraCosts || []).reduce((s, c) => s + c.amount, 0);
+      const profit = finance.revenue - payOut - costsSum;
+      return ok({ id: eventId, finance, profit });
     }
   );
 
@@ -258,3 +372,5 @@ export function registerEventTools(server, companyId) {
     }
   );
 }
+
+
