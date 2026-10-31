@@ -44,6 +44,7 @@ export function Provider({ children, loginUser, onLogout }) {
   const [attendance, setAttendanceList] = useState([]); // 정기청소 출근확인
   const [extraPayments, setExtraPayments] = useState([]); // 정기청소 추가지급
   const [monthlySettlements, setMonthlySettlements] = useState([]); // 정기청소 월정산
+  const [transactions, setTransactions] = useState([]); // 통합 수입·지출 내역 (MVP, 세금/부가세 계산 없음)
 
   // 모듈 전역 CALS 미러를 항상 최신 cals로 유지 (calById/CALS.find 호출부가 전부 이걸 본다)
   useEffect(() => { CALS.splice(0, CALS.length, ...cals); }, [cals]);
@@ -487,6 +488,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || fmt(new Date())
   const [extraPaymentModal, setExtraPaymentModal] = useState({ open: false, employeeId: null });
   const [siteDetailId, setSiteDetailId] = useState(null);
   const [extraCalFilterModal, setExtraCalFilterModal] = useState(false);
+  const [financeModal, setFinanceModal] = useState({ open: false, editId: null });
 
   // ── 지연 로딩 리스너 — activityLogs/links/extraPayments/monthlySettlements는 각자 전용 화면에서만
   // 쓰이는 게 확인돼서, 로그인 즉시 다 열지 않고 그 화면에 처음 들어갈 때만 붙인다. (notices/sites/
@@ -514,6 +516,10 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || fmt(new Date())
     if (currentScreen === "reg_my" || currentScreen === "reg_settlement") {
       start("monthlySettlements", collection(companyRef, "monthlySettlements"), snap =>
         setMonthlySettlements(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
+    }
+    if (currentScreen === "finance") {
+      start("transactions", collection(companyRef, "transactions"), snap =>
+        setTransactions(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
     }
   }, [currentScreen]);
   useEffect(() => () => { Object.values(lazyUnsubs.current).forEach(u => u && u()); }, []);
@@ -594,6 +600,18 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || fmt(new Date())
     }
   }, [calsLoaded, cals, myUserId, currentUser.name, updateCal]);
 
+  // ── 통합 수입·지출 CRUD (MVP) — 세금/부가세/일반관리비 계산 없음, 단순 금액 기록만 ──
+  const addTransaction = useCallback(t => {
+    const ref = doc(collection(companyRef, "transactions"));
+    setDoc(ref, { ...t, id: ref.id, createdBy: myUserId, createdAt: new Date().toISOString() });
+  }, [companyRef, myUserId]);
+  const updateTransaction = useCallback((id, patch) => {
+    updateDoc(doc(companyRef, "transactions", id), patch);
+  }, [companyRef]);
+  const deleteTransaction = useCallback(id => {
+    deleteDoc(doc(companyRef, "transactions", id));
+  }, [companyRef]);
+
   const visibleEvents  = useMemo(()=>{
     // calId가 없거나 "unassigned"인 미배정 일정도 항상 표시
     let evs = events.filter(e=>checkedIds.has(e.calId) || !e.calId || e.calId==="unassigned");
@@ -666,6 +684,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || fmt(new Date())
       extraPayments,addExtraPayment,deleteExtraPayment,extraPaymentModal,setExtraPaymentModal,
       setEmployeeAllowance,
       monthlySettlements,confirmSettlement,
+      transactions,addTransaction,updateTransaction,deleteTransaction,financeModal,setFinanceModal,
       extraCalFilter,setExtraCalFilter,extraCalFilterModal,setExtraCalFilterModal,
       eventModalGuardRef,
       companyId: loginUser.companyId
@@ -743,6 +762,7 @@ export function DemoProvider({ children }) {
   const [siteDetailId, setSiteDetailId] = useState(null);
   const [extraCalFilterModal, setExtraCalFilterModal] = useState(false);
   const [extraCalFilter, setExtraCalFilter] = useState(null);
+  const [financeModal, setFinanceModal] = useState({ open: false, editId: null });
   const [titleRule] = useState(["time","district","area"]);
   const [typeKeywords] = useState(["입주청소","정기청소","에어컨청소","특수청소","줄눈청소"]);
   const [linkCategories] = useState(["업무","지도","연락처","기타"]);
@@ -789,6 +809,8 @@ export function DemoProvider({ children }) {
       extraPayments: [], addExtraPayment: demoAlert, deleteExtraPayment: demoAlert, extraPaymentModal, setExtraPaymentModal,
       setEmployeeAllowance: demoAlert,
       monthlySettlements: [], confirmSettlement: demoAlert,
+      transactions: [], addTransaction: demoAlert, updateTransaction: demoAlert, deleteTransaction: demoAlert,
+      financeModal, setFinanceModal,
       extraCalFilter, setExtraCalFilter, extraCalFilterModal, setExtraCalFilterModal,
       eventModalGuardRef: demoGuardRef,
       companyId: "demo",
