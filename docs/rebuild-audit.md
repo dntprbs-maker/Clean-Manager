@@ -290,6 +290,65 @@ OAuth 2.1 + PKCE 또는 고정 Bearer 토큰으로 ChatGPT/Hermes(Claude)/Codex 
 
 ---
 
+## 6. 보강 조사 (후속 세션, 2026-10-31) — 위에서 "확인하지 못함"으로 남긴 부분 중 추가로 본 것
+
+이 절은 기존 조사를 덮어쓰지 않고 이어서 보강한 내용이다. 위 0절이 "범위 밖"이라 밝힌 항목 중
+일부를 추가로 열어봤다. 나머지(실제 운영 Firestore 데이터, Vercel 설정, Firebase 콘솔/Secret
+Manager, `attendance/` 내부, 통합 허브 자체)는 이 세션에서도 여전히 접근 범위 밖이라 확인하지 못함.
+
+### 6-1. 안드로이드 위젯 내부 로직 (기존 0절에서 "디렉터리 목록까지만 봤다"고 밝힌 부분)
+`android/app/src/main/java/com/cleanmanager/app/widget/`에 실제 `AppWidgetProvider` 4종
+(`CleanManagerMonthlyWidgetProvider`/`WeeklyWidgetProvider`/`TwoWeekWidgetProvider`/`TwoWeekGridWidgetProvider`)과
+보조 클래스(`FirestoreEventFetcher`, `WidgetCache`, `WidgetConfig`, `WidgetPushService`, `WidgetRefresher`,
+`WidgetSizing`)가 모두 Java로 구현돼 있다(총 2,405줄). 핵심 발견:
+- **`WidgetConfig.java:4-6`에 Firestore 프로젝트ID·API 키·`COMPANY_ID`("c_gctgx9b")가 하드코딩**돼
+  있다 — 본체 웹앱은 멀티테넌트(`companies/{companyId}`)인데, **이 안드로이드 위젯 빌드는 특정 회사
+  1곳 전용**이라는 뜻이다. 다른 회사가 위젯을 쓰려면 같은 소스를 회사별로 다시 빌드해야 하는 구조로
+  보인다.
+- `FirestoreEventFetcher.java:22-26` 주석에 스스로 "Firestore 보안 규칙상 공개 읽기가 열려있는 상태라
+  기존 위젯도 이 방식(비인증 REST 호출)으로 동작했다"고 적혀 있다 — 2-1절의 "비로그인 접근이 열려
+  있다"는 구조적 리스크를 위젯이 실제로 이용하고 있다는 실증 사례다.
+- 위젯 ↔ 서버 연동은 기존 조사(3절)의 설명대로 FCM 토픽(`widget_{companyId}`) 기반이며,
+  `WidgetPushService.java`가 바뀐 id만 단건 재조회(`fetchById`)하거나 범위 전체 재조회로 나눠
+  처리한다. 설치된 위젯이 없으면 토픽 구독을 스스로 해제한다(`WidgetPushService.java:34-38`).
+
+### 6-2. SuperAdmin 패스프레이즈의 실제 작동 방식 (기존 "접근 제어가 URL 해시뿐"이라는 평가의 근거 보강)
+`src/SuperAdmin.jsx:13-15, 282, 328-331` — 비밀번호가 **서버에 저장되거나 검증되지 않는다**. 처음
+`#superadmin`에 들어가서 아무 값이나 입력하면 그 값이 `localStorage`에 그대로 저장되고, 이후
+접속부터는 그 저장값과 입력값을 클라이언트에서 문자열 비교만 한다. 즉 "비밀번호"는 사실상 그
+브라우저의 첫 방문자가 정하는 자물쩍일 뿐이고, Firestore 규칙이 이미 전면 개방(2-1절)이라 이 화면을
+거치지 않고 Firestore를 직접 호출해도 같은 데이터를 다 읽고 쓸 수 있다.
+
+### 6-3. AI 추출이 실제로 호출하는 모델 (기존 0절·2-3절에서 "확인 안 함"으로 남긴 부분)
+`functions/index.js:31` — `const AI_MODEL = "openai/gpt-4o";`. OpenRouter를 거쳐 호출하는 모델은
+Gemini가 아니라 **OpenAI GPT-4o**다(`index.js:270` 주석에 "AI 일정 추출 (Gemini)"라고 적혀 있는 것과
+실제 구현이 불일치 — 리빌딩 때 주석 정리 필요).
+
+### 6-4. `firestore.rules` 전문
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{col}/{document=**} {
+      allow read, write: if !col.matches('(gcal|mcp).*');
+    }
+  }
+}
+```
+`gcal*`/`mcp*` 두 접두사만 막고 나머지는 전부(컬렉션명과 무관하게) 조건 없는 `read, write` 허용이다.
+2-1절이 지적한 리스크의 정확한 근거 코드.
+
+### 6-5. 정기청소(본체) ↔ `attendance/`(별도 앱) 데이터 연결 확인
+본체의 `assignments`(현장×직원×요일 배정)를 등록/수정하면 `src/context/AppContext.jsx:240-296`의
+`syncAssignmentCalendar`가 **그 배정을 `companies/{id}/events`에 `source:"regular"` 캘린더 이벤트로
+자동 생성·갱신**한다 — 즉 본체의 정기청소 배정은 캘린더 일정 데이터와 양방향으로 얽혀 있다. 반면
+`attendance/CLAUDE.md`가 밝힌 `attendance_*` 접두사 컬렉션은 이 이벤트 생성 로직과 전혀 연결돼 있지
+않다(코드상 참조 없음). 두 시스템이 겹치는 것은 "역할"만이 아니라, 본체 쪽은 캘린더와 결합돼 있고
+`attendance/`는 독립적이라는 **구조 차이**이기도 하다 — 5-2절의 "리빌딩 설계 단계에서 정해야 한다"는
+판단에 참고할 추가 정보로 덧붙인다.
+
+---
+
 ## 부록: 참고한 기존 문서
 - `docs/calendar-push-sync.md` — 구글 캘린더 push 동기화 런북
 - `docs/shared-mcp.md` — 공용 MCP 배포·연결 런북
