@@ -483,6 +483,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || fmt(new Date())
   const [currentScreen, setCurrentScreen] = useState("calendar");
   const [empModal, setEmpModal] = useState({ open: false, editId: null });
   const [companySettingsModal, setCompanySettingsModal] = useState(false);
+  const [notificationSettingsModal, setNotificationSettingsModal] = useState(false);
   const [siteModal, setSiteModal] = useState({ open: false, editId: null });
   const [assignmentModal, setAssignmentModal] = useState({ open: false, editId: null, presetSiteId: null });
   const [extraPaymentModal, setExtraPaymentModal] = useState({ open: false, employeeId: null });
@@ -670,6 +671,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || fmt(new Date())
       currentScreen,setCurrentScreen,
       empModal,setEmpModal,
       companySettingsModal,setCompanySettingsModal,
+      notificationSettingsModal,setNotificationSettingsModal,
       activityLogs,setActivityLogs,
       notices,setNotices,addNotice,deleteNotice,
       links,setLinks,addLink,deleteLink,updateLink,persistLinkOrder,
@@ -755,6 +757,7 @@ export function DemoProvider({ children }) {
   const [detEv, setDetEv] = useState(null);
   const [empModal, setEmpModal] = useState({open:false,editId:null});
   const [companySettingsModal, setCompanySettingsModal] = useState(false);
+  const [notificationSettingsModal, setNotificationSettingsModal] = useState(false);
   const [fieldReportEv, setFieldReportEv] = useState(null);
   const [siteModal, setSiteModal] = useState({ open: false, editId: null });
   const [assignmentModal, setAssignmentModal] = useState({ open: false, editId: null, presetSiteId: null });
@@ -801,6 +804,7 @@ export function DemoProvider({ children }) {
       detEv, setDetEv,
       empModal, setEmpModal,
       companySettingsModal, setCompanySettingsModal,
+      notificationSettingsModal, setNotificationSettingsModal,
       fieldReportEv, setFieldReportEv,
       sites: [], addSite: demoAlert, updateSite: demoAlert, deleteSite: demoAlert, siteModal, setSiteModal,
       assignments: [], addAssignment: demoAlert, updateAssignment: demoAlert, deleteAssignment: demoAlert, assignmentModal, setAssignmentModal,

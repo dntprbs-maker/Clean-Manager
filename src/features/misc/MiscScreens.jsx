@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { ChevronDown, ChevronLeft, X } from "lucide-react";
-import { doc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../../firebase";
 import { fmt, diff, fmtTime } from "../../lib/dateTime";
@@ -1119,6 +1119,99 @@ export function CompanySettingsModal() {
             </button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── 알림 설정 모달(사장/관리팀 개인별 "알림 받을 팀" 설정) ───────────────────
+// 담당팀이 없는(미배정) 일정의 알림은 사장(admins)과 관리팀(users)에게만 가는데,
+// 회사가 커지면 이 알림을 전부 받고 싶지 않은 사람도 있어서 팀별로 받을지 고를 수 있게
+// 한다. notifyTeams 필드가 없으면(기존 문서) 전체 허용으로 해석 — functions/index.js의
+// allowsTeam()과 반드시 같은 규칙을 유지할 것. "담당팀 미배정" 일정은 특정 팀이 아니라서
+// UNASSIGNED_KEY라는 가상 항목으로 따로 체크하게 한다(서버 로그의 "미지정" 표기와 동일한 값).
+const UNASSIGNED_KEY = "미지정";
+
+export function NotificationSettingsModal() {
+  const { notificationSettingsModal, setNotificationSettingsModal, currentUser, teams, users, companyId } = useC();
+  const [checked, setChecked] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving]   = useState(false);
+
+  const options = [...(teams || []).filter(t => t !== "사장"), UNASSIGNED_KEY];
+
+  useEffect(() => {
+    if (!notificationSettingsModal) return;
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      let notifyTeams;
+      try {
+        if (isSuperAdmin(currentUser)) {
+          const snap = await getDoc(doc(db, "admins", currentUser.uid));
+          notifyTeams = snap.exists() ? snap.data().notifyTeams : undefined;
+        } else {
+          notifyTeams = users.find(u => u.id === currentUser.uid)?.notifyTeams;
+        }
+      } catch (e) { /* 조회 실패 — 전체 허용으로 취급 */ }
+      if (cancelled) return;
+      const next = {};
+      options.forEach(key => { next[key] = !Array.isArray(notifyTeams) || notifyTeams.includes(key); });
+      setChecked(next);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notificationSettingsModal]);
+
+  if (!notificationSettingsModal) return null;
+  const close = () => setNotificationSettingsModal(false);
+  const toggle = (key) => setChecked(c => ({ ...c, [key]: !c[key] }));
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const notifyTeams = options.filter(k => checked[k]);
+      const ref = isSuperAdmin(currentUser)
+        ? doc(db, "admins", currentUser.uid)
+        : doc(db, "companies", companyId, "users", currentUser.uid);
+      await updateDoc(ref, { notifyTeams });
+      alert("저장됐습니다."); close();
+    } catch (e) { alert("오류: " + e.message); } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="absolute inset-0 z-[100] flex flex-col bg-white">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+        <button onClick={close}><X size={22} className="text-gray-600"/></button>
+        <h2 className="font-bold text-base">알림 설정</h2>
+        <div className="w-6"/>
+      </div>
+      <div className="flex-1 overflow-y-auto p-5">
+        <p className="text-xs text-gray-400 mb-4">
+          체크한 팀의 일정 알림만 받습니다. 모두 체크된 상태(기본값)면 모든 팀의 알림을 받아요.
+        </p>
+        {loading ? (
+          <p className="text-sm text-gray-400">불러오는 중...</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {options.map(key => (
+              <label key={key} className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3 cursor-pointer">
+                <input type="checkbox" checked={!!checked[key]} onChange={() => toggle(key)}
+                  className="w-4 h-4 accent-blue-600"/>
+                <span className="text-sm font-bold text-gray-800">
+                  {key === UNASSIGNED_KEY ? "담당팀 미배정 일정" : key}
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="p-4 border-t border-gray-100">
+        <button onClick={handleSave} disabled={loading || saving}
+          className="w-full py-4 rounded-xl text-white font-bold bg-blue-600 disabled:opacity-50">
+          {saving ? "저장 중..." : "저장"}
+        </button>
       </div>
     </div>
   );

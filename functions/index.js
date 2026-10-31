@@ -43,6 +43,15 @@ function isMemberOfTeam(u, team) {
   return getMemberships(u).some((m) => m.team === team);
 }
 
+// 사장(admins)/관리팀(users) 수신자별 "알림 받을 팀" 설정. notifyTeams 필드가 없으면(기존
+// 문서, 마이그레이션 없이 하위호환) 전체 팀 허용으로 해석한다. 담당팀이 없는(미배정) 일정은
+// 특정 팀이 아니므로 "미지정"이라는 가상 항목으로 다룬다(클라이언트 알림 설정 화면의
+// UNASSIGNED_KEY와 반드시 같은 문자열을 써야 함 — src/features/misc/MiscScreens.jsx 참고).
+function allowsTeam(recipient, teamName) {
+  if (!Array.isArray(recipient?.notifyTeams)) return true;
+  return recipient.notifyTeams.includes(teamName || "미지정");
+}
+
 // admins 컬렉션은 로그인 정보(아이디/비번)가 담겨있어 클라이언트 직접 쓰기가
 // Firestore 규칙으로 막혀있다(그래서 클라이언트에서 바로 fcmTokens를 갱신하려던
 // 시도가 매번 조용히 실패했음 — try/catch로 삼켜져서 앱에서는 "켜짐"으로만 보임).
@@ -95,7 +104,7 @@ async function notifyTeam(companyId, eventId, ev, action) {
     const u = d.data();
     if (u.status === "deleted") return;
     const isTeamMember = teamName && isMemberOfTeam(u, teamName);
-    const isManager = !teamName && isMemberOfTeam(u, "관리팀");
+    const isManager = !teamName && isMemberOfTeam(u, "관리팀") && allowsTeam(u, teamName);
     if (isTeamMember || isManager) {
       (u.fcmTokens || []).forEach((t) => targets.push({ token: t, userRef: d.ref }));
     }
@@ -109,6 +118,7 @@ async function notifyTeam(companyId, eventId, ev, action) {
     adminsSnap.forEach((d) => {
       const a = d.data();
       if (a.status === "deleted") return;
+      if (!allowsTeam(a, teamName)) return;
       (a.fcmTokens || []).forEach((t) => targets.push({ token: t, userRef: d.ref }));
     });
   }
@@ -202,9 +212,11 @@ function todayKST() {
 }
 
 // ── 매일 아침 "오늘 일정" 요약 알림 (시험 운영) ───────────────────────
-// 지금은 회사별 최고관리자(사장)에게만 보내고, 그 날 일정이 하나도 없으면 안 보낸다.
-// 팀 필터 없이 그 날의 전체 일정을 다 모아서 보낸다(사장은 전체를 봐야 하므로).
-// 잘 되는지 보고 나중에 팀 전체 발송/시간대 등을 검토하기로 함.
+// 회사별 최고관리자(사장)에게만 보내고, 그 날 일정이 하나도 없으면 안 보낸다.
+// 수신자(사장)마다 notifyTeams로 선호 팀이 다를 수 있어, 전체 일정을 모아 한 번에 토큰
+// 묶음 발송하는 대신 수신자별로 자기 선호 팀에 해당하는 일정만 골라 메시지를 따로
+// 구성해서 보낸다 — 어떤 사장이 모든 팀을 껐으면(notifyTeams: []) 그날 일정이 있어도
+// 그 사람에게는 digest를 보내지 않는다. notifyTeams 필드가 없으면 전체 허용(하위호환).
 async function runDailyDigest(dateStr, titlePrefix) {
   const companiesSnap = await db.collection("companies").get();
   const log = [];
@@ -230,28 +242,32 @@ async function runDailyDigest(dateStr, titlePrefix) {
 
       // 최고관리자(사장)는 companies/{id}/users가 아니라 별도 admins 컬렉션에 저장돼 있다.
       const adminsSnap = await db.collection("admins").where("companyId", "==", companyId).get();
-      const tokens = [];
-      adminsSnap.forEach((d) => {
+      let sentCount = 0;
+      for (const d of adminsSnap.docs) {
         const a = d.data();
-        if (a.status === "deleted") return; // 시험 운영: 사장만
-        (a.fcmTokens || []).forEach((t) => tokens.push(t));
-      });
-      if (tokens.length === 0) { log.push(`${companyId}: 사장 토큰 없음(일정 ${todays.length}건인데 못 보냄)`); continue; }
+        if (a.status === "deleted") continue; // 시험 운영: 사장만
+        const tokens = [...new Set(a.fcmTokens || [])];
+        if (tokens.length === 0) continue;
 
-      const sorted = [...todays].sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
-      const lines = sorted.map((e) => {
-        const time = e.allDay ? "종일" : e.startTime ? fmtTime(e.startTime) : "";
-        const team = e.team ? `[${e.team}] ` : "";
-        return `${time ? time + " " : ""}${team}${e.title || "제목 없음"}`;
-      });
+        const myEvents = todays.filter((e) => allowsTeam(a, e.team || ""));
+        if (myEvents.length === 0) continue; // 이 사람이 선호하는 팀엔 오늘 일정 없음 — 안 보냄
 
-      const uniqueTokens = [...new Set(tokens)];
-      const resp = await getMessaging().sendEachForMulticast({
-        tokens: uniqueTokens,
-        data: { title: `${titlePrefix} 일정 ${todays.length}건`, body: lines.join("\n"), companyId, type: "daily_digest" },
-        webpush: { fcmOptions: { link: "/" } },
-      });
-      log.push(`${companyId}: 발송 ${resp.successCount}/${uniqueTokens.length} (일정 ${todays.length}건)`);
+        const sorted = [...myEvents].sort((x, y) => (x.startTime || "").localeCompare(y.startTime || ""));
+        const lines = sorted.map((e) => {
+          const time = e.allDay ? "종일" : e.startTime ? fmtTime(e.startTime) : "";
+          const team = e.team ? `[${e.team}] ` : "";
+          return `${time ? time + " " : ""}${team}${e.title || "제목 없음"}`;
+        });
+
+        const resp = await getMessaging().sendEachForMulticast({
+          tokens,
+          data: { title: `${titlePrefix} 일정 ${myEvents.length}건`, body: lines.join("\n"), companyId, type: "daily_digest" },
+          webpush: { fcmOptions: { link: "/" } },
+        });
+        sentCount++;
+        log.push(`${companyId}/${d.id}: 발송 ${resp.successCount}/${tokens.length} (일정 ${myEvents.length}건)`);
+      }
+      if (sentCount === 0) log.push(`${companyId}: 수신 대상 없음(일정 ${todays.length}건인데 못 보냄)`);
     } catch (e) {
       log.push(`${companyId}: 오류 ${e?.message || e}`);
     }
