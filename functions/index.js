@@ -7,6 +7,7 @@ import { getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { getMemberships } from "./lib/membership.js";
+import { UNASSIGNED_TEAM_KEY } from "./lib/reservedTeamNames.js";
 import { fmtDate, addDays, expandRecurringForFeed } from "./lib/recurring.js";
 import { loadFeedEvents } from "./lib/calendarFeedQuery.js";
 import { parseIcs } from "./lib/ics.js";
@@ -42,13 +43,6 @@ function fmtTime(t) {
 function isMemberOfTeam(u, team) {
   return getMemberships(u).some((m) => m.team === team);
 }
-
-// 담당팀이 없는(미배정) 일정을 가리키는 가상 항목 — 클라이언트 알림 설정 화면의
-// UNASSIGNED_KEY(src/features/misc/MiscScreens.jsx)와 반드시 같은 문자열을 써야 한다.
-// functions/와 src/는 별도 빌드라 상수를 직접 공유할 수 없음(functions/lib/membership.js와
-// 같은 이유로 양쪽에 복사 유지 — 한쪽만 고치면 어긋나므로 바꿀 때 두 파일 다 같이 수정할 것).
-// 실제 팀을 이 이름으로 만드는 것은 EmployeeTeamScreens.jsx의 RESERVED_TEAM_NAMES에서 막는다.
-const UNASSIGNED_TEAM_KEY = "미지정";
 
 // 사장(admins)/관리팀(users) 수신자별 "알림 받을 팀" 설정. notifyTeams 필드가 없으면(기존
 // 문서, 마이그레이션 없이 하위호환) 전체 팀 허용으로 해석한다.

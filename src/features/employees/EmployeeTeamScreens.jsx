@@ -7,9 +7,12 @@ import { onlyDigits, fmtPhone } from "../../lib/phone";
 import { genFeedToken, feedUrl } from "../../lib/calendarFeed";
 import { isSuperAdmin, isMemberOf, teamRole, getMemberships, teamsLabel } from "../../lib/membership";
 
-// "미지정"은 알림 설정(MiscScreens.jsx의 UNASSIGNED_KEY, functions/index.js의 allowsTeam())에서
-// "담당팀 미배정 일정"을 가리키는 예약어로 쓰고 있어서, 실제 팀 이름으로 허용하면 그 둘이
-// 구분이 안 돼 알림 필터가 뒤섞인다 — 팀 생성/이름변경에서 막는다.
+// "미지정"은 알림 설정(MiscScreens.jsx의 UNASSIGNED_KEY, functions/lib/reservedTeamNames.js의
+// UNASSIGNED_TEAM_KEY)에서 "담당팀 미배정 일정"을 가리키는 예약어로 쓰고 있어서, 실제 팀
+// 이름으로 허용하면 그 둘이 구분이 안 돼 알림 필터가 뒤섞인다 — 팀 생성/이름변경(이 화면과
+// MCP의 create_team/rename_team, functions/mcp/tools/teams.js) 양쪽 다 막아야 함. 여긴
+// 클라이언트라 별도 빌드라서 functions/lib/reservedTeamNames.js의 RESERVED_TEAM_NAMES를
+// 직접 import 못 해 복사해 쓴다 — 예약어를 바꿀 땐 두 파일 다 같이 고칠 것.
 const RESERVED_TEAM_NAMES = ["미지정"];
 
 // ── 직원/팀 관리 화면 — 상단 탭으로 "직원"과 "팀"을 전환 ──────────────────────────

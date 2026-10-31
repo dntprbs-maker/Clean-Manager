@@ -3,6 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { getDb } from "../lib/db.js";
 import { ok, err } from "../lib/toolResult.js";
 import { getMemberships } from "../../lib/membership.js";
+import { RESERVED_TEAM_NAMES } from "../../lib/reservedTeamNames.js";
 
 const DEFAULT_TEAM_COLOR = "#f59e0b";
 
@@ -67,6 +68,7 @@ export function registerTeamTools(server, companyId) {
     async ({ name, isField }) => {
       const { ref, teams } = await getConfig(companyId);
       if (teams.includes(name)) return err(`팀 "${name}"은 이미 있습니다.`);
+      if (RESERVED_TEAM_NAMES.includes(name)) return err(`"${name}"은 예약된 이름이라 팀명으로 쓸 수 없습니다.`);
 
       const batch = getDb().batch();
       batch.set(ref, { teams: [...teams, name] }, { merge: true });
@@ -92,6 +94,7 @@ export function registerTeamTools(server, companyId) {
       const idx = teams.indexOf(oldName);
       if (idx === -1) return err(`팀 "${oldName}"을 찾을 수 없습니다.`);
       if (teams.includes(newName)) return err(`팀 "${newName}"은 이미 있습니다.`);
+      if (RESERVED_TEAM_NAMES.includes(newName)) return err(`"${newName}"은 예약된 이름이라 팀명으로 쓸 수 없습니다.`);
 
       const nextTeams = [...teams];
       nextTeams[idx] = newName;
