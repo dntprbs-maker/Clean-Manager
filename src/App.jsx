@@ -18,8 +18,10 @@ import {
   CheckSquare, FileText, Camera, Download, Check
 } from "lucide-react";
 
+import { Capacitor } from "@capacitor/core";
 import { db, functions, storage } from "./firebase";
 import { enablePush, disablePush, listenForeground } from "./fcm";
+import { setupNativePush } from "./nativePush";
 import { collection, doc, setDoc, getDoc, getDocs, updateDoc, query, where, serverTimestamp } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
@@ -153,6 +155,7 @@ function AppInner() {
     if (notifyCheckedRef.current) return;
     notifyCheckedRef.current = true;
     listenForeground();
+    if (Capacitor.isNativePlatform()) { setupNativePush(currentUser); return; }
     if (typeof Notification === "undefined") return;
     if (Notification.permission === "granted") {
       enablePush(currentUser); // 로그인 시 이 기기 토큰을 현재 사용자 소유로 이전

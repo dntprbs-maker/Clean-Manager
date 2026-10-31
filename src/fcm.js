@@ -13,7 +13,7 @@ const callSyncAdminPushToken = httpsCallable(functions, "syncAdminPushToken");
 // 이 기기 토큰을 "현재 로그인한 사람" 소유로 이전
 // (다른 직원 문서에서 이 토큰 제거 → 현재 사용자에게만 등록)
 // 한 기기 = 마지막 로그인한 사람만 알림 받음
-async function claimToken(user, token) {
+export async function claimToken(user, token) {
   if (user.role === "최고관리자") {
     await callSyncAdminPushToken({ uid: user.uid, token, action: "add" }).catch(() => {});
     return;
