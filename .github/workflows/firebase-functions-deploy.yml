@@ -1,0 +1,33 @@
+name: Deploy Functions to Firebase on merge
+
+# functions/ 쪽 코드(알림 발송 로직 등)가 main에 머지될 때 자동으로 Cloud Functions에
+# 배포한다. 지금까지는 이게 없어서(Hosting만 자동배포) functions 변경사항은 매번
+# 사람이 직접 `firebase deploy --only functions`를 돌려야 했다 (2026-10-31 기준).
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "functions/**"
+      - "firestore.rules"
+      - "firestore.indexes.json"
+      - "firebase.json"
+      - ".github/workflows/firebase-functions-deploy.yml"
+
+jobs:
+  deploy_functions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: functions
+      # firebase-tools는 이 저장소 루트의 devDependency로 설치하지 않고(용량/버전 고정 이슈
+      # 피하려고), npx로 그때그때 최신 버전을 받아 쓴다. --token은 firebase login:ci로
+      # 발급한 CI 토큰 — FIREBASE_TOKEN이라는 이름의 GitHub Actions 시크릿으로 등록해야 함
+      # (저장소 Settings → Secrets and variables → Actions).
+      - run: npx firebase-tools@latest deploy --only functions,firestore:rules --project clean-manager-60bc9 --token "$FIREBASE_TOKEN" --non-interactive
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
