@@ -232,6 +232,11 @@ async function runDailyDigest(dateStr, titlePrefix) {
       ]);
       // 직원 개인 캘린더(personal: true)는 회사 업무 요약에 안 어울려서 제외한다.
       const personalCalIds = new Set(calsSnap.docs.filter((d) => d.data().personal).map((d) => d.id));
+      // ev.team이 없는 일정(ICS 구독으로 들어온 일정 등)도 calId로 팀을 알아낼 수 있도록
+      // cals 문서 → 팀명 맵을 만들어둔다(resolveTeamName()과 같은 보정, 여기선 이미 calsSnap을
+      // 들고 있어서 문서당 재조회 없이 바로 가능).
+      const teamNameByCalId = new Map(calsSnap.docs.map((d) => [d.id, d.data().name || d.data().label || ""]));
+      const eventTeamName = (e) => e.team || teamNameByCalId.get(e.calId) || "";
       const events = eventsSnap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
         .filter((e) => e.status !== "deleted" && !personalCalIds.has(e.calId));
@@ -242,20 +247,20 @@ async function runDailyDigest(dateStr, titlePrefix) {
 
       // 최고관리자(사장)는 companies/{id}/users가 아니라 별도 admins 컬렉션에 저장돼 있다.
       const adminsSnap = await db.collection("admins").where("companyId", "==", companyId).get();
-      let sentCount = 0;
-      for (const d of adminsSnap.docs) {
+      const perAdminLogs = await Promise.all(adminsSnap.docs.map(async (d) => {
         const a = d.data();
-        if (a.status === "deleted") continue; // 시험 운영: 사장만
+        if (a.status === "deleted") return null; // 시험 운영: 사장만
         const tokens = [...new Set(a.fcmTokens || [])];
-        if (tokens.length === 0) continue;
+        if (tokens.length === 0) return null;
 
-        const myEvents = todays.filter((e) => allowsTeam(a, e.team || ""));
-        if (myEvents.length === 0) continue; // 이 사람이 선호하는 팀엔 오늘 일정 없음 — 안 보냄
+        const myEvents = todays.filter((e) => allowsTeam(a, eventTeamName(e)));
+        if (myEvents.length === 0) return null; // 이 사람이 선호하는 팀엔 오늘 일정 없음 — 안 보냄
 
         const sorted = [...myEvents].sort((x, y) => (x.startTime || "").localeCompare(y.startTime || ""));
         const lines = sorted.map((e) => {
           const time = e.allDay ? "종일" : e.startTime ? fmtTime(e.startTime) : "";
-          const team = e.team ? `[${e.team}] ` : "";
+          const teamName = eventTeamName(e);
+          const team = teamName ? `[${teamName}] ` : "";
           return `${time ? time + " " : ""}${team}${e.title || "제목 없음"}`;
         });
 
@@ -264,10 +269,11 @@ async function runDailyDigest(dateStr, titlePrefix) {
           data: { title: `${titlePrefix} 일정 ${myEvents.length}건`, body: lines.join("\n"), companyId, type: "daily_digest" },
           webpush: { fcmOptions: { link: "/" } },
         });
-        sentCount++;
-        log.push(`${companyId}/${d.id}: 발송 ${resp.successCount}/${tokens.length} (일정 ${myEvents.length}건)`);
-      }
-      if (sentCount === 0) log.push(`${companyId}: 수신 대상 없음(일정 ${todays.length}건인데 못 보냄)`);
+        return `${companyId}/${d.id}: 발송 ${resp.successCount}/${tokens.length} (일정 ${myEvents.length}건)`;
+      }));
+      const sentLogs = perAdminLogs.filter(Boolean);
+      if (sentLogs.length === 0) log.push(`${companyId}: 수신 대상 없음(일정 ${todays.length}건인데 못 보냄)`);
+      else log.push(...sentLogs);
     } catch (e) {
       log.push(`${companyId}: 오류 ${e?.message || e}`);
     }
