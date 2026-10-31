@@ -7,7 +7,7 @@ import {
   Calendar, AlignLeft, ChevronDown, ChevronLeft,
   ChevronRight, Menu, Settings, User, Edit3, Trash2, Copy,
   PieChart, Bell, History, ExternalLink,
-  CheckSquare, Download, Check, Eye
+  CheckSquare, Download, Check, Eye, Wallet
 } from "lucide-react";
 
 import { db, functions, storage } from "../../firebase";
@@ -1463,6 +1463,15 @@ export function SideDrawer() {
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
               <User size={20} className="text-blue-500" />
               <span className="text-sm font-medium text-gray-700 flex-1 text-left">직원/팀 관리</span>
+            </button>
+          )}
+          {/* 수입·지출 관리 (MVP) - 돈 관련 정보라 직원/팀 관리와 같은 권한(최고관리자/관리팀)만 노출 */}
+          {(isSuperAdmin(currentUser) || isMemberOf(currentUser, "관리팀")) && (
+            <button
+              onClick={() => { setCurrentScreen("finance"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <Wallet size={20} className="text-green-600" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">수입·지출 관리</span>
             </button>
           )}
           {/* 정기청소 근무관리 - 최고관리자이거나, 본인 앞으로 배정된 현장이 하나라도 있으면 노출 (팀 구성과 무관) */}

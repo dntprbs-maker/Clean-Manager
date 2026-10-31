@@ -48,6 +48,7 @@ import {
   MyRegularCleaningScreen, MonthlySettlementScreen, ExtraPaymentModal, SiteFormModal, AssignmentFormModal,
 } from "./features/regular-cleaning/RegularCleaningScreens";
 import { EmployeeListScreen, EmployeeFormModal } from "./features/employees/EmployeeTeamScreens";
+import { FinanceScreen, FinanceFormModal } from "./features/finance/FinanceScreens";
 import {
   buildLayout, TextBar, FullMonthCell, DotCell, useDates, ScheduleList, useSwipe,
   SlideTransition, ListTransition, ModeTransition, CalendarView, DetailSheet,
@@ -219,6 +220,7 @@ function AppInner() {
       {currentScreen === "reg_today"      && <TodayStatusScreen/>}
       {currentScreen === "reg_my"         && <MyRegularCleaningScreen/>}
       {currentScreen === "reg_settlement" && <MonthlySettlementScreen/>}
+      {currentScreen === "finance"         && <FinanceScreen/>}
       <SideDrawer/>
       <DetailSheet/>
       <EventModal/>
@@ -229,6 +231,7 @@ function AppInner() {
       <SiteFormModal/>
       <AssignmentFormModal/>
       <ExtraPaymentModal/>
+      <FinanceFormModal/>
       <FieldReportGate/>
     </div>
   );
