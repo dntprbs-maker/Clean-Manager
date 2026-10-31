@@ -439,11 +439,14 @@ function TeamTab() {
   const [addMemberRole, setAddMemberRole]   = useState("팀원"); // 이번에 추가하는 사람들에게 공통 적용
   const [removeMode, setRemoveMode]         = useState(false); // 일괄 제외(체크박스) 모드
   const [removeSelectedIds, setRemoveSelectedIds] = useState([]);
+  const [bulkAssignIdx, setBulkAssignIdx]   = useState(null); // 어느 팀의 "직원 일괄 배정" 모달이 열려있는지
+  const [bulkAssignIds, setBulkAssignIds]   = useState([]);   // 일괄 배정 모달에서 새로 체크한 직원 id
 
   // 구성원 시트를 닫을 때 안의 부분 상태(추가/제외 모드 등)도 같이 초기화
   const closeMemberSheet = () => {
     setMemberOpenIdx(null); setAddMemberIdx(null); setAddMemberEmpIds([]);
     setRemoveMode(false); setRemoveSelectedIds([]);
+    setBulkAssignIdx(null); setBulkAssignIds([]);
   };
 
   // 탭 진입 시: isField 없는 기존 cal에 기본값 세팅 (청소 포함 → true, 그 외 → false)
@@ -919,6 +922,13 @@ function TeamTab() {
                     + 직원 추가
                   </button>
                 )}
+                {!removeMode && addMemberIdx !== memberOpenIdx && (
+                  <button onClick={() => { setBulkAssignIdx(memberOpenIdx); setBulkAssignIds([]); }}
+                    disabled={users.length === 0}
+                    className="text-xs font-bold text-amber-600 disabled:text-gray-300 shrink-0 px-1">
+                    직원 일괄 배정
+                  </button>
+                )}
                 <button onClick={closeMemberSheet} className="shrink-0"><X size={20} className="text-gray-400"/></button>
               </div>
 
@@ -1015,6 +1025,51 @@ function TeamTab() {
                     className="flex-[2] py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
                     style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
                     {addMemberEmpIds.length > 1 ? `${addMemberEmpIds.length}명 팀에 추가` : "+ 팀에 추가"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 직원 일괄 배정 모달 — 전체 직원 목록을 체크박스로 보여주고, 체크된 직원을
+              이 팀 멤버십에 한 번에 추가한다. 이미 소속된 직원은 체크 표시만 하고
+              비활성화해서(해제 불가) 다른 팀 소속 여부나 기존 역할을 건드리지 않는다 ── */}
+          {bulkAssignIdx === memberOpenIdx && (
+            <div className="fixed inset-0 z-40 flex items-center justify-center px-4 pb-32"
+              onClick={() => { setBulkAssignIdx(null); setBulkAssignIds([]); }}>
+              <div className="bg-white w-full max-w-xs rounded-2xl shadow-2xl p-4 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
+                <h4 className="font-bold text-gray-900 text-sm">{t} — 직원 일괄 배정</h4>
+                <p className="text-[11px] text-gray-400">전체 직원 중 이 팀에 추가할 직원을 체크하세요. 이미 소속된 직원은 변경되지 않습니다.</p>
+                <div className="flex flex-col gap-1 max-h-60 overflow-y-auto border border-gray-200 rounded-lg p-1.5">
+                  {[...members, ...nonMembers].sort(byName).map(u => {
+                    const already = isMemberOf(u, t);
+                    const checked = already || bulkAssignIds.includes(u.id);
+                    return (
+                      <button key={u.id} type="button" disabled={already}
+                        onClick={() => setBulkAssignIds(prev => prev.includes(u.id) ? prev.filter(x => x !== u.id) : [...prev, u.id])}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-sm transition-colors ${
+                          already ? "cursor-default opacity-60" : checked ? "bg-amber-50" : "hover:bg-gray-50"
+                        }`}>
+                        <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center ${
+                          checked ? "bg-amber-500 border-amber-500" : "border-gray-300"
+                        }`}>
+                          {checked && <span className="text-white text-[9px]">✓</span>}
+                        </div>
+                        <span className={checked && !already ? "font-bold text-amber-700" : "text-gray-700"}>
+                          {u.name}{already ? " (이미 소속)" : ""}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-2 pt-2 border-t border-gray-100">
+                  <button onClick={() => { setBulkAssignIdx(null); setBulkAssignIds([]); }}
+                    className="flex-1 py-2 rounded-lg text-xs font-bold text-gray-500 bg-gray-100">취소</button>
+                  <button onClick={() => { if (bulkAssignIds.length) { addMembers(t, bulkAssignIds, "팀원"); } setBulkAssignIdx(null); setBulkAssignIds([]); }}
+                    disabled={bulkAssignIds.length === 0}
+                    className="flex-[2] py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
+                    style={{background:"linear-gradient(135deg,#d97706,#f59e0b)"}}>
+                    {bulkAssignIds.length > 0 ? `${bulkAssignIds.length}명 일괄 배정` : "일괄 배정"}
                   </button>
                 </div>
               </div>
