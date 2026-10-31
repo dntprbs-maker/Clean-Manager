@@ -417,6 +417,8 @@ export function useSwipe({ onUp, onDown, onLeft, onRight,
   const sx    = useRef(null);
   const sy    = useRef(null);
   const fired = useRef(false);
+  // 손가락을 댄 순간 안쪽 목록이 맨 위가 아니었으면, 아래로 끄는 건 목록 스크롤이지 화면 전환이 아니다
+  const scrolledDown = useRef(false);
 
   const judge = (dx, dy) => {
     if (fired.current) return;
@@ -428,7 +430,8 @@ export function useSwipe({ onUp, onDown, onLeft, onRight,
       if (dx > 0) onRight?.(); else onLeft?.();
     } else if (angle > 50 && ady >= vThreshold) {
       fired.current = true;
-      if (dy > 0) onDown?.(); else onUp?.();
+      if (dy > 0) { if (!scrolledDown.current) onDown?.(); }
+      else onUp?.();
     }
   };
 
@@ -437,6 +440,10 @@ export function useSwipe({ onUp, onDown, onLeft, onRight,
       sx.current    = e.touches[0].clientX;
       sy.current    = e.touches[0].clientY;
       fired.current = false;
+      scrolledDown.current = false;
+      for (let el = e.target; el && el !== e.currentTarget.parentNode; el = el.parentNode) {
+        if (el.scrollTop > 0) { scrolledDown.current = true; break; }
+      }
     },
     onTouchMove: e => {
       if (sx.current === null || fired.current) return;
