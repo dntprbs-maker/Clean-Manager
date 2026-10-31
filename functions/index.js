@@ -43,13 +43,18 @@ function isMemberOfTeam(u, team) {
   return getMemberships(u).some((m) => m.team === team);
 }
 
+// 담당팀이 없는(미배정) 일정을 가리키는 가상 항목 — 클라이언트 알림 설정 화면의
+// UNASSIGNED_KEY(src/features/misc/MiscScreens.jsx)와 반드시 같은 문자열을 써야 한다.
+// functions/와 src/는 별도 빌드라 상수를 직접 공유할 수 없음(functions/lib/membership.js와
+// 같은 이유로 양쪽에 복사 유지 — 한쪽만 고치면 어긋나므로 바꿀 때 두 파일 다 같이 수정할 것).
+// 실제 팀을 이 이름으로 만드는 것은 EmployeeTeamScreens.jsx의 RESERVED_TEAM_NAMES에서 막는다.
+const UNASSIGNED_TEAM_KEY = "미지정";
+
 // 사장(admins)/관리팀(users) 수신자별 "알림 받을 팀" 설정. notifyTeams 필드가 없으면(기존
-// 문서, 마이그레이션 없이 하위호환) 전체 팀 허용으로 해석한다. 담당팀이 없는(미배정) 일정은
-// 특정 팀이 아니므로 "미지정"이라는 가상 항목으로 다룬다(클라이언트 알림 설정 화면의
-// UNASSIGNED_KEY와 반드시 같은 문자열을 써야 함 — src/features/misc/MiscScreens.jsx 참고).
+// 문서, 마이그레이션 없이 하위호환) 전체 팀 허용으로 해석한다.
 function allowsTeam(recipient, teamName) {
   if (!Array.isArray(recipient?.notifyTeams)) return true;
-  return recipient.notifyTeams.includes(teamName || "미지정");
+  return recipient.notifyTeams.includes(teamName || UNASSIGNED_TEAM_KEY);
 }
 
 // admins 컬렉션은 로그인 정보(아이디/비번)가 담겨있어 클라이언트 직접 쓰기가
@@ -247,15 +252,21 @@ async function runDailyDigest(dateStr, titlePrefix) {
 
       // 최고관리자(사장)는 companies/{id}/users가 아니라 별도 admins 컬렉션에 저장돼 있다.
       const adminsSnap = await db.collection("admins").where("companyId", "==", companyId).get();
+      // 한 기기 토큰이 (정상적으론 안 생겨야 하지만) 두 사장 문서에 동시에 남아있는 드문
+      // 상태라도 같은 날 digest를 두 번 받지 않도록, 이미 발송에 쓴 토큰은 다음 사장
+      // 차례에서 제외한다. Promise.all(docs.map(async ...))의 각 콜백은 첫 await 전까지는
+      // 동기로 순서대로 실행되므로, 그 구간에서 sentTokens를 갱신/조회하는 건 경쟁 없이 안전하다.
+      const sentTokens = new Set();
       const perAdminLogs = await Promise.all(adminsSnap.docs.map(async (d) => {
         const a = d.data();
         if (a.status === "deleted") return null; // 시험 운영: 사장만
-        const tokens = [...new Set(a.fcmTokens || [])];
+        const tokens = [...new Set(a.fcmTokens || [])].filter((t) => !sentTokens.has(t));
         if (tokens.length === 0) return null;
 
         const myEvents = todays.filter((e) => allowsTeam(a, eventTeamName(e)));
         if (myEvents.length === 0) return null; // 이 사람이 선호하는 팀엔 오늘 일정 없음 — 안 보냄
 
+        tokens.forEach((t) => sentTokens.add(t));
         const sorted = [...myEvents].sort((x, y) => (x.startTime || "").localeCompare(y.startTime || ""));
         const lines = sorted.map((e) => {
           const time = e.allDay ? "종일" : e.startTime ? fmtTime(e.startTime) : "";

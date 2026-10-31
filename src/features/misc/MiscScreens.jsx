@@ -1138,23 +1138,33 @@ export function NotificationSettingsModal() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving]   = useState(false);
 
+  // SideDrawer의 "다른 직원으로 보기" 테스트 전환 중엔 currentUser가 users 배열의 원본
+  // 항목({ ...d.data(), id: d.id })으로 바뀌어 .uid가 없고 .id만 있다 — 둘 다 받아준다.
+  const myId = currentUser?.uid || currentUser?.id;
+
   const options = [...(teams || []).filter(t => t !== "사장"), UNASSIGNED_KEY];
+  // 모달이 열려있는 동안 fetch한 notifyTeams 원본 값 — teams 목록이 fetch 이후에
+  // (예: 로그인 직후 리스너가 늦게 붙는 경우) 새로 로드돼도 그 값으로 재계산할 수 있게 보관.
+  const fetchedNotifyTeamsRef = useRef(undefined);
+  const fetchedRef = useRef(false);
 
   useEffect(() => {
-    if (!notificationSettingsModal) return;
+    if (!notificationSettingsModal) { fetchedRef.current = false; return; }
     let cancelled = false;
     (async () => {
       setLoading(true);
       let notifyTeams;
       try {
         if (isSuperAdmin(currentUser)) {
-          const snap = await getDoc(doc(db, "admins", currentUser.uid));
+          const snap = await getDoc(doc(db, "admins", myId));
           notifyTeams = snap.exists() ? snap.data().notifyTeams : undefined;
         } else {
-          notifyTeams = users.find(u => u.id === currentUser.uid)?.notifyTeams;
+          notifyTeams = users.find(u => u.id === myId)?.notifyTeams;
         }
       } catch (e) { /* 조회 실패 — 전체 허용으로 취급 */ }
       if (cancelled) return;
+      fetchedNotifyTeamsRef.current = notifyTeams;
+      fetchedRef.current = true;
       const next = {};
       options.forEach(key => { next[key] = !Array.isArray(notifyTeams) || notifyTeams.includes(key); });
       setChecked(next);
@@ -1163,6 +1173,27 @@ export function NotificationSettingsModal() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notificationSettingsModal]);
+
+  // teams 목록이 위 fetch보다 늦게 도착해 옵션이 나중에 늘어나는 경우를 대비한 보강 —
+  // 이미 체크 상태가 있는 항목은 그대로 두고, 새로 생긴 항목만 fetch해둔 notifyTeams 기준으로
+  // 채운다(options 배열은 매 렌더 새로 생성되므로 참조 대신 값으로 비교).
+  const optionsKey = options.join("\u0000");
+  useEffect(() => {
+    if (!notificationSettingsModal || !fetchedRef.current) return;
+    setChecked(prev => {
+      const notifyTeams = fetchedNotifyTeamsRef.current;
+      let changed = false;
+      const next = { ...prev };
+      options.forEach(key => {
+        if (!(key in next)) {
+          next[key] = !Array.isArray(notifyTeams) || notifyTeams.includes(key);
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [optionsKey, notificationSettingsModal]);
 
   if (!notificationSettingsModal) return null;
   const close = () => setNotificationSettingsModal(false);
@@ -1173,8 +1204,8 @@ export function NotificationSettingsModal() {
     try {
       const notifyTeams = options.filter(k => checked[k]);
       const ref = isSuperAdmin(currentUser)
-        ? doc(db, "admins", currentUser.uid)
-        : doc(db, "companies", companyId, "users", currentUser.uid);
+        ? doc(db, "admins", myId)
+        : doc(db, "companies", companyId, "users", myId);
       await updateDoc(ref, { notifyTeams });
       alert("저장됐습니다."); close();
     } catch (e) { alert("오류: " + e.message); } finally { setSaving(false); }
