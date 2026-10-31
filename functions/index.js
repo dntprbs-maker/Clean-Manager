@@ -51,6 +51,60 @@ function allowsTeam(recipient, teamName) {
   return recipient.notifyTeams.includes(teamName || UNASSIGNED_TEAM_KEY);
 }
 
+// 공통: 토큰 목록으로 FCM 발송 + 무효 토큰 정리. targets는 [{ token, userRef }].
+// data는 sendEachForMulticast의 data 필드로 그대로 전달된다(title/body 포함해서 넘길 것).
+async function dispatchPush(targets, data, logLabel) {
+  if (targets.length === 0) {
+    console.log(`[${logLabel}] 대상 토큰 없음`);
+    return;
+  }
+  const tokens = [...new Set(targets.map((t) => t.token))];
+  const resp = await getMessaging().sendEachForMulticast({
+    tokens,
+    data,
+    webpush: { fcmOptions: { link: "/" } },
+  });
+  console.log(`[${logLabel}] 발송 ${resp.successCount}/${tokens.length}`);
+
+  const invalid = [];
+  resp.responses.forEach((r, i) => {
+    if (!r.success) {
+      const code = r.error?.code || "";
+      if (code.includes("registration-token-not-registered") || code.includes("invalid-argument")) {
+        invalid.push(tokens[i]);
+      }
+    }
+  });
+  if (invalid.length) {
+    const cleanups = new Map();
+    targets.forEach((t) => { if (invalid.includes(t.token)) cleanups.set(t.userRef.path, t.userRef); });
+    await Promise.all([...cleanups.values()].map((ref) =>
+      ref.update({ fcmTokens: FieldValue.arrayRemove(...invalid) }).catch(() => {})
+    ));
+  }
+}
+
+// 그 회사의 전 직원(users, status!=deleted) + 최고관리자(admins, companyId 일치, status!=deleted)
+// 전원의 토큰을 모은다. 담당팀 필터 없음 — 공지처럼 전체 대상 발송에 사용.
+async function getAllCompanyPushTargets(companyId) {
+  const [usersSnap, adminsSnap] = await Promise.all([
+    db.collection(`companies/${companyId}/users`).get(),
+    db.collection("admins").where("companyId", "==", companyId).get(),
+  ]);
+  const targets = [];
+  usersSnap.forEach((d) => {
+    const u = d.data();
+    if (u.status === "deleted") return;
+    (u.fcmTokens || []).forEach((t) => targets.push({ token: t, userRef: d.ref }));
+  });
+  adminsSnap.forEach((d) => {
+    const a = d.data();
+    if (a.status === "deleted") return;
+    (a.fcmTokens || []).forEach((t) => targets.push({ token: t, userRef: d.ref }));
+  });
+  return targets;
+}
+
 // admins 컬렉션은 로그인 정보(아이디/비번)가 담겨있어 클라이언트 직접 쓰기가
 // Firestore 규칙으로 막혀있다(그래서 클라이언트에서 바로 fcmTokens를 갱신하려던
 // 시도가 매번 조용히 실패했음 — try/catch로 삼켜져서 앱에서는 "켜짐"으로만 보임).
@@ -145,32 +199,39 @@ async function notifyTeam(companyId, eventId, ev, action) {
 
   // 4) 발송 — data-only 메시지 (notification 필드 넣으면 브라우저가 자동 표시 + SW 표시로 중복됨)
   //         표시는 클라이언트(SW onBackgroundMessage / 포그라운드 onMessage)에서 한 번만 처리
-  const tokens = [...new Set(targets.map((t) => t.token))];
-  const resp = await getMessaging().sendEachForMulticast({
-    tokens,
-    data: { title, body, companyId, eventId, type: `event_${action}` },
-    webpush: { fcmOptions: { link: "/" } },
-  });
-  console.log(`[알림:${action}] 발송 ${resp.successCount}/${tokens.length} (team=${teamName || "미지정"})`);
-
-  // 5) 무효 토큰 정리
-  const invalid = [];
-  resp.responses.forEach((r, i) => {
-    if (!r.success) {
-      const code = r.error?.code || "";
-      if (code.includes("registration-token-not-registered") || code.includes("invalid-argument")) {
-        invalid.push(tokens[i]);
-      }
-    }
-  });
-  if (invalid.length) {
-    const cleanups = new Map();
-    targets.forEach((t) => { if (invalid.includes(t.token)) cleanups.set(t.userRef.path, t.userRef); });
-    await Promise.all([...cleanups.values()].map((ref) =>
-      ref.update({ fcmTokens: FieldValue.arrayRemove(...invalid) }).catch(() => {})
-    ));
-  }
+  await dispatchPush(
+    targets,
+    { title, body, companyId, eventId, type: `event_${action}` },
+    `알림:${action} (team=${teamName || "미지정"})`
+  );
 }
+
+// 공지 내용 미리보기 — 알림 본문이 너무 길어지지 않도록 자른다.
+function truncateNoticeBody(text, max = 80) {
+  const s = (text || "").trim();
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+// 공지 등록 시 전 직원 + 최고관리자에게 알림
+export const sendNoticeNotification = onDocumentCreated(
+  { region: REGION, document: "companies/{companyId}/notices/{noticeId}" },
+  async (event) => {
+    if (!event.data) return;
+    const { companyId, noticeId } = event.params;
+    const notice = event.data.data();
+    if (!notice) return;
+
+    const targets = await getAllCompanyPushTargets(companyId);
+    const title = `[공지] ${notice.title || "제목 없음"}`;
+    const body = truncateNoticeBody(notice.body);
+
+    await dispatchPush(
+      targets,
+      { title, body, companyId, noticeId, type: "notice_created" },
+      "알림:공지"
+    );
+  }
+);
 
 // 일정 등록
 export const sendEventNotification = onDocumentCreated(
