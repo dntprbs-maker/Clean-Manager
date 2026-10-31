@@ -61,7 +61,7 @@ import { ImportCalendarScreen } from "./features/import-calendar/ImportCalendarS
 import { LoginScreen, DemoBanner, SetupCompanyModal, IphoneInstallGuide } from "./features/auth/AuthScreens";
 import {
   TeamScheduleScreen, DashboardScreen, NoticeScreen, ActivityLogScreen,
-  ExternalLinksScreen, CompanySettingsModal,
+  ExternalLinksScreen, CompanySettingsModal, NotificationSettingsModal,
 } from "./features/misc/MiscScreens";
 
 function AppInner() {
@@ -71,6 +71,7 @@ function AppInner() {
     drawer, setDrawer, searchOpen, setSearchOpen,
     empModal, setEmpModal,
     companySettingsModal, setCompanySettingsModal,
+    notificationSettingsModal, setNotificationSettingsModal,
     siteModal, setSiteModal, assignmentModal, setAssignmentModal,
     extraPaymentModal, setExtraPaymentModal,
     eventModalGuardRef,
@@ -95,6 +96,7 @@ function AppInner() {
     { open: showNotifyPrompt, close: () => setShowNotifyPrompt(false) },
     { open: empModal.open,           close: () => setEmpModal({ open: false, editId: null }) },
     { open: companySettingsModal,    close: () => setCompanySettingsModal(false) },
+    { open: notificationSettingsModal, close: () => setNotificationSettingsModal(false) },
     { open: siteModal.open,          close: () => setSiteModal({ open: false, editId: null }) },
     { open: assignmentModal.open,    close: () => setAssignmentModal({ open: false, editId: null, presetSiteId: null }) },
     { open: extraPaymentModal.open,  close: () => setExtraPaymentModal({ open: false, employeeId: null }) },
@@ -228,6 +230,7 @@ function AppInner() {
       <ExtraCalFilterModal/>
       <EmployeeFormModal/>
       <CompanySettingsModal/>
+      <NotificationSettingsModal/>
       <SiteFormModal/>
       <AssignmentFormModal/>
       <ExtraPaymentModal/>

@@ -1268,7 +1268,7 @@ export function BottomTabBar() {
 
 // ── 사이드 드로어 (스와이프 열기/닫기 지원) ───────────────────────
 export function SideDrawer() {
-  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, onLogout, companyId, assignments, extraCalFilter, setExtraCalFilterModal } = useC();
+  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, setNotificationSettingsModal, onLogout, companyId, assignments, extraCalFilter, setExtraCalFilterModal } = useC();
   const [pwModal, setPwModal] = useState(false);
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -1463,6 +1463,15 @@ export function SideDrawer() {
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
               <User size={20} className="text-blue-500" />
               <span className="text-sm font-medium text-gray-700 flex-1 text-left">직원/팀 관리</span>
+            </button>
+          )}
+          {/* 알림 설정 - 사장/관리팀이 팀별로 알림 받을지 고를 수 있게 함 */}
+          {(isSuperAdmin(currentUser) || isMemberOf(currentUser, "관리팀")) && (
+            <button
+              onClick={() => { setNotificationSettingsModal(true); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
+              <Bell size={20} className="text-amber-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">알림 설정</span>
             </button>
           )}
           {/* 수입·지출 관리 (MVP) - 돈 관련 정보라 직원/팀 관리와 같은 권한(최고관리자/관리팀)만 노출 */}
