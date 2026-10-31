@@ -7,6 +7,14 @@ import { onlyDigits, fmtPhone } from "../../lib/phone";
 import { genFeedToken, feedUrl } from "../../lib/calendarFeed";
 import { isSuperAdmin, isMemberOf, teamRole, getMemberships, teamsLabel } from "../../lib/membership";
 
+// "미지정"은 알림 설정(MiscScreens.jsx의 UNASSIGNED_KEY, functions/lib/reservedTeamNames.js의
+// UNASSIGNED_TEAM_KEY)에서 "담당팀 미배정 일정"을 가리키는 예약어로 쓰고 있어서, 실제 팀
+// 이름으로 허용하면 그 둘이 구분이 안 돼 알림 필터가 뒤섞인다 — 팀 생성/이름변경(이 화면과
+// MCP의 create_team/rename_team, functions/mcp/tools/teams.js) 양쪽 다 막아야 함. 여긴
+// 클라이언트라 별도 빌드라서 functions/lib/reservedTeamNames.js의 RESERVED_TEAM_NAMES를
+// 직접 import 못 해 복사해 쓴다 — 예약어를 바꿀 땐 두 파일 다 같이 고칠 것.
+const RESERVED_TEAM_NAMES = ["미지정"];
+
 // ── 직원/팀 관리 화면 — 상단 탭으로 "직원"과 "팀"을 전환 ──────────────────────────
 export function EmployeeListScreen() {
   const { users, teams, setCurrentScreen } = useC();
@@ -525,6 +533,7 @@ function TeamTab() {
     const name = newTeam.trim();
     if (!name) return;
     if (teams.includes(name)) { alert("이미 존재하는 팀입니다."); return; }
+    if (RESERVED_TEAM_NAMES.includes(name)) { alert(`"${name}"은 예약된 이름이라 팀명으로 쓸 수 없습니다.`); return; }
     saveTeams([teams[0], name, ...teams.slice(1)]);
     // 캘린더(담당팀)는 현장팀 여부와 무관하게 항상 생성 — 그래야 나중에
     // 현장팀/업무팀 토글로 서로 전환할 수 있음. 같은 이름 캘린더가 있으면 재사용.
@@ -553,6 +562,7 @@ function TeamTab() {
     const name = editName.trim();
     if (!name || name === oldName) { setEditIdx(null); return; }
     if (teams.includes(name)) { alert("이미 존재하는 팀입니다."); return; }
+    if (RESERVED_TEAM_NAMES.includes(name)) { alert(`"${name}"은 예약된 이름이라 팀명으로 쓸 수 없습니다.`); return; }
     saveTeams(teams.map(t => t === oldName ? name : t));
     reassignTeam(oldName, name);
     // 캘린더는 팀 이름 문자열로 매칭되는 구조라, 이름만 바꾸고 캘린더는 안 건드리면

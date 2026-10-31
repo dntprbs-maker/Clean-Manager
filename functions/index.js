@@ -7,6 +7,7 @@ import { getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { getMemberships } from "./lib/membership.js";
+import { UNASSIGNED_TEAM_KEY } from "./lib/reservedTeamNames.js";
 import { fmtDate, addDays, expandRecurringForFeed } from "./lib/recurring.js";
 import { loadFeedEvents } from "./lib/calendarFeedQuery.js";
 import { parseIcs } from "./lib/ics.js";
@@ -41,6 +42,13 @@ function fmtTime(t) {
 
 function isMemberOfTeam(u, team) {
   return getMemberships(u).some((m) => m.team === team);
+}
+
+// 사장(admins)/관리팀(users) 수신자별 "알림 받을 팀" 설정. notifyTeams 필드가 없으면(기존
+// 문서, 마이그레이션 없이 하위호환) 전체 팀 허용으로 해석한다.
+function allowsTeam(recipient, teamName) {
+  if (!Array.isArray(recipient?.notifyTeams)) return true;
+  return recipient.notifyTeams.includes(teamName || UNASSIGNED_TEAM_KEY);
 }
 
 // 공통: 토큰 목록으로 FCM 발송 + 무효 토큰 정리. targets는 [{ token, userRef }].
@@ -119,6 +127,15 @@ export const syncAdminPushToken = onCall({ region: REGION }, async (request) => 
   return { ok: true };
 });
 
+// cals 문서에서 화면에 보여줄 팀명을 뽑는 규칙 — name/label 둘 다 있을 수 있어 name을
+// 우선한다. resolveTeamName()과 runDailyDigest()의 teamNameByCalId 둘 다 이걸 쓴다
+// (한쪽만 고치면 둘이 서로 다른 이름을 돌려주게 되므로 바꿀 때 같이 고칠 것). calendarFeed()는
+// 피드 제목(X-WR-CALNAME) 표시 용도로 label을 우선하는 별도 규칙을 쓰는데, 그건 "팀 식별"이
+// 아니라 "캘린더 표시 이름"이라 의도적으로 분리돼 있다 — 여기에 맞춰 바꾸지 말 것.
+function calDisplayName(calData) {
+  return calData?.name || calData?.label || "";
+}
+
 // 일정(ev)의 담당 팀명을 알아낸다. team 필드가 없으면 calId로 cals 문서를 찾아본다.
 async function resolveTeamName(companyId, ev) {
   if (!ev) return "";
@@ -126,7 +143,7 @@ async function resolveTeamName(companyId, ev) {
   if (!teamName && ev.calId) {
     try {
       const calDoc = await db.doc(`companies/${companyId}/cals/${ev.calId}`).get();
-      if (calDoc.exists) teamName = calDoc.data().name || calDoc.data().label || "";
+      if (calDoc.exists) teamName = calDisplayName(calDoc.data());
     } catch (e) { /* 무시 */ }
   }
   return teamName;
@@ -149,7 +166,7 @@ async function notifyTeam(companyId, eventId, ev, action) {
     const u = d.data();
     if (u.status === "deleted") return;
     const isTeamMember = teamName && isMemberOfTeam(u, teamName);
-    const isManager = !teamName && isMemberOfTeam(u, "관리팀");
+    const isManager = !teamName && isMemberOfTeam(u, "관리팀") && allowsTeam(u, teamName);
     if (isTeamMember || isManager) {
       (u.fcmTokens || []).forEach((t) => targets.push({ token: t, userRef: d.ref }));
     }
@@ -163,6 +180,7 @@ async function notifyTeam(companyId, eventId, ev, action) {
     adminsSnap.forEach((d) => {
       const a = d.data();
       if (a.status === "deleted") return;
+      if (!allowsTeam(a, teamName)) return;
       (a.fcmTokens || []).forEach((t) => targets.push({ token: t, userRef: d.ref }));
     });
   }
@@ -263,9 +281,11 @@ function todayKST() {
 }
 
 // ── 매일 아침 "오늘 일정" 요약 알림 (시험 운영) ───────────────────────
-// 지금은 회사별 최고관리자(사장)에게만 보내고, 그 날 일정이 하나도 없으면 안 보낸다.
-// 팀 필터 없이 그 날의 전체 일정을 다 모아서 보낸다(사장은 전체를 봐야 하므로).
-// 잘 되는지 보고 나중에 팀 전체 발송/시간대 등을 검토하기로 함.
+// 회사별 최고관리자(사장)에게만 보내고, 그 날 일정이 하나도 없으면 안 보낸다.
+// 수신자(사장)마다 notifyTeams로 선호 팀이 다를 수 있어, 전체 일정을 모아 한 번에 토큰
+// 묶음 발송하는 대신 수신자별로 자기 선호 팀에 해당하는 일정만 골라 메시지를 따로
+// 구성해서 보낸다 — 어떤 사장이 모든 팀을 껐으면(notifyTeams: []) 그날 일정이 있어도
+// 그 사람에게는 digest를 보내지 않는다. notifyTeams 필드가 없으면 전체 허용(하위호환).
 async function runDailyDigest(dateStr, titlePrefix) {
   const companiesSnap = await db.collection("companies").get();
   const log = [];
@@ -281,6 +301,11 @@ async function runDailyDigest(dateStr, titlePrefix) {
       ]);
       // 직원 개인 캘린더(personal: true)는 회사 업무 요약에 안 어울려서 제외한다.
       const personalCalIds = new Set(calsSnap.docs.filter((d) => d.data().personal).map((d) => d.id));
+      // ev.team이 없는 일정(ICS 구독으로 들어온 일정 등)도 calId로 팀을 알아낼 수 있도록
+      // cals 문서 → 팀명 맵을 만들어둔다(resolveTeamName()과 같은 보정, 여기선 이미 calsSnap을
+      // 들고 있어서 문서당 재조회 없이 바로 가능).
+      const teamNameByCalId = new Map(calsSnap.docs.map((d) => [d.id, calDisplayName(d.data())]));
+      const eventTeamName = (e) => e.team || teamNameByCalId.get(e.calId) || "";
       const events = eventsSnap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
         .filter((e) => e.status !== "deleted" && !personalCalIds.has(e.calId));
@@ -291,28 +316,52 @@ async function runDailyDigest(dateStr, titlePrefix) {
 
       // 최고관리자(사장)는 companies/{id}/users가 아니라 별도 admins 컬렉션에 저장돼 있다.
       const adminsSnap = await db.collection("admins").where("companyId", "==", companyId).get();
-      const tokens = [];
-      adminsSnap.forEach((d) => {
+      // 한 기기 토큰이 (정상적으론 안 생겨야 하지만) 두 사장 문서에 동시에 남아있는 드문 상태라도
+      // 같은 날 digest를 두 번 받지 않도록, 사장별로 보낼 토큰/일정을 "누가 무엇을 받는지"까지
+      // 전부 동기적으로 먼저 정리한다(Promise.all(docs.map(async...)) 콜백의 동기 실행 순서에
+      // 의존하지 않도록 비동기 발송과 분리 — 나중에 이 구간에 await가 섞여도 중복발송 가드가
+      // 깨지지 않는다). 토큰이 없거나 선호 팀에 오늘 일정이 없는 경우도 이유별로 구분해둔다.
+      const sentTokens = new Set();
+      const adminPlans = adminsSnap.docs.map((d) => {
         const a = d.data();
-        if (a.status === "deleted") return; // 시험 운영: 사장만
-        (a.fcmTokens || []).forEach((t) => tokens.push(t));
-      });
-      if (tokens.length === 0) { log.push(`${companyId}: 사장 토큰 없음(일정 ${todays.length}건인데 못 보냄)`); continue; }
+        if (a.status === "deleted") return { adminId: d.id, reason: "deleted" }; // 시험 운영: 사장만
+        const tokens = [...new Set(a.fcmTokens || [])].filter((t) => !sentTokens.has(t));
+        if (tokens.length === 0) return { adminId: d.id, reason: "no_tokens" };
 
-      const sorted = [...todays].sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
-      const lines = sorted.map((e) => {
-        const time = e.allDay ? "종일" : e.startTime ? fmtTime(e.startTime) : "";
-        const team = e.team ? `[${e.team}] ` : "";
-        return `${time ? time + " " : ""}${team}${e.title || "제목 없음"}`;
+        const myEvents = todays.filter((e) => allowsTeam(a, eventTeamName(e)));
+        if (myEvents.length === 0) return { adminId: d.id, reason: "filtered_out" }; // 이 사람이 선호하는 팀엔 오늘 일정 없음
+
+        tokens.forEach((t) => sentTokens.add(t));
+        return { adminId: d.id, reason: "send", tokens, myEvents };
       });
 
-      const uniqueTokens = [...new Set(tokens)];
-      const resp = await getMessaging().sendEachForMulticast({
-        tokens: uniqueTokens,
-        data: { title: `${titlePrefix} 일정 ${todays.length}건`, body: lines.join("\n"), companyId, type: "daily_digest" },
-        webpush: { fcmOptions: { link: "/" } },
-      });
-      log.push(`${companyId}: 발송 ${resp.successCount}/${uniqueTokens.length} (일정 ${todays.length}건)`);
+      const perAdminLogs = await Promise.all(adminPlans.map(async (plan) => {
+        if (plan.reason !== "send") return null;
+        const { adminId, tokens, myEvents } = plan;
+        const sorted = [...myEvents].sort((x, y) => (x.startTime || "").localeCompare(y.startTime || ""));
+        const lines = sorted.map((e) => {
+          const time = e.allDay ? "종일" : e.startTime ? fmtTime(e.startTime) : "";
+          const teamName = eventTeamName(e);
+          const team = teamName ? `[${teamName}] ` : "";
+          return `${time ? time + " " : ""}${team}${e.title || "제목 없음"}`;
+        });
+
+        const resp = await getMessaging().sendEachForMulticast({
+          tokens,
+          data: { title: `${titlePrefix} 일정 ${myEvents.length}건`, body: lines.join("\n"), companyId, type: "daily_digest" },
+          webpush: { fcmOptions: { link: "/" } },
+        });
+        return `${companyId}/${adminId}: 발송 ${resp.successCount}/${tokens.length} (일정 ${myEvents.length}건)`;
+      }));
+
+      const sentLogs = perAdminLogs.filter(Boolean);
+      if (sentLogs.length > 0) {
+        log.push(...sentLogs);
+      } else {
+        const noTokenCount = adminPlans.filter((p) => p.reason === "no_tokens").length;
+        const filteredCount = adminPlans.filter((p) => p.reason === "filtered_out").length;
+        log.push(`${companyId}: 수신 대상 없음(일정 ${todays.length}건인데 못 보냄 — 토큰없음 ${noTokenCount}명, 필터링됨 ${filteredCount}명)`);
+      }
     } catch (e) {
       log.push(`${companyId}: 오류 ${e?.message || e}`);
     }
