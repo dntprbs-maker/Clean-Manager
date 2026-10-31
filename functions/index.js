@@ -73,6 +73,15 @@ export const syncAdminPushToken = onCall({ region: REGION }, async (request) => 
   return { ok: true };
 });
 
+// cals 문서에서 화면에 보여줄 팀명을 뽑는 규칙 — name/label 둘 다 있을 수 있어 name을
+// 우선한다. resolveTeamName()과 runDailyDigest()의 teamNameByCalId 둘 다 이걸 쓴다
+// (한쪽만 고치면 둘이 서로 다른 이름을 돌려주게 되므로 바꿀 때 같이 고칠 것). calendarFeed()는
+// 피드 제목(X-WR-CALNAME) 표시 용도로 label을 우선하는 별도 규칙을 쓰는데, 그건 "팀 식별"이
+// 아니라 "캘린더 표시 이름"이라 의도적으로 분리돼 있다 — 여기에 맞춰 바꾸지 말 것.
+function calDisplayName(calData) {
+  return calData?.name || calData?.label || "";
+}
+
 // 일정(ev)의 담당 팀명을 알아낸다. team 필드가 없으면 calId로 cals 문서를 찾아본다.
 async function resolveTeamName(companyId, ev) {
   if (!ev) return "";
@@ -80,7 +89,7 @@ async function resolveTeamName(companyId, ev) {
   if (!teamName && ev.calId) {
     try {
       const calDoc = await db.doc(`companies/${companyId}/cals/${ev.calId}`).get();
-      if (calDoc.exists) teamName = calDoc.data().name || calDoc.data().label || "";
+      if (calDoc.exists) teamName = calDisplayName(calDoc.data());
     } catch (e) { /* 무시 */ }
   }
   return teamName;
@@ -234,7 +243,7 @@ async function runDailyDigest(dateStr, titlePrefix) {
       // ev.team이 없는 일정(ICS 구독으로 들어온 일정 등)도 calId로 팀을 알아낼 수 있도록
       // cals 문서 → 팀명 맵을 만들어둔다(resolveTeamName()과 같은 보정, 여기선 이미 calsSnap을
       // 들고 있어서 문서당 재조회 없이 바로 가능).
-      const teamNameByCalId = new Map(calsSnap.docs.map((d) => [d.id, d.data().name || d.data().label || ""]));
+      const teamNameByCalId = new Map(calsSnap.docs.map((d) => [d.id, calDisplayName(d.data())]));
       const eventTeamName = (e) => e.team || teamNameByCalId.get(e.calId) || "";
       const events = eventsSnap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
@@ -246,21 +255,28 @@ async function runDailyDigest(dateStr, titlePrefix) {
 
       // 최고관리자(사장)는 companies/{id}/users가 아니라 별도 admins 컬렉션에 저장돼 있다.
       const adminsSnap = await db.collection("admins").where("companyId", "==", companyId).get();
-      // 한 기기 토큰이 (정상적으론 안 생겨야 하지만) 두 사장 문서에 동시에 남아있는 드문
-      // 상태라도 같은 날 digest를 두 번 받지 않도록, 이미 발송에 쓴 토큰은 다음 사장
-      // 차례에서 제외한다. Promise.all(docs.map(async ...))의 각 콜백은 첫 await 전까지는
-      // 동기로 순서대로 실행되므로, 그 구간에서 sentTokens를 갱신/조회하는 건 경쟁 없이 안전하다.
+      // 한 기기 토큰이 (정상적으론 안 생겨야 하지만) 두 사장 문서에 동시에 남아있는 드문 상태라도
+      // 같은 날 digest를 두 번 받지 않도록, 사장별로 보낼 토큰/일정을 "누가 무엇을 받는지"까지
+      // 전부 동기적으로 먼저 정리한다(Promise.all(docs.map(async...)) 콜백의 동기 실행 순서에
+      // 의존하지 않도록 비동기 발송과 분리 — 나중에 이 구간에 await가 섞여도 중복발송 가드가
+      // 깨지지 않는다). 토큰이 없거나 선호 팀에 오늘 일정이 없는 경우도 이유별로 구분해둔다.
       const sentTokens = new Set();
-      const perAdminLogs = await Promise.all(adminsSnap.docs.map(async (d) => {
+      const adminPlans = adminsSnap.docs.map((d) => {
         const a = d.data();
-        if (a.status === "deleted") return null; // 시험 운영: 사장만
+        if (a.status === "deleted") return { adminId: d.id, reason: "deleted" }; // 시험 운영: 사장만
         const tokens = [...new Set(a.fcmTokens || [])].filter((t) => !sentTokens.has(t));
-        if (tokens.length === 0) return null;
+        if (tokens.length === 0) return { adminId: d.id, reason: "no_tokens" };
 
         const myEvents = todays.filter((e) => allowsTeam(a, eventTeamName(e)));
-        if (myEvents.length === 0) return null; // 이 사람이 선호하는 팀엔 오늘 일정 없음 — 안 보냄
+        if (myEvents.length === 0) return { adminId: d.id, reason: "filtered_out" }; // 이 사람이 선호하는 팀엔 오늘 일정 없음
 
         tokens.forEach((t) => sentTokens.add(t));
+        return { adminId: d.id, reason: "send", tokens, myEvents };
+      });
+
+      const perAdminLogs = await Promise.all(adminPlans.map(async (plan) => {
+        if (plan.reason !== "send") return null;
+        const { adminId, tokens, myEvents } = plan;
         const sorted = [...myEvents].sort((x, y) => (x.startTime || "").localeCompare(y.startTime || ""));
         const lines = sorted.map((e) => {
           const time = e.allDay ? "종일" : e.startTime ? fmtTime(e.startTime) : "";
@@ -274,11 +290,17 @@ async function runDailyDigest(dateStr, titlePrefix) {
           data: { title: `${titlePrefix} 일정 ${myEvents.length}건`, body: lines.join("\n"), companyId, type: "daily_digest" },
           webpush: { fcmOptions: { link: "/" } },
         });
-        return `${companyId}/${d.id}: 발송 ${resp.successCount}/${tokens.length} (일정 ${myEvents.length}건)`;
+        return `${companyId}/${adminId}: 발송 ${resp.successCount}/${tokens.length} (일정 ${myEvents.length}건)`;
       }));
+
       const sentLogs = perAdminLogs.filter(Boolean);
-      if (sentLogs.length === 0) log.push(`${companyId}: 수신 대상 없음(일정 ${todays.length}건인데 못 보냄)`);
-      else log.push(...sentLogs);
+      if (sentLogs.length > 0) {
+        log.push(...sentLogs);
+      } else {
+        const noTokenCount = adminPlans.filter((p) => p.reason === "no_tokens").length;
+        const filteredCount = adminPlans.filter((p) => p.reason === "filtered_out").length;
+        log.push(`${companyId}: 수신 대상 없음(일정 ${todays.length}건인데 못 보냄 — 토큰없음 ${noTokenCount}명, 필터링됨 ${filteredCount}명)`);
+      }
     } catch (e) {
       log.push(`${companyId}: 오류 ${e?.message || e}`);
     }

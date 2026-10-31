@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { ChevronDown, ChevronLeft, X } from "lucide-react";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -1134,23 +1134,25 @@ const UNASSIGNED_KEY = "미지정";
 
 export function NotificationSettingsModal() {
   const { notificationSettingsModal, setNotificationSettingsModal, currentUser, teams, users, companyId } = useC();
-  const [checked, setChecked] = useState({});
+  // 체크 상태는 "사용자가 이번에 직접 토글한 항목"만 저장한다(overrides). 나머지는
+  // 아래 isChecked()가 매번 options/notifyTeamsRef로부터 다시 계산하므로, teams 목록이
+  // fetch보다 늦게 로드돼 체크박스가 새로 나타나도(예: 로그인 직후 리스너가 늦게 붙는 경우)
+  // 따로 보강 로직 없이 항상 fetch해둔 notifyTeams 기준값으로 맞게 표시된다.
+  const [overrides, setOverrides] = useState({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving]   = useState(false);
+  const notifyTeamsRef = useRef(undefined); // 서버에서 읽어온 원본 notifyTeams (배열 아니면 전체 허용)
 
   // SideDrawer의 "다른 직원으로 보기" 테스트 전환 중엔 currentUser가 users 배열의 원본
   // 항목({ ...d.data(), id: d.id })으로 바뀌어 .uid가 없고 .id만 있다 — 둘 다 받아준다.
   const myId = currentUser?.uid || currentUser?.id;
 
-  const options = [...(teams || []).filter(t => t !== "사장"), UNASSIGNED_KEY];
-  // 모달이 열려있는 동안 fetch한 notifyTeams 원본 값 — teams 목록이 fetch 이후에
-  // (예: 로그인 직후 리스너가 늦게 붙는 경우) 새로 로드돼도 그 값으로 재계산할 수 있게 보관.
-  const fetchedNotifyTeamsRef = useRef(undefined);
-  const fetchedRef = useRef(false);
+  const options = useMemo(() => [...(teams || []).filter(t => t !== "사장"), UNASSIGNED_KEY], [teams]);
 
   useEffect(() => {
-    if (!notificationSettingsModal) { fetchedRef.current = false; return; }
+    if (!notificationSettingsModal) return;
     let cancelled = false;
+    setOverrides({});
     (async () => {
       setLoading(true);
       let notifyTeams;
@@ -1163,46 +1165,25 @@ export function NotificationSettingsModal() {
         }
       } catch (e) { /* 조회 실패 — 전체 허용으로 취급 */ }
       if (cancelled) return;
-      fetchedNotifyTeamsRef.current = notifyTeams;
-      fetchedRef.current = true;
-      const next = {};
-      options.forEach(key => { next[key] = !Array.isArray(notifyTeams) || notifyTeams.includes(key); });
-      setChecked(next);
+      notifyTeamsRef.current = notifyTeams;
       setLoading(false);
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notificationSettingsModal]);
 
-  // teams 목록이 위 fetch보다 늦게 도착해 옵션이 나중에 늘어나는 경우를 대비한 보강 —
-  // 이미 체크 상태가 있는 항목은 그대로 두고, 새로 생긴 항목만 fetch해둔 notifyTeams 기준으로
-  // 채운다(options 배열은 매 렌더 새로 생성되므로 참조 대신 값으로 비교).
-  const optionsKey = options.join("\u0000");
-  useEffect(() => {
-    if (!notificationSettingsModal || !fetchedRef.current) return;
-    setChecked(prev => {
-      const notifyTeams = fetchedNotifyTeamsRef.current;
-      let changed = false;
-      const next = { ...prev };
-      options.forEach(key => {
-        if (!(key in next)) {
-          next[key] = !Array.isArray(notifyTeams) || notifyTeams.includes(key);
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [optionsKey, notificationSettingsModal]);
-
   if (!notificationSettingsModal) return null;
   const close = () => setNotificationSettingsModal(false);
-  const toggle = (key) => setChecked(c => ({ ...c, [key]: !c[key] }));
+
+  const isChecked = (key) => key in overrides
+    ? overrides[key]
+    : (!Array.isArray(notifyTeamsRef.current) || notifyTeamsRef.current.includes(key));
+  const toggle = (key) => setOverrides(o => ({ ...o, [key]: !isChecked(key) }));
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const notifyTeams = options.filter(k => checked[k]);
+      const notifyTeams = options.filter(isChecked);
       const ref = isSuperAdmin(currentUser)
         ? doc(db, "admins", myId)
         : doc(db, "companies", companyId, "users", myId);
@@ -1228,7 +1209,7 @@ export function NotificationSettingsModal() {
           <div className="flex flex-col gap-2">
             {options.map(key => (
               <label key={key} className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3 cursor-pointer">
-                <input type="checkbox" checked={!!checked[key]} onChange={() => toggle(key)}
+                <input type="checkbox" checked={isChecked(key)} onChange={() => toggle(key)}
                   className="w-4 h-4 accent-blue-600"/>
                 <span className="text-sm font-bold text-gray-800">
                   {key === UNASSIGNED_KEY ? "담당팀 미배정 일정" : key}
