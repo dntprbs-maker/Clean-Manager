@@ -122,8 +122,10 @@ export function FinanceFormModal() {
 
   if (!financeModal.open) return null;
   const close = () => setFinanceModal({ open: false, editId: null });
+  const amountValid = Number(amount) > 0;
+  const canSubmit = amountValid && !!date && category.trim();
   const submit = () => {
-    if (!amount || !category.trim()) return;
+    if (!canSubmit) return;
     addTransaction({ type, date, amount: Number(amount), category: category.trim(), memo: memo.trim() });
     close();
   };
@@ -160,7 +162,7 @@ export function FinanceFormModal() {
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1">금액</label>
-          <input type="number" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value)}
+          <input type="number" inputMode="numeric" min="1" step="1" value={amount} onChange={e => setAmount(e.target.value)}
             placeholder="예: 500000"
             className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
         </div>
@@ -176,7 +178,7 @@ export function FinanceFormModal() {
             className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
         </div>
 
-        <button onClick={submit} disabled={!amount || !category.trim()}
+        <button onClick={submit} disabled={!canSubmit}
           className="w-full py-3 rounded-xl text-sm font-bold text-white mt-1 disabled:opacity-40"
           style={{background: "linear-gradient(135deg,#1a56db,#2563eb)"}}>
           등록
