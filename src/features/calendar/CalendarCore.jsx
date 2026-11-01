@@ -1738,39 +1738,148 @@ const copyOf = ev => {
 const LAST_INPUT_MODE_KEY = "lastEventInputMode";
 const saveLastInputMode = mode => { try { localStorage.setItem(LAST_INPUT_MODE_KEY, mode); } catch { /* 저장 실패해도 기능엔 지장 없음 */ } };
 
-// ── 날짜/시간 필드 — 기기 기본 날짜/시간 선택창(<input type="date"/"time">)을 그대로 사용.
-// 예전엔 자체 제작 5열(연/월/일/시/분) 드럼롤(WheelPicker)이었으나, 조작 부담이 커서
-// OS/브라우저가 이미 제공하는 표준 선택창으로 교체했다. 저장 형식(YYYY-MM-DD, HH:MM)은
-// 그대로라 기존 데이터·Firestore 구조와 호환된다. WheelPicker 자체는 반복 종료일 선택
-// (RepeatUntilPicker)에서 여전히 쓰고 있어 컴포넌트를 삭제하지 않고 이 화면의 사용만 걷어냈다.
+// ── 날짜/시간 필드 — 네이티브 <input type="date"/"time">를 걷어내고 자체 UI로 교체.
+// 날짜: 탭하면 달력 시트가 뜨고 그 안에서 날짜를 고른다(생성/수정 동일 UX — 기본값만 다름).
+// 시간: 미루기(+1h 등) 버튼은 복잡도 때문에 빼고, 사용자가 등록한 즐겨찾기 시간 원터치 버튼과
+// 시/분 숫자 입력 + 오전/오후 탭 토글로 대체했다. 저장 형식(YYYY-MM-DD, HH:MM)은 그대로라
+// 기존 데이터·Firestore 구조와 호환된다.
 const fmtDateKorean = s => {
   const d = pd(s);
   if (!d) return null;
   return `${d.getFullYear()}. ${String(d.getMonth()+1).padStart(2,"0")}. ${String(d.getDate()).padStart(2,"0")}.`;
 };
 
-// 네이티브 input을 보이지 않게(opacity 0) 같은 자리에 겹쳐두고, 보기 좋은 텍스트는 그 위에
-// 얹는 방식 — <label>로 감싸 텍스트를 눌러도 실제 input이 눌린 것과 동일하게 동작한다
-// (모바일에서 OS 기본 선택창이 뜸). 데스크톱 등 label-클릭만으로 안 열리는 브라우저를 위해
-// showPicker()도 시도하되, 지원 안 하면 조용히 무시(포커스만 돼도 키보드로 조작 가능).
-function NativeDateTimeField({ type, value, onChange, ariaLabel, min, step, display, size="base" }) {
-  const ref = useRef(null);
-  const openPicker = () => { try { ref.current?.showPicker?.(); } catch { /* 미지원 브라우저는 기본 동작에 맡김 */ } };
+// 탭 → 달력에서 날짜 선택. min을 주면 그 이전 날짜는 고를 수 없게(종료 날짜가 시작보다
+// 앞서지 못하도록) 흐리게 비활성 처리한다.
+function DatePickerSheet({ value, min, onSelect, onClose }) {
+  // 열릴 때마다 새로 마운트되므로(부모가 조건부 렌더링) 초기값만 잡으면 됨 — effect로 동기화할 필요 없음.
+  const [cursor, setCursor] = useState(() => pd(value) || new Date());
+
+  const y = cursor.getFullYear(), m = cursor.getMonth();
+  const first = new Date(y, m, 1), last = new Date(y, m + 1, 0);
+  const cells = [...Array(first.getDay()).fill(null), ...Array.from({ length: last.getDate() }, (_, i) => fmt(new Date(y, m, i + 1)))];
+
   return (
-    <label onClick={openPicker}
-      className={`relative block cursor-pointer select-none ${size==="lg" ? "text-2xl font-bold text-gray-900" : "text-sm font-medium text-gray-600"}`}>
-      {display}
-      <input ref={ref} type={type} value={value||""} min={min} step={step}
-        aria-label={ariaLabel}
-        onChange={e=>onChange(e.target.value)}
-        onClick={e=>{ e.stopPropagation(); openPicker(); }}
-        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
-    </label>
+    <div className="fixed inset-0 z-[80] flex items-end justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40"/>
+      <div className="relative bg-white w-full max-w-md rounded-t-3xl shadow-2xl pb-6" onClick={e=>e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+          <button type="button" onClick={()=>setCursor(new Date(y,m-1,1))} className="p-2 rounded-full hover:bg-gray-100"><ChevronLeft size={20} className="text-gray-600"/></button>
+          <span className="font-bold text-base text-gray-900">{y}년 {m+1}월</span>
+          <button type="button" onClick={()=>setCursor(new Date(y,m+1,1))} className="p-2 rounded-full hover:bg-gray-100"><ChevronRight size={20} className="text-gray-600"/></button>
+        </div>
+        <div className="grid grid-cols-7 text-center text-xs text-gray-400 px-2 pt-2">
+          {WD.map(w=><div key={w} className="py-1">{w}</div>)}
+        </div>
+        <div className="grid grid-cols-7 gap-y-1 px-2 pb-2">
+          {cells.map((ds,i) => ds===null ? <div key={`b${i}`}/> : (
+            <button key={ds} type="button" disabled={min && ds < min}
+              onClick={()=>{ onSelect(ds); onClose(); }}
+              className={`mx-auto w-9 h-9 rounded-full text-sm font-medium flex items-center justify-center
+                ${ds===value ? "bg-blue-600 text-white font-bold" : min && ds<min ? "text-gray-300" : "text-gray-700 hover:bg-gray-100"}`}>
+              {Number(ds.slice(8,10))}
+            </button>
+          ))}
+        </div>
+        <div className="px-4 pt-2">
+          <button type="button" onClick={()=>{ const t=fmt(new Date()); if(!(min && t<min)) { onSelect(t); onClose(); } }}
+            className="w-full py-2.5 rounded-xl bg-gray-100 text-sm font-bold text-gray-600">오늘</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
-export function DateTimePicker({ form, set, errs, lockRepeat }) {
+// 즐겨찾기 시간 — 사용자(기기)별로 로컬에 저장. extraCalFilter_* 와 동일한 패턴(계정별,
+// 서버에 안 올라가서 다른 사람 화면엔 영향 없음). 기본값은 자주 쓰는 오전 9시/오후 2시.
+const FAV_TIMES_PREFIX = "favTimes_";
+const DEFAULT_FAV_TIMES = ["09:00","14:00"];
+const loadFavTimes = uid => { try { const v=JSON.parse(localStorage.getItem(FAV_TIMES_PREFIX+uid)); return Array.isArray(v)&&v.length ? v : DEFAULT_FAV_TIMES; } catch { return DEFAULT_FAV_TIMES; } };
+const saveFavTimes = (uid,list) => { try { localStorage.setItem(FAV_TIMES_PREFIX+uid, JSON.stringify(list)); } catch { /* 저장 실패해도 기능엔 지장 없음 */ } };
+
+function FavoriteTimeRow({ userId, value, onPick }) {
+  const [favs, setFavs] = useState(() => loadFavTimes(userId));
+  const [editing, setEditing] = useState(false);
+
+  const addCurrent = () => {
+    if (favs.includes(value)) return;
+    const next = [...favs, value].sort();
+    setFavs(next); saveFavTimes(userId, next);
+  };
+  const removeFav = t => {
+    const next = favs.filter(f=>f!==t);
+    setFavs(next); saveFavTimes(userId, next);
+    if (next.length===0) setEditing(false);
+  };
+
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {favs.map(t => (
+        <button key={t} type="button" onClick={()=> editing ? removeFav(t) : onPick(t)}
+          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-bold
+            ${editing ? "bg-red-50 text-red-500" : value===t ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>
+          {fmtTime(t)}{editing && <X size={11}/>}
+        </button>
+      ))}
+      <button type="button" onClick={addCurrent} aria-label="현재 시간을 즐겨찾기에 추가"
+        className="flex items-center justify-center w-7 h-7 rounded-full bg-gray-50 text-blue-500 border border-dashed border-blue-200">
+        <Plus size={13}/>
+      </button>
+      {favs.length>0 && (
+        <button type="button" onClick={()=>setEditing(e=>!e)} className="px-1.5 py-1 text-xs font-bold text-gray-400">
+          {editing ? "완료" : "편집"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// 시/분 숫자 입력 + 오전/오후 탭 토글. 네이티브 select/time input이 아니라 전부 직접 그린
+// 버튼·텍스트 입력이라 iOS Safari/Android Chrome에서 똑같이 보인다.
+function TimeField({ value, onChange, ariaLabel }) {
+  const [h24, mi] = (value||"09:00").split(":").map(Number);
+  const isPM = h24>=12;
+  const h12 = h24%12===0 ? 12 : h24%12;
+
+  const commit = (h12v, miv, pm) => {
+    let hh = h12v % 12;
+    if (pm) hh += 12;
+    onChange(`${String(hh).padStart(2,"0")}:${String(miv).padStart(2,"0")}`);
+  };
+  const onHourInput = e => {
+    const raw = e.target.value.replace(/\D/g,"");
+    if (raw==="") return;
+    commit(Math.min(12, Math.max(1, parseInt(raw,10))), mi, isPM);
+  };
+  const onMinInput = e => {
+    const raw = e.target.value.replace(/\D/g,"");
+    if (raw==="") return;
+    commit(h12, Math.min(59, Math.max(0, parseInt(raw,10))), isPM);
+  };
+  const selectAll = e => e.target.select();
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="flex rounded-lg overflow-hidden border border-gray-200 text-[11px] font-bold shrink-0">
+        <button type="button" onClick={()=>commit(h12,mi,false)} className={`px-2 py-2 ${!isPM?"bg-blue-600 text-white":"bg-white text-gray-400"}`}>오전</button>
+        <button type="button" onClick={()=>commit(h12,mi,true)} className={`px-2 py-2 ${isPM?"bg-blue-600 text-white":"bg-white text-gray-400"}`}>오후</button>
+      </div>
+      <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2}
+        aria-label={`${ariaLabel} 시`} value={String(h12)}
+        onFocus={selectAll} onChange={onHourInput}
+        className="w-10 text-center py-1.5 rounded-lg bg-gray-50 border border-gray-200 text-lg font-bold text-gray-900"/>
+      <span className="text-gray-400 font-bold">:</span>
+      <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2}
+        aria-label={`${ariaLabel} 분`} value={String(mi).padStart(2,"0")}
+        onFocus={selectAll} onChange={onMinInput}
+        className="w-10 text-center py-1.5 rounded-lg bg-gray-50 border border-gray-200 text-lg font-bold text-gray-900"/>
+    </div>
+  );
+}
+
+export function DateTimePicker({ form, set, errs, lockRepeat, userId }) {
   const [repeatOpen, setRepeatOpen] = useState(false);
+  const [dateSheet, setDateSheet] = useState(null); // "start" | "end" | null
   // 사용자가 종료 날짜/시간을 직접(피커로) 바꾼 적이 있으면, 이후 시작 날짜/시간을 바꿔도
   // 더 이상 자동으로 같이 밀지 않는다 — 애써 골라둔 값을 덮어쓰지 않기 위함.
   // 모달을 새로 열 때마다(= 이 컴포넌트가 새로 마운트될 때마다) false로 리셋된다.
@@ -1857,28 +1966,44 @@ export function DateTimePicker({ form, set, errs, lockRepeat }) {
       {/* 반복 설정 패널 — 전체 너비로 펼쳐짐 (단건 수정 중엔 숨김) */}
       {!lockRepeat && repeatOpen && <RepeatPanel form={form} set={set}/>}
 
-      {/* 시작/종료 날짜·시간 */}
+      {/* 시작/종료 날짜 — 탭하면 달력 시트가 뜬다 */}
       <div className="flex items-start px-4 py-3 gap-2">
         <div className="flex-1 flex flex-col gap-1">
           <span className="text-xs font-bold text-gray-400">시작</span>
-          <NativeDateTimeField type="date" value={form.start} onChange={handleStartDateChange}
-            ariaLabel="시작 날짜" display={fmtDateKorean(form.start) || <span className="text-red-500 font-semibold">날짜 선택 필요</span>}/>
-          {!form.allDay && (
-            <NativeDateTimeField type="time" value={form.startTime} onChange={handleStartTimeChange}
-              ariaLabel="시작 시간" step={1800} size="lg" display={fmtTime(form.startTime) || "--:--"}/>
-          )}
+          <button type="button" onClick={()=>setDateSheet("start")} aria-label="시작 날짜 선택"
+            className="text-left text-sm font-medium text-gray-600">
+            {fmtDateKorean(form.start) || <span className="text-red-500 font-semibold">날짜 선택 필요</span>}
+          </button>
         </div>
         <ChevronRight size={16} className="text-gray-300 shrink-0 mt-6"/>
         <div className="flex-1 flex flex-col gap-1 items-end text-right">
           <span className="text-xs font-bold text-gray-400">종료</span>
-          <NativeDateTimeField type="date" value={form.end} onChange={handleEndDateChange}
-            ariaLabel="종료 날짜" min={form.start} display={fmtDateKorean(form.end) || <span className="text-red-500 font-semibold">날짜 선택 필요</span>}/>
-          {!form.allDay && (
-            <NativeDateTimeField type="time" value={form.endTime} onChange={handleEndTimeChange}
-              ariaLabel="종료 시간" step={1800} size="lg" display={fmtTime(form.endTime) || "--:--"}/>
-          )}
+          <button type="button" onClick={()=>setDateSheet("end")} aria-label="종료 날짜 선택"
+            className="text-left text-sm font-medium text-gray-600">
+            {fmtDateKorean(form.end) || <span className="text-red-500 font-semibold">날짜 선택 필요</span>}
+          </button>
         </div>
       </div>
+
+      {dateSheet==="start" && <DatePickerSheet value={form.start} onSelect={handleStartDateChange} onClose={()=>setDateSheet(null)}/>}
+      {dateSheet==="end" && <DatePickerSheet value={form.end} min={form.start} onSelect={handleEndDateChange} onClose={()=>setDateSheet(null)}/>}
+
+      {/* 시작/종료 시간 — 즐겨찾기 원터치 버튼 + 시/분 숫자입력 + 오전/오후 토글 */}
+      {!form.allDay && (
+        <div className="px-4 pb-3 flex flex-col gap-2 border-t border-gray-100 pt-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold text-gray-400 shrink-0">시작 시간</span>
+            <TimeField value={form.startTime} onChange={handleStartTimeChange} ariaLabel="시작 시간"/>
+          </div>
+          <FavoriteTimeRow userId={userId} value={form.startTime} onPick={handleStartTimeChange}/>
+        </div>
+      )}
+      {!form.allDay && (
+        <div className="px-4 pb-3 flex items-center justify-between gap-2">
+          <span className="text-xs font-bold text-gray-400 shrink-0">종료 시간</span>
+          <TimeField value={form.endTime} onChange={handleEndTimeChange} ariaLabel="종료 시간"/>
+        </div>
+      )}
 
       {/* 빠른 종료 시간 버튼 — 위 종료 시간 입력의 보조 수단 */}
       {!form.allDay && (
@@ -2369,7 +2494,7 @@ export function EventModal() {
         </div>
 
         {/* 날짜 & 시간 — 네이버 앱 스타일 */}
-        <DateTimePicker form={form} set={set} errs={errs} lockRepeat={scope==="instance"}/>
+        <DateTimePicker form={form} set={set} errs={errs} lockRepeat={scope==="instance"} userId={currentUser.id || currentUser.uid}/>
 
         {/* 주소 */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-100">
