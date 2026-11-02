@@ -417,36 +417,25 @@ export function useSwipe({ onUp, onDown, onLeft, onRight,
   const sx    = useRef(null);
   const sy    = useRef(null);
   const fired = useRef(false);
-  // 손가락을 댄 순간 안쪽 목록이 맨 위가 아니었으면, 아래로 끄는 건 목록 스크롤이지 화면 전환이 아니다
-  const scrolledDown = useRef(false);
-  // 마찬가지로, 안쪽 목록이 아직 끝까지 안 내려간(= 더 내려볼 내용이 남은) 상태였으면,
-  // 위로 끄는 것도 목록을 더 내려보려는 스크롤이지 화면 전환이 아니다(2026-11-02 피드백 —
-  // 반반 화면에서 일간 목록을 살짝만 위로 밀어도 바로 전체화면으로 넘어가버리던 문제).
-  const atBottom = useRef(true);
+  // 세로 스와이프(화면 전환)는 고정 픽셀이 아니라 "지금 손을 올린 영역 높이의 절반"을
+  // 넘어야 발동한다 — 달력(도트그리드) 쪽에서 내리면 그 영역 절반, 일정 목록 쪽에서
+  // 올리면 그 영역 절반을 넘어야 전환되고, 그 전까지는 안쪽 목록이 그냥 스크롤된다
+  // (2026-11-02 요청: 살짝 민 걸로 화면이 바뀌지 않게, 충분히 길게 밀 때만).
+  const dynVThreshold = useRef(vThreshold);
+  const measure = e => { dynVThreshold.current = Math.max(vThreshold, e.currentTarget.clientHeight / 2); };
 
   const judge = (dx, dy) => {
     if (fired.current) return;
     const adx = Math.abs(dx), ady = Math.abs(dy);
-    if (adx < hThreshold && ady < vThreshold) return;
+    const vT = dynVThreshold.current;
+    if (adx < hThreshold && ady < vT) return;
     const angle = Math.atan2(ady, adx) * 180 / Math.PI;
     if (angle < 40 && adx >= hThreshold) {
       fired.current = true;
       if (dx > 0) onRight?.(); else onLeft?.();
-    } else if (angle > 50 && ady >= vThreshold) {
+    } else if (angle > 50 && ady >= vT) {
       fired.current = true;
-      if (dy > 0) { if (!scrolledDown.current) onDown?.(); }
-      else { if (atBottom.current) onUp?.(); }
-    }
-  };
-
-  // 시작 지점에서 조상 쪽으로 올라가며 안쪽 목록의 스크롤 상태를 읽는다 — 터치든
-  // 마우스 드래그든(데스크톱) 똑같이 적용해야 하므로 공용 함수로 뺐다.
-  const readScrollState = (target, boundary) => {
-    scrolledDown.current = false;
-    atBottom.current = true;
-    for (let el = target; el && el !== boundary; el = el.parentNode) {
-      if (el.scrollTop > 0) scrolledDown.current = true;
-      if (el.scrollHeight - el.scrollTop - el.clientHeight > 1) atBottom.current = false;
+      if (dy > 0) onDown?.(); else onUp?.();
     }
   };
 
@@ -455,7 +444,7 @@ export function useSwipe({ onUp, onDown, onLeft, onRight,
       sx.current    = e.touches[0].clientX;
       sy.current    = e.touches[0].clientY;
       fired.current = false;
-      readScrollState(e.target, e.currentTarget.parentNode);
+      measure(e);
     },
     onTouchMove: e => {
       if (sx.current === null || fired.current) return;
@@ -475,7 +464,7 @@ export function useSwipe({ onUp, onDown, onLeft, onRight,
     },
     onMouseDown: e => {
       sx.current = e.clientX; sy.current = e.clientY; fired.current = false;
-      readScrollState(e.target, e.currentTarget.parentNode);
+      measure(e);
       const handleMouseMove = ev => {
         if (sx.current === null || fired.current) return;
         judge(ev.clientX - sx.current, ev.clientY - sy.current);
