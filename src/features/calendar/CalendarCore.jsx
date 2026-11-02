@@ -1834,46 +1834,22 @@ function FavoriteTimeRow({ userId, value, onPick }) {
   );
 }
 
-// 시/분 숫자 입력 + 오전/오후 탭 토글. 네이티브 select/time input이 아니라 전부 직접 그린
-// 버튼·텍스트 입력이라 iOS Safari/Android Chrome에서 똑같이 보인다.
-function TimeField({ value, onChange, ariaLabel }) {
-  const [h24, mi] = (value||"09:00").split(":").map(Number);
-  const isPM = h24>=12;
-  const h12 = h24%12===0 ? 12 : h24%12;
-
-  const commit = (h12v, miv, pm) => {
-    let hh = h12v % 12;
-    if (pm) hh += 12;
-    onChange(`${String(hh).padStart(2,"0")}:${String(miv).padStart(2,"0")}`);
-  };
-  const onHourInput = e => {
-    const raw = e.target.value.replace(/\D/g,"");
-    if (raw==="") return;
-    commit(Math.min(12, Math.max(1, parseInt(raw,10))), mi, isPM);
-  };
-  const onMinInput = e => {
-    const raw = e.target.value.replace(/\D/g,"");
-    if (raw==="") return;
-    commit(h12, Math.min(59, Math.max(0, parseInt(raw,10))), isPM);
-  };
-  const selectAll = e => e.target.select();
-
+// 시간 입력 — 시/분 분리 숫자입력 + 오전오후 토글로 만들었다가(최초 PR), 모바일에서
+// 두 자리 숫자를 입력하는 중간에 매 키 입력마다 값이 확정·재계산(종료시간 자동이동 등)되면서
+// 커서/선택 상태가 틀어져 "수정이 안 된다"는 실사용 피드백(2026-11-02)을 받고 되돌렸다.
+// 다시 기기 네이티브 <input type="time">을 쓴다 — 아이폰에서는 OS 기본 휠 피커가 뜬다.
+function NativeTimeField({ value, onChange, ariaLabel }) {
+  const ref = useRef(null);
+  const openPicker = () => { try { ref.current?.showPicker?.(); } catch { /* 미지원 브라우저는 기본 동작에 맡김 */ } };
   return (
-    <div className="flex items-center gap-1.5">
-      <div className="flex rounded-lg overflow-hidden border border-gray-200 text-[11px] font-bold shrink-0">
-        <button type="button" onClick={()=>commit(h12,mi,false)} className={`px-2 py-2 ${!isPM?"bg-blue-600 text-white":"bg-white text-gray-400"}`}>오전</button>
-        <button type="button" onClick={()=>commit(h12,mi,true)} className={`px-2 py-2 ${isPM?"bg-blue-600 text-white":"bg-white text-gray-400"}`}>오후</button>
-      </div>
-      <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2}
-        aria-label={`${ariaLabel} 시`} value={String(h12)}
-        onFocus={selectAll} onChange={onHourInput}
-        className="w-10 text-center py-1.5 rounded-lg bg-gray-50 border border-gray-200 text-lg font-bold text-gray-900"/>
-      <span className="text-gray-400 font-bold">:</span>
-      <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2}
-        aria-label={`${ariaLabel} 분`} value={String(mi).padStart(2,"0")}
-        onFocus={selectAll} onChange={onMinInput}
-        className="w-10 text-center py-1.5 rounded-lg bg-gray-50 border border-gray-200 text-lg font-bold text-gray-900"/>
-    </div>
+    <label onClick={openPicker} className="relative block cursor-pointer select-none text-lg font-bold text-gray-900">
+      {fmtTime(value) || "--:--"}
+      <input ref={ref} type="time" value={value||""} step={1800}
+        aria-label={ariaLabel}
+        onChange={e=>onChange(e.target.value)}
+        onClick={e=>{ e.stopPropagation(); openPicker(); }}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
+    </label>
   );
 }
 
@@ -1993,7 +1969,7 @@ export function DateTimePicker({ form, set, errs, lockRepeat, userId }) {
         <div className="px-4 pb-3 flex flex-col gap-2 border-t border-gray-100 pt-3">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-bold text-gray-400 shrink-0">시작 시간</span>
-            <TimeField value={form.startTime} onChange={handleStartTimeChange} ariaLabel="시작 시간"/>
+            <NativeTimeField value={form.startTime} onChange={handleStartTimeChange} ariaLabel="시작 시간"/>
           </div>
           <FavoriteTimeRow userId={userId} value={form.startTime} onPick={handleStartTimeChange}/>
         </div>
@@ -2001,7 +1977,7 @@ export function DateTimePicker({ form, set, errs, lockRepeat, userId }) {
       {!form.allDay && (
         <div className="px-4 pb-3 flex items-center justify-between gap-2">
           <span className="text-xs font-bold text-gray-400 shrink-0">종료 시간</span>
-          <TimeField value={form.endTime} onChange={handleEndTimeChange} ariaLabel="종료 시간"/>
+          <NativeTimeField value={form.endTime} onChange={handleEndTimeChange} ariaLabel="종료 시간"/>
         </div>
       )}
 
