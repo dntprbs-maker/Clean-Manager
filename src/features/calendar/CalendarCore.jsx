@@ -2010,13 +2010,25 @@ export function DateTimePicker({ form, set, errs, lockRepeat, userId }) {
             )}
             <div className="flex items-center justify-between px-4 py-2 pb-6 border-t border-gray-100">
               <button onClick={()=>{
-                const t = new Date();
-                const y=t.getFullYear(), mo=t.getMonth()+1, d=t.getDate();
-                ps.current = {...ps.current, year:y, month:mo, day:d};
-                setPYear(y); setPMonth(mo); setPDay(d);
-                applyToForm(y, mo, d, ps.current.h24, ps.current.min);
+                // 시작 피커: 날짜뿐 아니라 시간도 지금 시각으로(분은 휠 단위인 5분으로 반올림).
+                // 종료 피커: "오늘"이 아니라 "시작과 같게" — 종료만 따로 오늘로 맞출 일은 없고,
+                // 시작을 기준으로 다시 잡는 게 자연스럽다(2026-11-02 요청).
+                let y, mo, d, h24, min;
+                if (activePicker === "start") {
+                  const t = new Date();
+                  y = t.getFullYear(); mo = t.getMonth()+1; d = t.getDate();
+                  h24 = t.getHours(); min = Math.round(t.getMinutes()/5)*5 % 60;
+                } else {
+                  const sd = pd(form.start) || new Date();
+                  const [sh, sm] = (form.startTime||"09:00").split(":").map(Number);
+                  y = sd.getFullYear(); mo = sd.getMonth()+1; d = sd.getDate();
+                  h24 = sh; min = sm;
+                }
+                ps.current = { year:y, month:mo, day:d, h24, min };
+                setPYear(y); setPMonth(mo); setPDay(d); setPH24(h24); setPMin(min);
+                applyToForm(y, mo, d, h24, min);
               }} className="px-4 py-1.5 rounded-full text-sm font-bold bg-gray-100 text-gray-600">
-                오늘
+                {activePicker === "start" ? "오늘" : "시작과 동일"}
               </button>
               <button onClick={()=>setActivePicker(null)}
                 className="px-6 py-1.5 rounded-full text-sm font-bold text-white"
