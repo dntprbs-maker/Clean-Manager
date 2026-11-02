@@ -1742,7 +1742,51 @@ const saveLastInputMode = mode => { try { localStorage.setItem(LAST_INPUT_MODE_K
 // 피드백을 받고(2026-11-02), 그 전까지 오래 썼던 5열(연/월/일/시/분) 드럼롤 방식("네이버 앱
 // 스타일")으로 되돌렸다. WheelPicker는 반복종료일 선택(RepeatUntilPicker)과 공용으로 쓰던
 // 컴포넌트를 그대로 재사용한다. 저장 형식(YYYY-MM-DD, HH:MM)은 그대로라 기존 데이터와 호환된다.
-export function DateTimePicker({ form, set, errs, lockRepeat }) {
+// 즐겨찾기 시작시간 — 사용자(기기)별로 로컬에 저장. extraCalFilter_* 와 동일한 패턴
+// (계정·기기별, 서버에 안 올라가서 다른 사람 화면엔 영향 없음). 기본값은 자주 쓰는 시간.
+const FAV_TIMES_PREFIX = "favTimes_";
+const DEFAULT_FAV_TIMES = ["09:00","10:00","14:00","15:00"];
+const loadFavTimes = uid => { try { const v=JSON.parse(localStorage.getItem(FAV_TIMES_PREFIX+uid)); return Array.isArray(v)&&v.length ? v : DEFAULT_FAV_TIMES; } catch { return DEFAULT_FAV_TIMES; } };
+const saveFavTimes = (uid,list) => { try { localStorage.setItem(FAV_TIMES_PREFIX+uid, JSON.stringify(list)); } catch { /* 저장 실패해도 기능엔 지장 없음 */ } };
+
+function FavoriteTimeRow({ userId, value, onPick }) {
+  const [favs, setFavs] = useState(() => loadFavTimes(userId));
+  const [editing, setEditing] = useState(false);
+
+  const addCurrent = () => {
+    if (favs.includes(value)) return;
+    const next = [...favs, value].sort();
+    setFavs(next); saveFavTimes(userId, next);
+  };
+  const removeFav = t => {
+    const next = favs.filter(f=>f!==t);
+    setFavs(next); saveFavTimes(userId, next);
+    if (next.length===0) setEditing(false);
+  };
+
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {favs.map(t => (
+        <button key={t} type="button" onClick={()=> editing ? removeFav(t) : onPick(t)}
+          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-bold
+            ${editing ? "bg-red-50 text-red-500" : value===t ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>
+          {fmtTime(t)}{editing && <X size={11}/>}
+        </button>
+      ))}
+      <button type="button" onClick={addCurrent} aria-label="현재 시간을 즐겨찾기에 추가"
+        className="flex items-center justify-center w-7 h-7 rounded-full bg-gray-50 text-blue-500 border border-dashed border-blue-200">
+        <Plus size={13}/>
+      </button>
+      {favs.length>0 && (
+        <button type="button" onClick={()=>setEditing(e=>!e)} className="px-1.5 py-1 text-xs font-bold text-gray-400">
+          {editing ? "완료" : "편집"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function DateTimePicker({ form, set, errs, lockRepeat, userId }) {
   const [activePicker, setActivePicker] = useState(null); // null | "start" | "end"
   const [repeatOpen, setRepeatOpen] = useState(false);
 
@@ -1850,6 +1894,20 @@ export function DateTimePicker({ form, set, errs, lockRepeat }) {
   const chDay = (v, delta=0) => { const b = baseDate(); b.setDate(b.getDate() + delta); reSync(b); };
   const chH24 = (v, delta=0) => { const b = baseDate(); b.setHours(b.getHours() + delta); reSync(b); };
   const chMin = (v, delta=0) => { const b = baseDate(); b.setMinutes(b.getMinutes() + delta*5); reSync(b); };
+  // 즐겨찾기 시작시간 — 지금 고르고 있는 날짜는 그대로 두고 시/분만 그 값으로 바꾼다.
+  const pickFavoriteTime = timeStr => {
+    const [hh, mm] = timeStr.split(":").map(Number);
+    const b = baseDate();
+    b.setHours(hh, mm, 0, 0);
+    reSync(b);
+  };
+  // 종료시간 +N분 — "현재 종료시간" 기준으로만 더한다(시작시간과는 무관).
+  // activePicker==="end"일 때만 노출되므로 applyToForm의 종료 분기(그대로 set)를 탄다.
+  const bumpTime = minutes => {
+    const b = baseDate();
+    b.setMinutes(b.getMinutes() + minutes);
+    reSync(b);
+  };
 
   const daysInMonth = new Date(pYear, pMonth, 0).getDate();
   const years   = Array.from({length:8}, (_,i) => 2023+i);
@@ -1928,6 +1986,23 @@ export function DateTimePicker({ form, set, errs, lockRepeat }) {
               <WheelPicker key="m"   items={mins}    value={pMin} onChange={chMin} renderItem={v=>String(v).padStart(2,"0")} loop/>
             </>}
           </div>
+          {/* 시작시간 편집 중: 즐겨찾기 시간 원터치 버튼 */}
+          {!form.allDay && activePicker==="start" && (
+            <div className="px-4 pt-2 pb-1 border-t border-gray-100">
+              <FavoriteTimeRow userId={userId} value={`${String(pH24).padStart(2,"0")}:${String(pMin).padStart(2,"0")}`} onPick={pickFavoriteTime}/>
+            </div>
+          )}
+          {/* 종료시간 편집 중: 지금 종료시간 기준으로 N분 더하기 */}
+          {!form.allDay && activePicker==="end" && (
+            <div className="flex gap-1.5 px-4 pt-2 pb-1 flex-wrap border-t border-gray-100">
+              {[{m:10,l:"+10분"},{m:30,l:"+30분"},{m:60,l:"+1시간"}].map(q => (
+                <button key={q.m} type="button" onClick={()=>bumpTime(q.m)}
+                  className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-gray-100 text-gray-600 hover:bg-gray-200">
+                  {q.l}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex items-center justify-between px-4 py-2 border-t border-gray-100">
             <button onClick={()=>{
               const t = new Date();
@@ -2420,7 +2495,7 @@ export function EventModal() {
         </div>
 
         {/* 날짜 & 시간 — 네이버 앱 스타일 */}
-        <DateTimePicker form={form} set={set} errs={errs} lockRepeat={scope==="instance"}/>
+        <DateTimePicker form={form} set={set} errs={errs} lockRepeat={scope==="instance"} userId={currentUser.id || currentUser.uid}/>
 
         {/* 주소 */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-100">
