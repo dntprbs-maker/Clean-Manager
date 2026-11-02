@@ -413,21 +413,32 @@ export function ScheduleList({ selDate, compact=false }) {
 //   수직각도 > 55도 → 상하로 판정
 //   → 대각선 스와이프에서 좌우/상하 혼용 완전 차단
 export function useSwipe({ onUp, onDown, onLeft, onRight,
-                    hThreshold=30, vThreshold=30 }) {
+                    hThreshold=30, vThreshold=30, downThreshold=null }) {
   const sx    = useRef(null);
   const sy    = useRef(null);
   const fired = useRef(false);
-  // 세로 스와이프(화면 전환)는 고정 픽셀이 아니라 "지금 손을 올린 영역 높이의 절반"을
-  // 넘어야 발동한다 — 달력(도트그리드) 쪽에서 내리면 그 영역 절반, 일정 목록 쪽에서
-  // 올리면 그 영역 절반을 넘어야 전환되고, 그 전까지는 안쪽 목록이 그냥 스크롤된다
-  // (2026-11-02 요청: 살짝 민 걸로 화면이 바뀌지 않게, 충분히 길게 밀 때만).
+  // 위로(화면을 더 펼치는 쪽)는 "지금 손을 올린 영역 높이의 절반"을 넘어야 발동—
+  // 안쪽 목록을 읽으려고 스크롤하다가 실수로 전체화면까지 안 넘어가게. 아래로(접는
+  // 쪽, 되돌아가는 동작)는 안쪽 목록이 이미 맨 위(scrollTop 0)일 때만 반응하고,
+  // 그 상태에서 더 끌어내릴 때는 절반이 아니라 짧은 고정값(downThreshold)만 넘으면
+  // 된다 — 일정 목록이 거의 풀스크린이면 절반은 너무 길어서 되돌아오기 힘들었고,
+  // 맨 위가 아닌데 끌어내리면(= 목록을 더 올려보려는 스크롤) 화면이 안 바뀌어야
+  // 자연스럽다(2026-11-02 피드백 — 일정 카드 위에서 시작했는지는 따지지 않는다).
   const dynVThreshold = useRef(vThreshold);
-  const measure = e => { dynVThreshold.current = Math.max(vThreshold, e.currentTarget.clientHeight / 2); };
+  const atTop = useRef(true);
+  const measure = e => {
+    dynVThreshold.current = Math.max(vThreshold, e.currentTarget.clientHeight / 2);
+    atTop.current = true;
+    for (let el = e.target; el && el !== e.currentTarget.parentNode; el = el.parentNode) {
+      if (el.scrollTop > 0) { atTop.current = false; break; }
+    }
+  };
 
   const judge = (dx, dy) => {
     if (fired.current) return;
+    if (dy > 0 && downThreshold != null && !atTop.current) return; // 맨 위가 아니면 아래로 끌어도 전환 안 함
     const adx = Math.abs(dx), ady = Math.abs(dy);
-    const vT = dynVThreshold.current;
+    const vT = dy > 0 && downThreshold != null ? downThreshold : dynVThreshold.current;
     if (adx < hThreshold && ady < vT) return;
     const angle = Math.atan2(ady, adx) * 180 / Math.PI;
     if (angle < 40 && adx >= hThreshold) {
@@ -711,6 +722,9 @@ export function CalendarView() {
   const gridSwipe = drawer ? {} : gridSwipeActive;
 
   // ── 시간표용 스와이프 (드로어 열려있으면 빈 객체)
+  // downThreshold: 목록이 맨 위(scrollTop 0)일 때만, 적당히 긴 거리(90px)를 끌어내리면
+  // 반반화면으로 접힌다 — 맨 위가 아니면(더 위로 스크롤해볼 내용이 있으면) 아무리 길게
+  // 끌어내려도 전환 안 되고 그냥 목록만 스크롤된다(2026-11-02 요청).
   const listSwipeActive = useSwipe({
     onLeft:  goNextDay,
     onRight: goPrevDay,
@@ -718,6 +732,7 @@ export function CalendarView() {
     onDown:  () => setSheetMode(m => m > 0 ? m - 1 : m),
     hThreshold: 30,
     vThreshold: 30,
+    downThreshold: 90,
   });
   const listSwipe = drawer ? {} : listSwipeActive;
 
