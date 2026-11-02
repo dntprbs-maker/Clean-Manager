@@ -1778,49 +1778,37 @@ export function DateTimePicker({ form, set, errs, lockRepeat }) {
     return `${yy}. ${d.getMonth()+1}. ${d.getDate()}.(${WD[d.getDay()]})`;
   };
 
-  // 시작 날짜/시간을 바꾸면 기존 시작~종료 간격(일·분)을 유지한 채로 종료도 같이 옮긴다.
-  // 종료를 직접(피커로) 바꾼 적이 있으면 더는 자동으로 안 따라가고, 종료가 시작보다
-  // 앞서지만 않게 최소한으로만 보정한다. 모달을 새로 열 때마다 리셋된다.
-  const endTouchedRef = useRef(false);
-
+  // 시작 날짜/시간을 바꾸면 "지금" 시작~종료 간격(일·분)을 그대로 유지한 채 종료도 같이
+  // 옮긴다 — 종료를 직접 바꾼 적이 있어도 그 뒤로는 그 새 간격 기준으로 계속 따라간다.
+  // ("한 번 손대면 다시는 안 따라간다"로 했다가, 종료를 한 번 조정한 뒤 시작을 옮기면
+  // 종료가 안 따라와 시작보다 앞서 저장이 막히는 문제가 있어 되돌림 — 2026-11-02 피드백)
   const applyToForm = (y, mo, d, h24, m) => {
     if (!activePicker) return;
     const safeDay = Math.min(d, new Date(y, mo, 0).getDate());
     const dateStr = `${y}-${String(mo).padStart(2,"0")}-${String(safeDay).padStart(2,"0")}`;
     const timeStr = `${String(h24).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
     if (activePicker === "start") {
-      if (endTouchedRef.current) {
-        set("start", dateStr);
-        if (dateStr > form.end) set("end", dateStr);
-      } else {
-        const spanDays = diff(form.start, form.end); // 0 이상 — validate()가 end<start를 막아둠
-        set("start", dateStr);
-        set("end", spanDays > 0 ? add(dateStr, spanDays) : dateStr);
-      }
+      set("start", dateStr);
+      if (dateStr > form.end) set("end", dateStr);
       if (!form.allDay) {
-        if (endTouchedRef.current) {
-          set("startTime", timeStr);
-        } else {
-          // 기존 시간차(분)를 유지하면서 종료 시간도 같이 조정
-          const [oldSH, oldSM] = (form.startTime||"09:00").split(":").map(Number);
-          const [oldEH, oldEM] = (form.endTime||"10:00").split(":").map(Number);
-          const diffMin = (oldEH*60+oldEM) - (oldSH*60+oldSM);
-          const newStartMin = h24*60 + m;
-          const totalEndMin = newStartMin + (diffMin > 0 ? diffMin : 60);
-          const dayOverflow = Math.floor(totalEndMin / (24*60));
-          const newEndMin = totalEndMin % (24*60);
-          const endTimeStr = `${String(Math.floor(newEndMin/60)).padStart(2,"0")}:${String(newEndMin%60).padStart(2,"0")}`;
-          set("startTime", timeStr);
-          set("endTime", endTimeStr);
-          if (dayOverflow > 0) {
-            const endDate = pd(dateStr);
-            endDate.setDate(endDate.getDate() + dayOverflow);
-            set("end", fmt(endDate));
-          }
+        // 기존 시간차(분)를 유지하면서 종료 시간도 같이 조정
+        const [oldSH, oldSM] = (form.startTime||"09:00").split(":").map(Number);
+        const [oldEH, oldEM] = (form.endTime||"10:00").split(":").map(Number);
+        const diffMin = (oldEH*60+oldEM) - (oldSH*60+oldSM);
+        const newStartMin = h24*60 + m;
+        const totalEndMin = newStartMin + (diffMin > 0 ? diffMin : 60);
+        const dayOverflow = Math.floor(totalEndMin / (24*60));
+        const newEndMin = totalEndMin % (24*60);
+        const endTimeStr = `${String(Math.floor(newEndMin/60)).padStart(2,"0")}:${String(newEndMin%60).padStart(2,"0")}`;
+        set("startTime", timeStr);
+        set("endTime", endTimeStr);
+        if (dayOverflow > 0) {
+          const endDate = pd(dateStr);
+          endDate.setDate(endDate.getDate() + dayOverflow);
+          set("end", fmt(endDate));
         }
       }
     } else {
-      endTouchedRef.current = true;
       set("end", dateStr < form.start ? form.start : dateStr);
       if (!form.allDay) set("endTime", timeStr);
     }

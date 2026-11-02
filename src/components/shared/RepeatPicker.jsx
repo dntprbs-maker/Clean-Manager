@@ -104,8 +104,12 @@ export function WheelPicker({ items, value, onChange, renderItem, loop=false }) 
         <div style={{ height: ITEM_H * 2 }} />
         {rendered.map((item, i) => {
           const sel = i === centerRow;
+          // 숫자를 직접 탭해도 그 값으로 부드럽게 스크롤 — 실제 스크롤 이동은 위
+          // handleScroll의 settle 로직이 그대로 감지해 onChange까지 처리한다(로직 중복 없음).
+          const vIdx = loop ? ((i - centerOffset) % L + L) % L : i;
           return (
-            <div key={i} style={{ height: ITEM_H, scrollSnapAlign: "center",
+            <div key={i} onClick={()=>ref.current?.scrollTo({top: posFor(vIdx), behavior:"smooth"})}
+              style={{ height: ITEM_H, scrollSnapAlign: "center", cursor: "pointer",
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: sel ? 17 : 15, fontWeight: sel ? 700 : 400,
               color: sel ? "#111827" : "#9ca3af", whiteSpace: "nowrap" }}>
