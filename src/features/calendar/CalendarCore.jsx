@@ -1973,51 +1973,57 @@ export function DateTimePicker({ form, set, errs, lockRepeat, userId }) {
       {errs.end  && <p className="text-red-500 text-xs px-4 pb-2">{errs.end}</p>}
       {errs.time && <p className="text-red-500 text-xs px-4 pb-2">{errs.time}</p>}
 
-      {/* 날짜/시간 팝업 — 버튼 바로 아래 인라인 드럼롤 */}
+      {/* 날짜/시간 팝업 — 바텀시트로 띄워서 뒤 화면(폼의 나머지 입력칸)이 스크롤되거나
+          탭되지 않게 막는다. 전에는 버튼 바로 아래 인라인으로 펼쳤는데, 그러면 휠을
+          조작하다 실수로 뒤의 폼이 스크롤되거나 다른 입력칸이 눌릴 수 있었다(2026-11-02 피드백).
+          다른 바텀시트(DatePickerSheet 등)와 같은 스타일을 맞춰 썼다. */}
       {activePicker && (
-        <div className="border-t border-gray-100 bg-white">
-          <div className="flex px-1" style={{height:220}}>
-            <WheelPicker key="y"  items={years}  value={pYear}  onChange={chYear}  renderItem={v=>String(v)}/>
-            <WheelPicker key="mo" items={months} value={pMonth} onChange={chMonth} renderItem={v=>`${v}월`} loop/>
-            <WheelPicker key={`${pYear}-${pMonth}-d`} items={days} value={pDay} onChange={chDay}
-              renderItem={v=>`${v}일`} loop/>
-            {!form.allDay && <>
-              <WheelPicker key="h24" items={hours24} value={pH24} onChange={chH24} renderItem={fmtH24} loop/>
-              <WheelPicker key="m"   items={mins}    value={pMin} onChange={chMin} renderItem={v=>String(v).padStart(2,"0")} loop/>
-            </>}
-          </div>
-          {/* 시작시간 편집 중: 즐겨찾기 시간 원터치 버튼 */}
-          {!form.allDay && activePicker==="start" && (
-            <div className="px-4 pt-2 pb-1 border-t border-gray-100">
-              <FavoriteTimeRow userId={userId} value={`${String(pH24).padStart(2,"0")}:${String(pMin).padStart(2,"0")}`} onPick={pickFavoriteTime}/>
+        <div className="fixed inset-0 z-[90] flex items-end justify-center" onClick={()=>setActivePicker(null)}>
+          <div className="absolute inset-0 bg-black/40"/>
+          <div className="relative bg-white w-full max-w-md rounded-t-3xl shadow-2xl" onClick={e=>e.stopPropagation()}>
+            <div className="flex px-1" style={{height:220}}>
+              <WheelPicker key="y"  items={years}  value={pYear}  onChange={chYear}  renderItem={v=>String(v)}/>
+              <WheelPicker key="mo" items={months} value={pMonth} onChange={chMonth} renderItem={v=>`${v}월`} loop/>
+              <WheelPicker key={`${pYear}-${pMonth}-d`} items={days} value={pDay} onChange={chDay}
+                renderItem={v=>`${v}일`} loop/>
+              {!form.allDay && <>
+                <WheelPicker key="h24" items={hours24} value={pH24} onChange={chH24} renderItem={fmtH24} loop/>
+                <WheelPicker key="m"   items={mins}    value={pMin} onChange={chMin} renderItem={v=>String(v).padStart(2,"0")} loop/>
+              </>}
             </div>
-          )}
-          {/* 종료시간 편집 중: 지금 종료시간 기준으로 N분 더하기 */}
-          {!form.allDay && activePicker==="end" && (
-            <div className="flex gap-1.5 px-4 pt-2 pb-1 flex-wrap border-t border-gray-100">
-              {[{m:10,l:"+10분"},{m:30,l:"+30분"},{m:60,l:"+1시간"}].map(q => (
-                <button key={q.m} type="button" onClick={()=>bumpTime(q.m)}
-                  className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-gray-100 text-gray-600 hover:bg-gray-200">
-                  {q.l}
-                </button>
-              ))}
+            {/* 시작시간 편집 중: 즐겨찾기 시간 원터치 버튼 */}
+            {!form.allDay && activePicker==="start" && (
+              <div className="px-4 pt-2 pb-1 border-t border-gray-100">
+                <FavoriteTimeRow userId={userId} value={`${String(pH24).padStart(2,"0")}:${String(pMin).padStart(2,"0")}`} onPick={pickFavoriteTime}/>
+              </div>
+            )}
+            {/* 종료시간 편집 중: 지금 종료시간 기준으로 N분 더하기 */}
+            {!form.allDay && activePicker==="end" && (
+              <div className="flex gap-1.5 px-4 pt-2 pb-1 flex-wrap border-t border-gray-100">
+                {[{m:10,l:"+10분"},{m:30,l:"+30분"},{m:60,l:"+1시간"}].map(q => (
+                  <button key={q.m} type="button" onClick={()=>bumpTime(q.m)}
+                    className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-gray-100 text-gray-600 hover:bg-gray-200">
+                    {q.l}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center justify-between px-4 py-2 pb-6 border-t border-gray-100">
+              <button onClick={()=>{
+                const t = new Date();
+                const y=t.getFullYear(), mo=t.getMonth()+1, d=t.getDate();
+                ps.current = {...ps.current, year:y, month:mo, day:d};
+                setPYear(y); setPMonth(mo); setPDay(d);
+                applyToForm(y, mo, d, ps.current.h24, ps.current.min);
+              }} className="px-4 py-1.5 rounded-full text-sm font-bold bg-gray-100 text-gray-600">
+                오늘
+              </button>
+              <button onClick={()=>setActivePicker(null)}
+                className="px-6 py-1.5 rounded-full text-sm font-bold text-white"
+                style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
+                확인
+              </button>
             </div>
-          )}
-          <div className="flex items-center justify-between px-4 py-2 border-t border-gray-100">
-            <button onClick={()=>{
-              const t = new Date();
-              const y=t.getFullYear(), mo=t.getMonth()+1, d=t.getDate();
-              ps.current = {...ps.current, year:y, month:mo, day:d};
-              setPYear(y); setPMonth(mo); setPDay(d);
-              applyToForm(y, mo, d, ps.current.h24, ps.current.min);
-            }} className="px-4 py-1.5 rounded-full text-sm font-bold bg-gray-100 text-gray-600">
-              오늘
-            </button>
-            <button onClick={()=>setActivePicker(null)}
-              className="px-6 py-1.5 rounded-full text-sm font-bold text-white"
-              style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
-              확인
-            </button>
           </div>
         </div>
       )}
