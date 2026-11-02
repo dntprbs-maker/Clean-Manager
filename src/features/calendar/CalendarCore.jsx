@@ -413,25 +413,40 @@ export function ScheduleList({ selDate, compact=false }) {
 //   수직각도 > 55도 → 상하로 판정
 //   → 대각선 스와이프에서 좌우/상하 혼용 완전 차단
 export function useSwipe({ onUp, onDown, onLeft, onRight,
-                    hThreshold=30, vThreshold=30 }) {
+                    hThreshold=30, vThreshold=30, downThreshold=null }) {
   const sx    = useRef(null);
   const sy    = useRef(null);
   const fired = useRef(false);
-  // 손가락을 댄 순간 안쪽 목록이 맨 위가 아니었으면, 아래로 끄는 건 목록 스크롤이지 화면 전환이 아니다
-  const scrolledDown = useRef(false);
+  // 위로(화면을 더 펼치는 쪽)는 "지금 손을 올린 영역 높이의 절반"을 넘어야 발동—
+  // 안쪽 목록을 읽으려고 스크롤하다가 실수로 전체화면까지 안 넘어가게. 아래로(접는
+  // 쪽, 되돌아가는 동작)는 안쪽 목록이 이미 맨 위(scrollTop 0)일 때만 반응하고,
+  // 그 상태에서 더 끌어내릴 때는 절반이 아니라 짧은 고정값(downThreshold)만 넘으면
+  // 된다 — 일정 목록이 거의 풀스크린이면 절반은 너무 길어서 되돌아오기 힘들었고,
+  // 맨 위가 아닌데 끌어내리면(= 목록을 더 올려보려는 스크롤) 화면이 안 바뀌어야
+  // 자연스럽다(2026-11-02 피드백 — 일정 카드 위에서 시작했는지는 따지지 않는다).
+  const dynVThreshold = useRef(vThreshold);
+  const atTop = useRef(true);
+  const measure = e => {
+    dynVThreshold.current = Math.max(vThreshold, e.currentTarget.clientHeight / 2);
+    atTop.current = true;
+    for (let el = e.target; el && el !== e.currentTarget.parentNode; el = el.parentNode) {
+      if (el.scrollTop > 0) { atTop.current = false; break; }
+    }
+  };
 
   const judge = (dx, dy) => {
     if (fired.current) return;
+    if (dy > 0 && downThreshold != null && !atTop.current) return; // 맨 위가 아니면 아래로 끌어도 전환 안 함
     const adx = Math.abs(dx), ady = Math.abs(dy);
-    if (adx < hThreshold && ady < vThreshold) return;
+    const vT = dy > 0 && downThreshold != null ? downThreshold : dynVThreshold.current;
+    if (adx < hThreshold && ady < vT) return;
     const angle = Math.atan2(ady, adx) * 180 / Math.PI;
     if (angle < 40 && adx >= hThreshold) {
       fired.current = true;
       if (dx > 0) onRight?.(); else onLeft?.();
-    } else if (angle > 50 && ady >= vThreshold) {
+    } else if (angle > 50 && ady >= vT) {
       fired.current = true;
-      if (dy > 0) { if (!scrolledDown.current) onDown?.(); }
-      else onUp?.();
+      if (dy > 0) onDown?.(); else onUp?.();
     }
   };
 
@@ -440,10 +455,7 @@ export function useSwipe({ onUp, onDown, onLeft, onRight,
       sx.current    = e.touches[0].clientX;
       sy.current    = e.touches[0].clientY;
       fired.current = false;
-      scrolledDown.current = false;
-      for (let el = e.target; el && el !== e.currentTarget.parentNode; el = el.parentNode) {
-        if (el.scrollTop > 0) { scrolledDown.current = true; break; }
-      }
+      measure(e);
     },
     onTouchMove: e => {
       if (sx.current === null || fired.current) return;
@@ -463,6 +475,7 @@ export function useSwipe({ onUp, onDown, onLeft, onRight,
     },
     onMouseDown: e => {
       sx.current = e.clientX; sy.current = e.clientY; fired.current = false;
+      measure(e);
       const handleMouseMove = ev => {
         if (sx.current === null || fired.current) return;
         judge(ev.clientX - sx.current, ev.clientY - sy.current);
@@ -709,6 +722,9 @@ export function CalendarView() {
   const gridSwipe = drawer ? {} : gridSwipeActive;
 
   // ── 시간표용 스와이프 (드로어 열려있으면 빈 객체)
+  // downThreshold: 목록이 맨 위(scrollTop 0)일 때만, 적당히 긴 거리(90px)를 끌어내리면
+  // 반반화면으로 접힌다 — 맨 위가 아니면(더 위로 스크롤해볼 내용이 있으면) 아무리 길게
+  // 끌어내려도 전환 안 되고 그냥 목록만 스크롤된다(2026-11-02 요청).
   const listSwipeActive = useSwipe({
     onLeft:  goNextDay,
     onRight: goPrevDay,
@@ -716,8 +732,128 @@ export function CalendarView() {
     onDown:  () => setSheetMode(m => m > 0 ? m - 1 : m),
     hThreshold: 30,
     vThreshold: 30,
+    downThreshold: 90,
   });
   const listSwipe = drawer ? {} : listSwipeActive;
+
+  // ── MODE 2 전용: 당겨서 반반화면으로 — 팍 바뀌는 게 아니라 손가락 따라 실시간으로
+  // 달력이 내려오는 게 보이고, 손을 놓기 전에 다시 올리면 그만큼 다시 들어가도록
+  // (2026-11-02 요청). pullY=0~도트그리드 높이. 임계값(90px) 넘겨서 놓으면 반반으로
+  // 확정, 아니면 부드럽게 원위치로 스냅백한다.
+  const [pullY, setPullY] = useState(0);
+  const [isPulling, setIsPulling] = useState(false);
+  // pull.current.y — pullY state와 별개로 "지금까지 끌어낸 거리"를 동기적으로 들고 있는
+  // 값. onMouseUp 리스너는 onMouseDown 시점 클로저로 한 번만 등록되므로, 그 안에서
+  // React state(pullY)를 직접 읽으면 드래그 중 바뀐 값이 반영 안 된 옛날 값을 보게 된다
+  // (실제로 이 버그로 커밋이 전혀 안 됐었다) — 그래서 커밋 판정은 항상 이 ref로 한다.
+  const pull = useRef({ active:false, atTop:false, sx:0, sy:0, fired:false, y:0 });
+  const gridHRef = useRef(260); // 실제 도트그리드 렌더 높이로 매 mode1 렌더마다 갱신됨
+
+  const pullStart = (clientX, clientY, target, currentTarget) => {
+    pull.current.sx = clientX; pull.current.sy = clientY; pull.current.fired = false;
+    pull.current.y = 0;
+    pull.current.atTop = true;
+    for (let el = target; el && el !== currentTarget; el = el.parentNode) {
+      if (el.scrollTop > 0) { pull.current.atTop = false; break; }
+    }
+    pull.current.active = true;
+    setIsPulling(true);
+  };
+  const pullMove = (clientX, clientY) => {
+    const st = pull.current;
+    if (!st.active || st.fired) return;
+    const dx = clientX - st.sx, dy = clientY - st.sy;
+    if (!st.atTop) return; // 맨 위가 아니면 그냥 안쪽 목록 스크롤에 맡긴다
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 30) {
+      st.fired = true; st.active = false; st.y = 0; setIsPulling(false); setPullY(0);
+      if (dx > 0) goPrevDay(); else goNextDay();
+      return;
+    }
+    const y = dy > 0 ? Math.min(dy, gridHRef.current) : 0;
+    st.y = y;
+    setPullY(y);
+  };
+  const pullEnd = () => {
+    const st = pull.current;
+    if (!st.fired && st.active && st.y > 90) setSheetMode(1);
+    st.active = false;
+    setIsPulling(false);
+    setPullY(0);
+  };
+  const pullHandlers = drawer ? {} : {
+    onTouchStart: e => pullStart(e.touches[0].clientX, e.touches[0].clientY, e.target, e.currentTarget),
+    onTouchMove:  e => pullMove(e.touches[0].clientX, e.touches[0].clientY),
+    onTouchEnd:   pullEnd,
+    onTouchCancel: pullEnd,
+    onMouseDown: e => {
+      pullStart(e.clientX, e.clientY, e.target, e.currentTarget);
+      const onMove = ev => pullMove(ev.clientX, ev.clientY);
+      const onUp = () => {
+        pullEnd();
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+  };
+
+  // 도트 그리드(요일 헤더 + 주차 + 드래그 핸들) — mode1과 mode2의 당겨보기 미리보기
+  // 양쪽에서 똑같이 쓴다.
+  const dotGridPanel = (
+    <div ref={el => { if (el) gridHRef.current = el.offsetHeight; }}
+      className="bg-white border-b border-gray-100 shrink-0 select-none" style={{touchAction:"none"}} {...gridSwipe}>
+      <div className="grid grid-cols-7 pt-0.5">
+        {WD.map((w,i) => (
+          <div key={w} className={`text-center text-[11px] font-semibold py-0.5
+            ${i===0?"text-red-500":i===6?"text-blue-500":"text-gray-500"}`}>{w}</div>
+        ))}
+      </div>
+      <SlideTransition direction={slideDir} slideKey={slideKey}>
+        {weeks.map((wk,wi) => (
+          <div key={wi} className="grid grid-cols-7">
+            {wk.map(({s,cm}) => {
+              const dots = visibleEvents
+                .filter(ev => ev.start<=s && (ev.end||ev.start)>=s)
+                .slice(0,5)
+                .map(ev => calByIdLocal(ev.calId).color);
+              return (
+                <DotCell key={s} ds={s} isCm={cm} dots={dots}
+                  onDate={d => {
+                    setSelDate(d);
+                    const nd=pd(d);
+                    setCurrent(new Date(nd.getFullYear(),nd.getMonth(),1));
+                  }}
+                  selDate={selDate}/>
+              );
+            })}
+          </div>
+        ))}
+      </SlideTransition>
+      {/* 드래그 핸들 — 상하 모드 전환 전용 터치존 */}
+      <div
+        className="flex justify-center pb-2 pt-1 cursor-pointer"
+        onTouchStart={e => { handleBar.current = e.touches[0].clientY; }}
+        onTouchEnd={e => {
+          if (handleBar.current === null) return;
+          const dy = e.changedTouches[0].clientY - handleBar.current;
+          handleBar.current = null;
+          if (dy < -30) setSheetMode(m => Math.min(m+1, 2)); // 위로 → 한단계씩
+          if (dy >  30) setSheetMode(m => Math.max(m-1, 0)); // 아래로 → 한단계씩
+        }}
+        onMouseDown={e => { handleBar.current = e.clientY; }}
+        onMouseUp={e => {
+          if (handleBar.current === null) return;
+          const dy = e.clientY - handleBar.current;
+          handleBar.current = null;
+          if (dy < -30) setSheetMode(m => Math.min(m+1, 2));
+          if (dy >  30) setSheetMode(m => Math.max(m-1, 0));
+        }}
+      >
+        <div className="w-10 h-[3px] bg-gray-300 rounded-full"/>
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -762,61 +898,7 @@ export function CalendarView() {
           key="mode1"
           style={{animation:"slideInFromBottom 0.28s cubic-bezier(0.25,0.46,0.45,0.94) both"}}
           className="flex flex-col flex-1 overflow-hidden">
-          {/* 도트 그리드 */}
-          {/* select-none: 월 이동 스와이프 + 상하 모드전환 드래그 중 텍스트 블록 지정 방지 */}
-          <div className="bg-white border-b border-gray-100 shrink-0 select-none" style={{touchAction:"none"}} {...gridSwipe}>
-            <div className="grid grid-cols-7 pt-0.5">
-              {WD.map((w,i) => (
-                <div key={w} className={`text-center text-[11px] font-semibold py-0.5
-                  ${i===0?"text-red-500":i===6?"text-blue-500":"text-gray-500"}`}>{w}</div>
-              ))}
-            </div>
-            <SlideTransition direction={slideDir} slideKey={slideKey}>
-              {weeks.map((wk,wi) => (
-                <div key={wi} className="grid grid-cols-7">
-                  {wk.map(({s,cm}) => {
-                    // 일정 하나당 점 하나 (일정 개수만큼, 최대 5개)
-                    const dots = visibleEvents
-                      .filter(ev => ev.start<=s && (ev.end||ev.start)>=s)
-                      .slice(0,5)
-                      .map(ev => calByIdLocal(ev.calId).color);
-                    return (
-                      <DotCell key={s} ds={s} isCm={cm} dots={dots}
-                        onDate={d => {
-                          setSelDate(d);
-                          const nd=pd(d);
-                          setCurrent(new Date(nd.getFullYear(),nd.getMonth(),1));
-                        }}
-                        selDate={selDate}/>
-                    );
-                  })}
-                </div>
-              ))}
-            </SlideTransition>
-            {/* 드래그 핸들 — 상하 모드 전환 전용 터치존 */}
-            <div
-              className="flex justify-center pb-2 pt-1 cursor-pointer"
-              onTouchStart={e => { handleBar.current = e.touches[0].clientY; }}
-              onTouchEnd={e => {
-                if (handleBar.current === null) return;
-                const dy = e.changedTouches[0].clientY - handleBar.current;
-                handleBar.current = null;
-                if (dy < -30) setSheetMode(m => Math.min(m+1, 2)); // 위로 → 한단계씩
-                if (dy >  30) setSheetMode(m => Math.max(m-1, 0)); // 아래로 → 한단계씩
-              }}
-              onMouseDown={e => { handleBar.current = e.clientY; }}
-              onMouseUp={e => {
-                if (handleBar.current === null) return;
-                const dy = e.clientY - handleBar.current;
-                handleBar.current = null;
-                if (dy < -30) setSheetMode(m => Math.min(m+1, 2));
-                if (dy >  30) setSheetMode(m => Math.max(m-1, 0));
-              }}
-            >
-              <div className="w-10 h-[3px] bg-gray-300 rounded-full"/>
-            </div>
-          </div>
-
+          {dotGridPanel}
           {/* 시간표 — 좌우 날짜 스와이프 (select-none: 스와이프 중 텍스트 블록 지정 방지) */}
           <div className="flex flex-col flex-1 overflow-hidden select-none" {...listSwipe}>
             <ListTransition direction={listDir} listKey={listKey}>
@@ -826,16 +908,27 @@ export function CalendarView() {
         </div>
       )}
 
-      {/* ══ MODE 2: 시간표 전용 ════════════════════════════════════ */}
+      {/* ══ MODE 2: 시간표 전용 — 맨 위에서 아래로 당기면 손가락 따라 실시간으로
+          반반화면(달력)이 드러나고, 임계값 전에 손을 떼거나 다시 밀어 올리면
+          부드럽게 원위치로 돌아간다 ═══════════════════════════════════════ */}
       {sheetMode === 2 && (
-        <div
-          // select-none: 좌우 날짜 스와이프 도중 텍스트가 블록 지정되는 것 방지
-          className="flex flex-col flex-1 overflow-hidden select-none"
-          style={{animation:"slideInFromBottom 0.28s cubic-bezier(0.25,0.46,0.45,0.94) both"}}
-          {...listSwipe}>
-          <ListTransition direction={listDir} listKey={listKey}>
-            <ScheduleList selDate={selDate}/>
-          </ListTransition>
+        <div className="relative flex-1 overflow-hidden">
+          {/* 아래 레이어: 당긴 만큼만 보이는 달력 미리보기(비인터랙티브) */}
+          <div className="absolute inset-x-0 top-0 overflow-hidden pointer-events-none" style={{height: pullY}}>
+            {dotGridPanel}
+          </div>
+          {/* 위 레이어: 지금 보이는 일정 목록 — 당기면 그만큼 아래로 밀린다 */}
+          <div
+            className="absolute inset-0 flex flex-col overflow-hidden select-none bg-white"
+            style={{
+              transform: `translateY(${pullY}px)`,
+              transition: isPulling ? "none" : "transform 0.25s cubic-bezier(0.25,0.46,0.45,0.94)",
+            }}
+            {...pullHandlers}>
+            <ListTransition direction={listDir} listKey={listKey}>
+              <ScheduleList selDate={selDate}/>
+            </ListTransition>
+          </div>
         </div>
       )}
     </div>
