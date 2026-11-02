@@ -14,7 +14,11 @@ export function WheelPicker({ items, value, onChange, renderItem, loop=false }) 
   const timer = useRef(null);
   const scrolling = useRef(false);
   const dragY = useRef(null);
+  const inputRef = useRef(null);
   const display = renderItem || (v => String(v));
+  // 선택 영역(가운데 값)을 탭하면 숫자 키패드로 직접 타이핑해 넣을 수 있는 모드.
+  const [editing, setEditing] = useState(false);
+  const [editVal, setEditVal] = useState("");
 
   // 순환 모드면 items를 REPEAT번 복제
   const rendered = loop
@@ -90,11 +94,53 @@ export function WheelPicker({ items, value, onChange, renderItem, loop=false }) 
     }, 120);
   };
 
+  const startEdit = () => {
+    setEditVal(String(value));
+    setEditing(true);
+  };
+  useEffect(() => {
+    if (editing && inputRef.current) { inputRef.current.focus(); inputRef.current.select(); }
+  }, [editing]);
+
+  const commitEdit = () => {
+    setEditing(false);
+    const raw = parseInt(editVal, 10);
+    if (Number.isNaN(raw)) return;
+    // 입력값과 가장 가까운 유효값으로 스냅(분처럼 5단위로만 있는 목록 포함)
+    let nearest = items[0], minDiff = Infinity;
+    for (const it of items) { const d = Math.abs(it - raw); if (d < minDiff) { minDiff = d; nearest = it; } }
+    const el = ref.current;
+    const newIdx = items.indexOf(nearest);
+    const delta = newIdx - idxOf();
+    if (el) el.scrollTop = posFor(newIdx);
+    setCenterRow(centerOffset + newIdx);
+    lastRow.current = centerOffset + newIdx;
+    if (delta !== 0) onChange(nearest, delta);
+  };
+
   return (
     <div className="relative flex-1 overflow-hidden select-none" style={{ height: ITEM_H * 5 }}>
-      {/* 선택 영역 하이라이트 — 텍스트 뒤에 */}
+      {/* 선택 영역 하이라이트 — 텍스트 뒤에, 순수 장식용(클릭 안 받음) */}
       <div className="absolute left-1 right-1 rounded-xl bg-gray-100 pointer-events-none"
         style={{ top: ITEM_H * 2, height: ITEM_H, zIndex: 1 }} />
+      {/* 같은 자리의 투명 버튼 — 스크롤 내용(zIndex 2)보다 위에 둬서 탭을 가로채되,
+          배경이 없어 밑의 숫자 텍스트는 그대로 보인다. 탭하면 숫자 키패드로 직접 입력. */}
+      {!editing && (
+        <button type="button" onClick={startEdit}
+          className="absolute left-1 right-1"
+          style={{ top: ITEM_H * 2, height: ITEM_H, zIndex: 4 }} aria-label="숫자 직접 입력"/>
+      )}
+      {editing && (
+        <input ref={inputRef} type="text" inputMode="numeric" pattern="[0-9]*" value={editVal}
+          onChange={e=>setEditVal(e.target.value.replace(/\D/g,"").slice(0,4))}
+          onBlur={commitEdit}
+          onKeyDown={e=>{
+            if (e.key==="Enter") { e.preventDefault(); commitEdit(); }
+            if (e.key==="Escape") { e.preventDefault(); setEditing(false); }
+          }}
+          className="absolute left-1 right-1 text-center font-bold text-gray-900 bg-white border-2 border-blue-500 rounded-xl outline-none"
+          style={{ top: ITEM_H * 2, height: ITEM_H, zIndex: 10, fontSize: 17 }}/>
+      )}
       {/* 스크롤 내용 */}
       <div ref={ref} onScroll={handleScroll}
         onWheel={e => { e.preventDefault(); if(ref.current) ref.current.scrollTop += e.deltaY; }}
@@ -104,12 +150,8 @@ export function WheelPicker({ items, value, onChange, renderItem, loop=false }) 
         <div style={{ height: ITEM_H * 2 }} />
         {rendered.map((item, i) => {
           const sel = i === centerRow;
-          // 숫자를 직접 탭해도 그 값으로 부드럽게 스크롤 — 실제 스크롤 이동은 위
-          // handleScroll의 settle 로직이 그대로 감지해 onChange까지 처리한다(로직 중복 없음).
-          const vIdx = loop ? ((i - centerOffset) % L + L) % L : i;
           return (
-            <div key={i} onClick={()=>ref.current?.scrollTo({top: posFor(vIdx), behavior:"smooth"})}
-              style={{ height: ITEM_H, scrollSnapAlign: "center", cursor: "pointer",
+            <div key={i} style={{ height: ITEM_H, scrollSnapAlign: "center",
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: sel ? 17 : 15, fontWeight: sel ? 700 : 400,
               color: sel ? "#111827" : "#9ca3af", whiteSpace: "nowrap" }}>
