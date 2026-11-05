@@ -1,3 +1,5 @@
+import { expandRecurring } from './appRecurrence.js';
+import { canViewWidgetEvent } from './appAuthCore.js';
 import { createHash } from 'node:crypto';
 
 const DAY_MS = 86400000;
@@ -31,12 +33,19 @@ export function normalizeReadScope(input = {}) {
     ranges = [...new Map(supplied.map(range => [`${range.from}:${range.to}`, { from: range.from, to: range.to }])).values()]
       .sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
   }
+  let widgetRange = null;
+  if (input.widgetRange !== undefined) {
+    const range = input.widgetRange;
+    if (!range || !validDate(range.from) || !validDate(range.to) || range.from > range.to
+      || (Date.parse(range.to) - Date.parse(range.from)) / DAY_MS > 370) invalid('위젯 조회 구간은 올바른 날짜로 370일 이내여야 합니다.');
+    widgetRange = { from: range.from, to: range.to };
+  }
   if (input.eventIds !== undefined && !Array.isArray(input.eventIds)) invalid('열린 일정을 확인해주세요.');
   const eventIds = input.eventIds || [];
   if (eventIds.length > 2000) throw new ScopedReadError('resource-exhausted', '열린 일정 범위가 너무 큽니다.');
   if (eventIds.some(id => typeof id !== 'string' || !id || id.includes('/') || id === '.' || id === '..' || Buffer.byteLength(id, 'utf8') > 1500)) invalid('열린 일정 ID를 확인해주세요.');
   return { full, from: full ? null : ranges[0].from, to: full ? null : ranges.reduce((max, range) => range.to > max ? range.to : max, ranges[0].to),
-    ranges, eventIds: [...new Set(eventIds)].sort() };
+    ranges, widgetRange, eventIds: [...new Set(eventIds)].sort() };
 }
 
 export function readScopeKey(scope, principal) {
@@ -71,13 +80,26 @@ function latest(left, right) {
 }
 const chunks = (items, size) => Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, (i + 1) * size));
 
+/** Merge overlapping app/widget windows before running candidate queries. */
+export function candidateReadRanges(scope) {
+  const ranges = [...scope.ranges, ...(scope.widgetRange ? [scope.widgetRange] : [])]
+    .sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
+  const merged = [];
+  for (const range of ranges) {
+    const last = merged.at(-1);
+    if (last && range.from <= last.to) last.to = last.to > range.to ? last.to : range.to;
+    else merged.push({ ...range });
+  }
+  return merged;
+}
+
 /** Snapshot union, intentionally unbounded for recurrence sources (moved exceptions). */
 export async function loadScopedEventSnapshots(db, companyId, scope) {
   const root = `companies/${companyId}/events`;
   const col = db.collection(root);
   if (scope.full) return col.get();
   const snapshots = await Promise.all([
-    ...scope.ranges.flatMap(range => [
+    ...candidateReadRanges(scope).flatMap(range => [
       col.where('start', '>=', range.from).where('start', '<=', range.to).get(),
       col.where('end', '>=', range.from).where('start', '<=', range.to).get(),
     ]),
@@ -114,3 +136,17 @@ export async function loadScopedReportSnapshots(db, companyId, eventIds, { full 
   const docs = [...byId.values()];
   return { docs, size: docs.length, empty: docs.length === 0 };
 }
+
+export const widgetEvent = e => Object.fromEntries(['id', 'title', 'start', 'end', 'startTime', 'endTime', 'allDay', 'place', 'calId'].filter(k => e[k] !== undefined).map(k => [k, e[k]]));
+export function projectWidgetRange(raw, principal, cals, assignments, { from, to }) {
+  const events = expandRecurring(raw.filter(e => e.status !== 'deleted'), { start: from, end: to })
+    .filter(e => e.status !== 'deleted' && canViewWidgetEvent(e, principal, cals, assignments)
+      && e.start <= to && (e.end || e.start) >= from).map(widgetEvent);
+  const visible = new Set(events.map(e => e.calId));
+  return { events, calendars: cals.filter(c => visible.has(c.id)).map(c => ({ id: c.id, color: c.color || '#1a56db' })) };
+}
+
+// Preserve the owner's historical report ledger even after its source event
+// disappears. Management-team staff still require the existing event ACL.
+export const mayReadFullReportLedger = (scope, principal) => scope.full === true
+  && (principal.kind === 'admin' || principal.master === true);

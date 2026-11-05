@@ -25,6 +25,7 @@ public final class WidgetSessionStore {
     }
 
     public static String company(Context context) { return prefs(context).getString("company", ""); }
+    static String user(Context context) { return prefs(context).getString("user", ""); }
     public static String scope(Context context) {
         SharedPreferences p = prefs(context);
         String company = p.getString("company", "");
@@ -55,6 +56,7 @@ public final class WidgetSessionStore {
                     .putString("user", user).putString("version", claims.optString("cmv"))
                     .putString("generation", generation).putLong("expires", claims.optLong("exp", 0) * 1000L).commit();
             if (changed) {
+                WidgetSharedRead.invalidate();
                 p.edit().putLong("dataRevision", 0L).commit();
                 WidgetCache.clear(context);
             }
@@ -73,6 +75,7 @@ public final class WidgetSessionStore {
             long revision = dataRevision(context);
             if (revision == Long.MAX_VALUE) { WidgetCache.clear(context); revision = 0; }
             prefs(context).edit().putLong("dataRevision", revision + 1).commit();
+            WidgetSharedRead.invalidate();
         }
     }
 
@@ -80,6 +83,7 @@ public final class WidgetSessionStore {
         String previous;
         synchronized (LOCK) {
             previous = company(context);
+            WidgetSharedRead.invalidate();
             prefs(context).edit().clear().commit();
             WidgetCache.clear(context);
         }
@@ -95,6 +99,12 @@ public final class WidgetSessionStore {
     static void runIfCurrent(Context context, String expectedScope, Runnable action) {
         synchronized (LOCK) {
             if (!expectedScope.isEmpty() && expectedScope.equals(scope(context))) action.run();
+        }
+    }
+
+    static void runIfCurrentRevision(Context context, String expectedScope, long revision, Runnable action) {
+        synchronized (LOCK) {
+            if (!expectedScope.isEmpty() && expectedScope.equals(scope(context)) && revision == dataRevision(context)) action.run();
         }
     }
 

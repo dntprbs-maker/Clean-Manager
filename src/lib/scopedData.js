@@ -28,6 +28,12 @@ export function expandEventsInWindows(events, windows) {
   return [...rows.values()];
 }
 
+export function findEventSource(events, selected) {
+  const candidates=events.filter(event=>event.id===selected.id);
+  return candidates.find(event=>!event.__occurrenceOnly)
+    || candidates.find(event=>(event._origDate||event.start)===(selected._origDate||selected.start));
+}
+
 // Each snapshot replaces membership of its own query. A 'removed' document can
 // still belong to another range/pinned query; never infer a global delete.
 export function subscribeGroup(companyId, specs, receive, status) {

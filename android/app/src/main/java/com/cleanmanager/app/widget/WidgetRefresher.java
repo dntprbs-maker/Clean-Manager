@@ -25,11 +25,14 @@ public final class WidgetRefresher {
     static boolean ensureRange(Context context, String from, String to, boolean force) {
         Context appContext = context.getApplicationContext();
         synchronized (LOCK) {
+            if (force) WidgetSessionStore.invalidateData(appContext);
             String sessionScope = WidgetSessionStore.scope(appContext);
             if (!WidgetSessionStore.isSignedIn(appContext)) { WidgetCache.clear(appContext); return false; }
             // 락을 잡은 뒤 다시 확인한다 — 다른 위젯이 그새 채워 놨을 수 있다.
             WidgetCache.Snapshot cached = WidgetCache.load(appContext);
             long dataRevision = WidgetSessionStore.dataRevision(appContext);
+            if (WidgetSharedRead.defer(sessionScope, dataRevision, from, to)) return false;
+            long fence = WidgetSharedRead.nativeFence();
             long now = System.currentTimeMillis();
             boolean covers = cached.rangeFrom != null && cached.rangeTo != null
                     && cached.rangeFrom.compareTo(from) <= 0 && cached.rangeTo.compareTo(to) >= 0;
@@ -53,9 +56,16 @@ public final class WidgetRefresher {
                 }
             }
 
-            if (!sessionScope.equals(WidgetSessionStore.scope(appContext))) return false;
-            WidgetCache.saveScoped(appContext, sessionScope, events, cals, from, to, now, calsAt, dataRevision);
-            return true;
+            final Map<String, Integer> finalCals = cals;
+            final long finalCalsAt = calsAt;
+            java.util.concurrent.atomic.AtomicBoolean saved = new java.util.concurrent.atomic.AtomicBoolean(false);
+            WidgetSessionStore.runIfCurrentRevision(appContext, sessionScope, dataRevision, () -> {
+                if (WidgetSharedRead.nativeMayPublish(fence)) {
+                    WidgetCache.saveScoped(appContext, sessionScope, events, finalCals, from, to, now, finalCalsAt, dataRevision);
+                    saved.set(true);
+                }
+            });
+            return saved.get();
         }
     }
 

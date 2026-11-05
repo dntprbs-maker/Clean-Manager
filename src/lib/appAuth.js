@@ -6,6 +6,36 @@ import { auth, functions } from '../firebase';
 const request = httpsCallable(functions, 'appAuth');
 const WidgetSession = registerPlugin('WidgetSession');
 const store = user => { localStorage.setItem('loginUser', JSON.stringify(user)); return user; };
+// Sharing is optional: a missing native callback must never block the calendar.
+export async function optionalWidgetOperation(operation, milliseconds = 2500) {
+  let timer;
+  try { return await Promise.race([operation,new Promise(resolve=>{timer=setTimeout(()=>resolve(null),milliseconds);})]); }
+  catch { return null; }
+  finally { clearTimeout(timer); }
+}
+export async function supportsWidgetSharing() {
+  if (!Capacitor.isNativePlatform()) return false;
+  try { return (await optionalWidgetOperation(WidgetSession.capabilities()))?.supported === true; }
+  catch { return false; }
+}
+export async function beginWidgetRead(companyId, knownRevision) {
+  if (!Capacitor.isNativePlatform() || !auth.currentUser) return null;
+  try {
+    const lease = await optionalWidgetOperation(WidgetSession.beginSharedRead({ companyId, userId: auth.currentUser.uid,
+      ...(Number.isSafeInteger(knownRevision)&&knownRevision>=0?{knownRevision}:{}) }));
+    return lease?.ticket && lease.from && lease.to ? lease : null;
+  } catch { return null; }
+}
+export async function commitWidgetRead(lease, snapshot) {
+  if (!lease?.ticket || !snapshot) return false;
+  try { return (await optionalWidgetOperation(WidgetSession.commitSharedRead({ ticket: lease.ticket, snapshot }),5000))?.accepted === true; }
+  catch { return false; }
+}
+export async function cancelWidgetRead(lease) {
+  if (!lease?.ticket) return;
+  try { await optionalWidgetOperation(WidgetSession.cancelSharedRead({ ticket: lease.ticket })); }
+  catch { /* Native expiry retains the independent widget fallback. */ }
+}
 export async function authenticate(input) {
   const { data } = await request(input);
   if (data.token) {
@@ -55,6 +85,6 @@ export async function endSession() {
 // the app and refreshing the same authentication token must not force DB reads.
 export async function invalidateWidgetData() {
   if (!Capacitor.isNativePlatform() || !auth.currentUser) return;
-  try { await WidgetSession.invalidateData(); }
+  try { await optionalWidgetOperation(WidgetSession.invalidateData()); }
   catch { /* Legacy APKs continue to rely on push/manual refresh. */ }
 }

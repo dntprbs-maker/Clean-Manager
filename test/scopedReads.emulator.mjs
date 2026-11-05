@@ -35,6 +35,12 @@ await Promise.all([
     '2040-01-01': { start: '2026-11-05', end: '2026-11-05', calId: 'teamA', title: '허용된 독립회차' },
     '2040-01-02': { title: 'qa-private-exception-secret', contact: 'qa-private-contact' },
   } }),
+  put(`${root}/events/deletedSource`, { start: '2026-11-05', calId: 'teamA', status: 'deleted' }),
+  put(`${root}/reports/preservedDeleted`, { eventId: 'deletedSource', status: '완료' }),
+  put(`${root}/reports/preservedMissing`, { eventId: 'missingSource', status: '완료' }),
+  put(`${root}/reports/preservedNoEventId`, { status: '완료' }),
+  put(`${root}/events/widgetOnly`, { title: '위젯 범위 전용', start: '2026-11-02', end: '2026-11-02', calId: 'teamA' }),
+  put(`${root}/reports/widgetOnlyReport`, { eventId: 'widgetOnly', date: '2026-11-02', status: '완료' }),
   put(`${root}/events/outside`, { title: '먼 과거 일반 일정', start: '2000-01-01', end: '2000-01-01', calId: 'teamA' }),
   put(`${root}/events/pinned`, { title: '핀으로만 조회', start: '2050-01-01', end: '2050-01-01', calId: 'teamA' }),
   put(`${root}/events/pastMonth`, { title: '오래 전 표시 월', start: '1990-02-14', calId: 'teamA' }),
@@ -87,6 +93,29 @@ assert.equal(unchanged.result.notModified, true);
 assert.equal(unchanged.result.events, undefined);
 assert.equal(unchanged.result.reports, undefined);
 assert.equal(unchanged.result.cals, undefined);
+const widgetRange = { from: '2026-11-01', to: '2026-11-06' };
+const shared = await callable('appReadData', { ...scope, widgetRange }, token);
+assert.equal(shared.status, 200);
+assert.equal(shared.result.events.some(e => e.id === 'widgetOnly'), false, 'widget-only candidates never enter application events');
+assert.equal(shared.result.reports.some(e => e.id === 'widgetOnlyReport'), false, 'widget-only candidates never select application reports');
+assert.ok(shared.result.sharedWidget.events.some(e => e.id === 'widgetOnly'));
+assert.ok(shared.result.sharedWidget.events.some(e => e.title === '허용된 독립회차'));
+assert.equal(JSON.stringify(shared.result.sharedWidget).includes('qa-private-exception-secret'), false);
+assert.equal(shared.result.sharedWidget.userId, 'cm_staff_qa_scoped_staff');
+assert.equal(shared.result.sharedWidget.companyId, company);
+assert.equal(shared.result.sharedWidget.scopeKey, shared.result.scopeKey);
+assert.equal(shared.result.sharedWidget.revision, shared.result.revision);
+assert.equal(shared.result.sharedWidget.serverAt, shared.result.serverAt);
+assert.deepEqual({ from: shared.result.sharedWidget.from, to: shared.result.sharedWidget.to }, widgetRange);
+assert.equal(first.result.sharedWidget, undefined);
+const sharedUnchanged = await callable('appReadData', { ...scope, widgetRange, knownRevision: shared.result.revision, scopeKey: shared.result.scopeKey }, token);
+assert.equal(sharedUnchanged.result.notModified, true);
+assert.equal(sharedUnchanged.result.sharedWidget, undefined);
+const emptyWidget = await callable('appReadData', { ...scope, widgetRange: { from: '1980-01-01', to: '1980-01-02' }, knownRevision: shared.result.revision, scopeKey: shared.result.scopeKey }, token);
+assert.equal(emptyWidget.result.notModified, undefined);
+assert.deepEqual(emptyWidget.result.sharedWidget.events, []);
+assert.deepEqual(emptyWidget.result.sharedWidget.calendars, []);
+assert.equal((await callable('appReadData', { ...scope, widgetRange: { from: '2026-02-30', to: '2026-03-01' } }, token)).status, 400);
 const pinned = await callable('appReadData', { ...scope, eventIds: ['pinned'], knownRevision: first.result.revision, scopeKey: first.result.scopeKey }, token);
 assert.equal(pinned.result.notModified, undefined, 'changed pins invalidate old scope key');
 assert.ok(pinned.result.events.some(e => e.id === 'pinned'));
@@ -116,5 +145,21 @@ await put(`${root}/users/qa_scoped_staff`, { ...user, memberships: [{ team: 'B',
 const permissionChanged = await callable('appReadData', { ...scope, knownRevision: revisionChanged.result.revision, scopeKey: revisionChanged.result.scopeKey }, token);
 assert.equal(permissionChanged.result.notModified, undefined, 'live permission changes invalidate cached scope even with same token');
 assert.equal(permissionChanged.result.events.some(e => e.id === 'noEnd'), false);
+const preserved = ['preservedDeleted', 'preservedMissing', 'preservedNoEventId'];
+await put('admins/qa_scoped_admin', { id: 'qa_scoped_admin', pw: 'qa-scope-owner-only', companyId: company, name: '가상 관리자' });
+const ownerLogin = await callable('appAuth', { identifier: 'qa_scoped_admin', password: 'qa-scope-owner-only' });
+assert.equal(ownerLogin.status, 200);
+const ownerExchange = await fetch(`http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=local-only`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: ownerLogin.result.token, returnSecureToken: true }) });
+const ownerToken = (await ownerExchange.json()).idToken;
+const ownerFull = await callable('appReadData', { full: true }, ownerToken);
+assert.equal(ownerFull.status, 200);
+for (const id of preserved) assert.ok(ownerFull.result.reports.some(r => r.id === id), 'owner full history preserves orphan ledger');
+const ownerPeriod = await callable('appReadData', scope, ownerToken);
+for (const id of preserved) assert.equal(ownerPeriod.result.reports.some(r => r.id === id), false, 'period reads keep selected-event semantics');
+const staffFull = await callable('appReadData', { full: true }, token);
+for (const id of preserved) assert.equal(staffFull.result.reports.some(r => r.id === id), false, 'staff never gains orphan history access');
+await put(`${root}/users/qa_scoped_staff`, { ...user, memberships: [{ team: '관리팀', role: '팀원' }] });
+const managerFull = await callable('appReadData', { full: true }, token);
+for (const id of preserved) assert.equal(managerFull.result.reports.some(r => r.id === id), false, 'management staff retain event ACL');
 await db.terminate();
 console.log('Scoped read emulator regression passed: ranges, missing end, long/old recurrence, moved private exceptions, related reports, scope-bound revision cache, pins and widget. No token printed.');

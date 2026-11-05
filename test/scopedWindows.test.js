@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calendarWindows, expandEventsInWindows } from '../src/lib/scopedData.js';
+import { calendarWindows, expandEventsInWindows, findEventSource } from '../src/lib/scopedData.js';
+
+test('isolated allowed occurrences keep their original identity in open details',()=>{
+  const first={id:'series',start:'2026-11-09',_origDate:'2026-11-01',__occurrenceOnly:true};
+  const second={id:'series',start:'2026-11-09',_origDate:'2026-11-02',__occurrenceOnly:true};
+  assert.equal(findEventSource([first,second],second),second);
+  assert.equal(findEventSource([first],second),undefined);
+  const source={id:'series',start:'2026-01-01',repeat:'daily'};
+  assert.equal(findEventSource([first,source],second),source);
+});
 
 test('distant month, selected day and team day remain separate bounded windows',()=>{
   assert.deepEqual(calendarWindows(new Date(2024,0,1),'2026-11-05','2026-11-05'),[
