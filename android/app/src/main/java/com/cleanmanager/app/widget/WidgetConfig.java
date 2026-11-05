@@ -2,8 +2,8 @@ package com.cleanmanager.app.widget;
 
 final class WidgetConfig {
     static final String FIRESTORE_PROJECT_ID = "clean-manager-60bc9";
+    static final String DATA_URL = "https://asia-northeast3-clean-manager-60bc9.cloudfunctions.net/appWidgetData";
     static final String FIRESTORE_API_KEY = "AIzaSyAz-Gt2CC0_6nOMA2UhRZBsqbHKobVLDzc";
-    static final String COMPANY_ID = "c_gctgx9b";
     static final String WEB_APP_URL = "https://www.clean-manager.com/";
 
     static final int MAX_EVENTS_PER_CELL = 10;

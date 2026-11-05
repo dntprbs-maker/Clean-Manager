@@ -1,3 +1,7 @@
+import { LoginScreen } from "./features/auth/AuthScreens";
+import { restoreSession, endSession } from "./lib/appAuth";
+import { httpsCallable } from "firebase/functions";
+import { functions } from "./firebase";
 /**
  * SuperAdmin.jsx — 클린메니져 DB 전용 마스터 관리자 페이지
  * 접속: http://localhost:5173/Clean-Manager/#superadmin
@@ -279,6 +283,20 @@ function downloadExcel(rows, tabId) {
 
 // ── 메인 컴포넌트 ─────────────────────────────────────────────
 export default function SuperAdmin() {
+  const [session, setSession] = useState(undefined);
+  const [sessionError, setSessionError] = useState("");
+  const verify = async () => {
+    try { const result = await restoreSession(); setSession(result || null); }
+    catch { setSession(null); setSessionError("다시 로그인해주세요."); }
+  };
+  useEffect(() => { verify(); }, []);
+  if (session === undefined) return <div className="p-8">로그인 확인 중...</div>;
+  if (!session) return <div className="max-w-sm mx-auto"><LoginScreen onLogin={verify}/>{sessionError}</div>;
+  if (!session.master) return <div className="p-8">마스터 관리자 권한이 필요합니다.<button onClick={async () => { await endSession(); setSession(null); }}>다른 계정으로 로그인</button></div>;
+  return <SuperAdminContent/>;
+}
+
+function SuperAdminContent() {
   const savedPw = getSavedPw();
   // 정식 배포 전까지 임시로 기본 상태를 'unlocked'로 고정 (공식 배포 전 비밀번호 적용 예정)
   const [authState, setAuthState]       = useState("unlocked");
@@ -287,6 +305,7 @@ export default function SuperAdmin() {
   const [showChangePw, setShowChangePw] = useState(false);
   const [newPw, setNewPw]               = useState("");
   const [newPwConfirm, setNewPwConfirm] = useState("");
+  const [oldAccountPw, setOldAccountPw] = useState("");
   const [showPwText, setShowPwText]     = useState(false);
 
   const [activeTab, setActiveTab]       = useState("events");
@@ -331,11 +350,15 @@ export default function SuperAdmin() {
     if (pwInput === getSavedPw()) { setPwInput(""); setPwError(""); setAuthState("unlocked"); }
     else setPwError("비밀번호가 틀렸습니다. 다시 입력해주세요.");
   }
-  function handleChangePw() {
+  async function handleChangePw() {
     if (!newPw || newPw.length < 4) { setPwError("새 비밀번호는 4자 이상이어야 합니다."); return; }
     if (newPw !== newPwConfirm) { setPwError("새 비밀번호가 일치하지 않습니다."); return; }
-    savePw(newPw); setNewPw(""); setNewPwConfirm(""); setPwError(""); setShowChangePw(false);
-    alert("✅ 비밀번호가 성공적으로 변경되었습니다!");
+    try {
+      await httpsCallable(functions, 'appAccount')({ action: 'changePassword', oldPassword: oldAccountPw, newPassword: newPw });
+      await endSession();
+      alert("비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인해주세요.");
+      window.location.reload();
+    } catch (e) { setPwError(e.message || '비밀번호 변경에 실패했습니다.'); }
   }
 
   // ── 삭제 (삭제목록 탭만 영구 삭제, 그 외 일반 탭은 소프트 삭제) ──
@@ -634,7 +657,7 @@ export default function SuperAdmin() {
               🔑 비밀번호 변경
             </button>
             <button
-              onClick={() => { setAuthState("locked"); setPwInput(""); }}
+              onClick={async () => { await endSession(); window.location.reload(); }}
               className="text-xs text-red-400 hover:text-red-300 border border-red-900 hover:border-red-700 px-3 py-1.5 rounded-lg transition-colors"
             >
               잠금
@@ -649,6 +672,9 @@ export default function SuperAdmin() {
           <div className="mx-auto px-6 py-4 flex flex-col gap-3 w-full" style={{ maxWidth: "66%" }}>
             <div className="max-w-md flex flex-col gap-3">
               <p className="text-sm font-bold text-white">🔑 비밀번호 변경</p>
+              <input type="password" value={oldAccountPw} onChange={e => setOldAccountPw(e.target.value)}
+                placeholder="현재 계정 비밀번호"
+                className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white outline-none focus:border-blue-500 text-sm" />
               <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)}
                 placeholder="새 비밀번호 (4자 이상)"
                 className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white outline-none focus:border-blue-500 text-sm" />

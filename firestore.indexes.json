@@ -4,18 +4,50 @@
       "collectionGroup": "events",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "calId", "order": "ASCENDING" },
-        { "fieldPath": "start", "order": "ASCENDING" }
+        {
+          "fieldPath": "calId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "start",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "events",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "calId", "order": "ASCENDING" },
-        { "fieldPath": "repeat", "order": "ASCENDING" }
+        {
+          "fieldPath": "calId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "repeat",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "end",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "start",
+          "order": "ASCENDING"
+        }
       ]
     }
   ],
-  "fieldOverrides": [{ "collectionGroup": "mcpHubChanges", "fieldPath": "value", "indexes": [] }]
+  "fieldOverrides": [
+    {
+      "collectionGroup": "mcpHubChanges",
+      "fieldPath": "value",
+      "indexes": []
+    }
+  ]
 }

@@ -1,3 +1,4 @@
+import { seoulToday } from "../../lib/dateTime";
 import { useState, useEffect } from "react";
 import { X, ChevronLeft, ChevronRight, Edit3, Trash2, Check } from "lucide-react";
 import { useC } from "../../context/AppContext";
@@ -200,7 +201,7 @@ export function SiteDetailScreen() {
 // ── 정기청소 오늘현황 (관리자용 출근체크) ───────────────────────────────────────────────
 export function TodayStatusScreen() {
   const { assignments, sites, users, attendance, setAttendanceCheck, setCurrentScreen } = useC();
-  const todayStr = fmt(new Date());
+  const todayStr = seoulToday();
   const weekday = new Date().getDay();
   const todays = assignments.filter(a => assignmentOccursOn(a, todayStr));
   const bySite = sites
@@ -263,7 +264,7 @@ export function TodayStatusScreen() {
 export function MyRegularCleaningScreen() {
   const { currentUser, assignments, sites, attendance, setAttendanceCheck, monthlySettlements, setCurrentScreen } = useC();
   const siteName = id => sites.find(s => s.id === id)?.name || "삭제된 현장";
-  const todayStr = fmt(new Date());
+  const todayStr = seoulToday();
   const weekday = new Date().getDay();
   const myAssignments = assignments.filter(a => a.employeeId === currentUser.id);
   const todaysMine = myAssignments.filter(a => assignmentOccursOn(a, todayStr));
@@ -395,8 +396,9 @@ function MySettlementRow({ s }) {
 
 // ── 정기청소 월별 정산 (관리자용) ───────────────────────────────────────────────
 export function MonthlySettlementScreen() {
-  const { users, assignments, setCurrentScreen } = useC();
-  const [ym, setYm] = useState(() => fmt(new Date()).slice(0, 7));
+  const { users, assignments, setCurrentScreen, setSettlementMonth } = useC();
+  const [ym, setYm] = useState(() => seoulToday().slice(0, 7));
+  useEffect(()=>{setSettlementMonth?.(ym);},[ym,setSettlementMonth]);
   const shiftMonth = delta => {
     const [y, m] = ym.split("-").map(Number);
     const d = new Date(y, m - 1 + delta, 1);
@@ -434,13 +436,15 @@ export function MonthlySettlementScreen() {
 }
 
 function SettlementCard({ employee, ym }) {
-  const { sites, assignments, attendance, extraPayments, monthlySettlements, setEmployeeAllowance, deleteExtraPayment, confirmSettlement, setExtraPaymentModal } = useC();
+  const { sites, assignments, attendance, extraPayments, monthlySettlements, setEmployeeAllowance, deleteExtraPayment, confirmSettlement, setExtraPaymentModal, dataReady } = useC();
   const siteName = id => sites.find(s => s.id === id)?.name || "삭제된 현장";
   const [allowance, setAllowance] = useState(employee.dailyAllowance || 0);
   const calc = computeSettlement({ employee, ym, assignments, attendance, extraPayments, allowance });
   const { workDays, dailySum, weeklySum, monthlySum, weeklyLines, monthlyLines, myExtras, extraSum, allowanceSum, refTotal } = calc;
   const settlement = monthlySettlements.find(s => s.employeeId === employee.id && s.yearMonth === ym);
-  const [finalAmount, setFinalAmount] = useState(settlement ? settlement.finalAmount : refTotal);
+  const [amountOverride, setAmountOverride] = useState(null);
+  const finalAmount=amountOverride ?? (settlement ? settlement.finalAmount : refTotal);
+  const [saving, setSaving] = useState(false);
   const breakdown = { workDays, dailySum, weeklySum, monthlySum, allowanceSum, extraSum, refTotal };
 
   return (
@@ -502,9 +506,10 @@ function SettlementCard({ employee, ym }) {
       </div>
       <div className="flex items-center gap-2">
         <input type="number" inputMode="numeric" value={finalAmount}
-          onChange={e => setFinalAmount(Number(e.target.value) || 0)}
+          onChange={e => {setAmountOverride(Number(e.target.value) || 0);}}
           className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold"/>
-        <button onClick={() => confirmSettlement(employee.id, ym, finalAmount, breakdown)}
+        <button disabled={dataReady===false || saving}
+          onClick={async () => {setSaving(true);try{await confirmSettlement(employee.id, ym, finalAmount, breakdown);setAmountOverride(null);}catch(e){alert(e.message||"확정 실패. 다시 확인해 주세요.");}finally{setSaving(false);}}}
           className="px-4 py-2 rounded-xl text-xs font-bold text-white shrink-0"
           style={{ background: "linear-gradient(135deg,#1a56db,#2563eb)" }}>
           {settlement ? "재확정" : "확정"}
@@ -518,12 +523,12 @@ function SettlementCard({ employee, ym }) {
 // ── 정기청소 추가지급 등록 모달 ───────────────────────────────────────────────
 export function ExtraPaymentModal() {
   const { extraPaymentModal, setExtraPaymentModal, addExtraPayment } = useC();
-  const [date, setDate] = useState(fmt(new Date()));
+  const [date, setDate] = useState(seoulToday());
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
 
   useEffect(() => {
-    if (extraPaymentModal.open) { setDate(fmt(new Date())); setAmount(""); setReason(""); }
+    if (extraPaymentModal.open) { setDate(seoulToday()); setAmount(""); setReason(""); }
   }, [extraPaymentModal.open]);
 
   if (!extraPaymentModal.open) return null;
@@ -636,7 +641,7 @@ export function AssignmentFormModal() {
   const { assignmentModal, setAssignmentModal, assignments, sites, users, addAssignment, updateAssignment } = useC();
   const blankForm = () => ({
     employeeId: "", siteId: "",
-    start: fmt(new Date()),
+    start: seoulToday(),
     repeat: "weekly", repeatInterval: 1, repeatWeekdays: [],
     repeatMonthlyType: "day", repeatMonthlyDay: null, repeatMonthlyOrdinal: null, repeatMonthlyWeekday: null,
     repeatYearlyType: "date", repeatYearlyMonth: null, repeatYearlyDay: null, repeatYearlyOrdinal: null, repeatYearlyWeekday: null,

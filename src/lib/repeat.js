@@ -1,5 +1,5 @@
-import { fmt, pd, diff, add, WD } from "./dateTime";
-import { nthWeekdayOfMonth } from "./dateTime";
+import { WD } from "./dateTime.js";
+import { expandRecurring } from "../../functions/lib/appRecurrence.js";
 
 // 반복 유형 선택지 (일정/배정 공용)
 export const REPEAT_OPTS = [
@@ -16,79 +16,8 @@ export const WAGE_TYPES = [
 ];
 export const wageTypeLabel = t => WAGE_TYPES.find(w => w.value === t)?.label || "일급";
 
-// ── 반복 일정 전개 ────────────────────────────────────────────────
-// repeat(daily/weekly/monthly) 일정을 repeatUntil(없으면 1년) 까지 개별 일정으로 펼친다.
-// 각 인스턴스는 원본 id 를 그대로 유지(상세/수정/삭제는 시리즈 단위로 동작).
-export function expandRecurring(events) {
-  const HARD_CAP = 400; // 안전장치 (무한 루프 방지)
-  const now = new Date();
-  const defaultUntil = fmt(new Date(now.getFullYear() + 1, now.getMonth(), now.getDate()));
-  const out = [];
-  for (const ev of events) {
-    if (!ev.repeat || ev.repeat === "none") { out.push(ev); continue; }
-    const dur      = diff(ev.start, ev.end || ev.start); // 일정 길이(일)
-    const until    = ev.repeatUntil || defaultUntil;
-    const untilD   = pd(until);
-    const startD   = pd(ev.start);
-    const interval = Math.max(1, Number(ev.repeatInterval) || 1);
-    const push = (dStr) => {
-      const ex = ev.exceptions?.[dStr];
-      if (ex && ex._deleted) return; // 이 회차만 삭제된 경우 건너뜀
-      const merged = ex ? { ...ev, ...ex } : ev;
-      // 예외에 start(단건 일정 변경)가 있으면 그 날짜/기간을 그대로 사용, 없으면 반복 규칙대로 계산
-      const outStart = ex?.start || dStr;
-      const outEnd   = ex?.end   || add(outStart, dur);
-      out.push({ ...merged, _origDate: dStr, start: outStart, end: outEnd, _recurring: true, _hasException: !!ex });
-    };
-    let count = 0;
-
-    if (ev.repeat === "daily") {
-      let cur = ev.start;
-      while (cur <= until && count < HARD_CAP) { push(cur); count++; cur = add(cur, interval); }
-
-    } else if (ev.repeat === "weekly") {
-      const weekdays  = (ev.repeatWeekdays && ev.repeatWeekdays.length) ? ev.repeatWeekdays : [startD.getDay()];
-      const weekStart = new Date(startD); weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-      let cur = new Date(startD);
-      while (cur <= untilD && count < HARD_CAP) {
-        const weekIdx = Math.floor((cur - weekStart) / (7*864e5));
-        if (weekIdx % interval === 0 && weekdays.includes(cur.getDay())) { push(fmt(cur)); count++; }
-        cur.setDate(cur.getDate() + 1);
-      }
-
-    } else if (ev.repeat === "monthly") {
-      let idx = 0;
-      while (count < HARD_CAP && idx < 400) {
-        const monTotal = startD.getMonth() + idx*interval;
-        const y  = startD.getFullYear() + Math.floor(monTotal/12);
-        const mo = ((monTotal%12)+12)%12;
-        const d  = ev.repeatMonthlyType === "weekday"
-          ? nthWeekdayOfMonth(y, mo, ev.repeatMonthlyWeekday ?? startD.getDay(), ev.repeatMonthlyOrdinal || 1)
-          : new Date(y, mo, Math.min(ev.repeatMonthlyDay || startD.getDate(), new Date(y, mo+1, 0).getDate()));
-        if (d > untilD) break;
-        if (d >= startD) { push(fmt(d)); count++; }
-        idx++;
-      }
-
-    } else if (ev.repeat === "yearly") {
-      let idx = 0;
-      while (count < HARD_CAP && idx < 200) {
-        const year = startD.getFullYear() + idx*interval;
-        const mo   = (ev.repeatYearlyMonth || startD.getMonth()+1) - 1;
-        const d    = ev.repeatYearlyType === "weekday"
-          ? nthWeekdayOfMonth(year, mo, ev.repeatYearlyWeekday ?? startD.getDay(), ev.repeatYearlyOrdinal || 1)
-          : new Date(year, mo, Math.min(ev.repeatYearlyDay || startD.getDate(), new Date(year, mo+1, 0).getDate()));
-        if (d > untilD) break;
-        if (d >= startD) { push(fmt(d)); count++; }
-        idx++;
-      }
-
-    } else {
-      out.push(ev);
-    }
-  }
-  return out;
-}
+// One implementation is shared by web and the authenticated widget endpoint.
+export { expandRecurring } from "../../functions/lib/appRecurrence.js";
 
 // ── 정기청소 배정 반복 규칙 ────────────────────────────────────────
 // 배정도 일정과 똑같은 반복 규칙(repeat/repeatWeekdays/repeatMonthlyType 등)을 쓴다.
@@ -112,7 +41,7 @@ export function assignmentOccursOn(assignment, dateStr) {
     repeatYearlyDay: a.repeatYearlyDay, repeatYearlyOrdinal: a.repeatYearlyOrdinal, repeatYearlyWeekday: a.repeatYearlyWeekday,
     repeatUntil: a.repeatUntil || "",
   };
-  return expandRecurring([synthetic]).some(inst => inst.start === dateStr);
+  return expandRecurring([synthetic], { start: dateStr, end: dateStr }).some(inst => inst.start === dateStr);
 }
 // 배정의 반복 규칙을 사람이 읽는 문구로 ("매주 월,수" / "매월 둘째 토요일" 등)
 export function describeRepeat(assignment) {

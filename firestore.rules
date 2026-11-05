@@ -1,9 +1,149 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // gcal*: 구글 캘린더 동기화 서버 전용 / mcp*: 공용 MCP 서버 전용 (Admin SDK는 규칙 무시)
+    function signedIn() {
+      return request.auth != null && request.auth.token.keys().hasAll(['cmCompany', 'cmid', 'cmk', 'cmv']);
+    }
+    function accountPath() {
+      return /databases/$(database)/documents/$(request.auth.token.cmk == 'admin' ? 'admins' : 'staffs')/$(request.auth.token.cmid);
+    }
+    function validSession() {
+      let account = get(accountPath()).data;
+      let profile = request.auth.token.cmk == 'staff'
+        ? get(/databases/$(database)/documents/companies/$(request.auth.token.cmCompany)/users/$(request.auth.token.cmid)).data : {};
+      return signedIn() && request.auth.token.cmk in ['admin', 'staff']
+        && account.get('status', '') != 'deleted'
+        && account.get('pw', '') != ''
+        && account.companyId == request.auth.token.cmCompany
+        && account.authVersion == request.auth.token.cmv
+        && (request.auth.token.cmk == 'admin'
+          || profile.get('status', '') != 'deleted');
+    }
+    function master() {
+      return signedIn() && request.auth.token.cmk == 'admin' && validSession()
+        && exists(/databases/$(database)/documents/appAuthConfig/master)
+        && request.auth.token.cmid in get(/databases/$(database)/documents/appAuthConfig/master).data.get('accountIds', []);
+    }
+    function member(companyId) {
+      return signedIn() && request.auth.token.cmCompany == companyId && validSession()
+        && exists(/databases/$(database)/documents/companies/$(request.auth.token.cmCompany))
+        && get(/databases/$(database)/documents/companies/$(request.auth.token.cmCompany)).data.get('status', '') != 'deleted';
+    }
+    function owner(companyId) { return signedIn() && request.auth.token.cmk == 'admin' && member(companyId); }
+    function manager(companyId) {
+      let profile = request.auth.token.cmk == 'staff'
+        ? get(/databases/$(database)/documents/companies/$(request.auth.token.cmCompany)/users/$(request.auth.token.cmid)).data : {};
+      let manages = request.auth.token.cmk == 'admin'
+        || profile.get('team', '') in ['관리팀', '영업팀']
+        || profile.get('memberships', []).hasAny([
+            {'team': '관리팀', 'role': '팀장'}, {'team': '관리팀', 'role': '팀원'},
+            {'team': '영업팀', 'role': '팀장'}, {'team': '영업팀', 'role': '팀원'}
+          ]);
+      return signedIn() && manages && member(companyId);
+    }
+    function ownProfile(id) { return signedIn() && request.auth.token.cmid == id; }
+    // Employee/team administration is granted to 관리팀, not 영업팀.
+    function staffManager(companyId) {
+      let profile = request.auth.token.cmk == 'staff'
+        ? get(/databases/$(database)/documents/companies/$(request.auth.token.cmCompany)/users/$(request.auth.token.cmid)).data : {};
+      let manages = request.auth.token.cmk == 'admin'
+        || profile.get('team', '') == '관리팀'
+        || profile.get('memberships', []).hasAny([
+          {'team': '관리팀', 'role': '팀장'}, {'team': '관리팀', 'role': '팀원'}
+        ]);
+      return signedIn() && manages && member(companyId);
+    }
+    function staffRoleOnly() { return request.resource.data.get('role', '') != '최고관리자'; }
+    match /admins/{id} {
+      allow read: if master() || (validSession() && request.auth.token.cmk == 'admin' && request.auth.token.cmid == id);
+      allow create, delete: if master();
+      allow update: if master() || (validSession() && request.auth.token.cmk == 'admin' && request.auth.token.cmid == id
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['companyName', 'companyLogoUrl', 'notifyTeams', 'fcmTokens']));
+    }
+    match /staffs/{id} {
+      allow read: if master() || staffManager(resource.data.companyId);
+      allow create: if master() || (staffManager(request.resource.data.companyId) && staffRoleOnly());
+      allow update: if master() || (staffManager(resource.data.companyId) && request.resource.data.companyId == resource.data.companyId && staffRoleOnly());
+      allow delete: if master() || staffManager(resource.data.companyId);
+    }
+    match /companies/{companyId} {
+      allow read: if master() || member(companyId);
+      allow create, delete: if master();
+      allow update: if master() || owner(companyId);
+      match /users/{id} {
+        allow read: if master() || staffManager(companyId) || (member(companyId) && ownProfile(id));
+        allow create: if master() || (staffManager(companyId) && staffRoleOnly());
+        allow delete: if master() || staffManager(companyId);
+        allow update: if master() || (staffManager(companyId) && staffRoleOnly())
+          || (member(companyId) && ownProfile(id) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fcmTokens', 'notifyTeams']));
+      }
+      match /profiles/{id} {
+        allow read: if master() || member(companyId);
+        allow write: if false;
+      }
+      match /events/{id} {
+        allow read, write: if master() || owner(companyId);
+      }
+      match /reports/{id} {
+        allow read, write: if master() || owner(companyId);
+      }
+      match /monthlySettlements/{id} {
+        allow read: if master() || manager(companyId) || (member(companyId) && resource.data.employeeId == request.auth.token.cmid);
+        // Confirmations are validated atomically by confirmMonthlySettlement.
+        // Admin SDK bypasses Rules; no client, including master, can skip it.
+        allow write: if false;
+      }
+      match /extraPayments/{id} {
+        allow read: if master() || manager(companyId) || (member(companyId) && resource.data.employeeId == request.auth.token.cmid);
+        allow write: if master() || manager(companyId);
+      }
+      match /transactions/{id} {
+        allow read, write: if master() || manager(companyId);
+      }
+      match /attendance/{id} {
+        function validOwnAttendance() {
+          let next = request.resource.data;
+          return next.keys().hasAll(['date', 'employeeId', 'siteId', 'confirmed'])
+            && next.keys().hasOnly(['date', 'employeeId', 'siteId', 'confirmed', 'confirmedBy'])
+            && next.date is string && next.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+            && next.employeeId is string && next.employeeId == request.auth.token.cmid
+            && next.siteId is string && next.siteId.size() > 0
+            && next.confirmed is bool
+            && id == next.date + '_' + next.employeeId + '_' + next.siteId;
+        }
+        allow read: if master() || member(companyId);
+        allow create: if master() || manager(companyId) || (member(companyId) && validOwnAttendance());
+        allow update: if master() || manager(companyId) || (member(companyId) && resource.data.employeeId == request.auth.token.cmid && validOwnAttendance());
+        allow delete: if master() || manager(companyId);
+      }
+      match /cals/{id} {
+        // Feed tokens and external subscription URLs are bearer credentials.
+        // Staff consume appReadData's per-principal calendar projection.
+        allow read: if master() || owner(companyId);
+        allow create: if master() || owner(companyId)
+          || (request.resource.data.get('personal', false) != true && manager(companyId))
+          || (member(companyId) && request.resource.data.get('personal', false) == true && request.resource.data.get('ownerId', '') == request.auth.token.cmid);
+        allow update: if master() || owner(companyId)
+          || (resource.data.get('personal', false) != true && request.resource.data.get('personal', false) != true && manager(companyId))
+          || (member(companyId) && (
+          (resource.data.get('personal', false) == true && resource.data.get('ownerId', '') == request.auth.token.cmid && request.resource.data.get('ownerId', '') == request.auth.token.cmid && request.resource.data.get('personal', false) == true)
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checked'])));
+        allow delete: if master() || owner(companyId)
+          || (resource.data.get('personal', false) != true && manager(companyId))
+          || (member(companyId) && resource.data.get('personal', false) == true && resource.data.get('ownerId', '') == request.auth.token.cmid);
+      }
+      match /{collectionName}/{id} {
+        allow read: if !(collectionName in ['users', 'profiles', 'cals', 'events', 'reports', 'monthlySettlements', 'extraPayments', 'transactions']) && (master() || member(companyId));
+        allow write: if !(collectionName in ['users', 'profiles', 'cals', 'events', 'reports', 'monthlySettlements', 'extraPayments', 'transactions', 'attendance']) && (
+          master() || manager(companyId)
+          || (member(companyId) && collectionName == 'activityLogs')
+        );
+      }
+    }
+    // Unrelated attendance application collections retain their prior policy.
+    // Private/server namespaces and protected app data cannot use this fallback.
     match /{col}/{document=**} {
-      allow read, write: if !col.matches('(gcal|mcp).*');
+      allow read, write: if !col.matches('(gcal|mcp|appAuth).*') && !(col in ['companies', 'admins', 'staffs']);
     }
   }
 }

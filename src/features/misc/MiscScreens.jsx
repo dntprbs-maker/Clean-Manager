@@ -1,3 +1,5 @@
+import { seoulToday } from "../../lib/dateTime";
+import { MoreRows } from "../../components/shared/MoreRows";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { ChevronDown, ChevronLeft, X } from "lucide-react";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
@@ -10,7 +12,7 @@ import { isSuperAdmin, isMemberOf, accessTier } from "../../lib/membership";
 
 // ── 팀별 일정 화면 ───────────────────────────────────────────────
 export function TeamScheduleScreen() {
-  const { visibleEvents, setCurrentScreen, visibleCals: cals } = useC();
+  const { visibleEvents, setCurrentScreen, visibleCals: cals, setCalendarDay } = useC();
   const [selectedCal, setSelectedCal] = useState(null);
   const [dateOffset, setDateOffset]   = useState(0);
   const [dropOpen, setDropOpen]       = useState(false);
@@ -36,6 +38,7 @@ export function TeamScheduleScreen() {
   };
 
   const dateLabel = getDate(dateOffset);
+  useEffect(()=>{setCalendarDay?.(dateLabel);return ()=>setCalendarDay?.(null);},[dateLabel,setCalendarDay]);
   const curr = formatDate(dateOffset);
   const prev = formatDate(dateOffset - 1);
   const next = formatDate(dateOffset + 1);
@@ -176,7 +179,7 @@ const _ovl = (ev, from, to) => ev.start <= to && (ev.end || ev.start) >= from;
 const ALL_DASH_CARDS = [
   { id:"today_count", label:"오늘 일정", icon:"📅", color:"#1a56db", bg:"#eff6ff", group:"count",
     roles:["최고관리자","팀장","팀원"],
-    getValue:(evs)=>{ const t=fmt(new Date()); return { value:evs.filter(e=>_ovl(e,t,t)).length, unit:"건" }; } },
+    getValue:(evs)=>{ const t=seoulToday(); return { value:evs.filter(e=>_ovl(e,t,t)).length, unit:"건" }; } },
   { id:"week_count", label:"이번주 일정", icon:"🗓️", color:"#0891b2", bg:"#ecfeff", group:"count",
     roles:["최고관리자","팀장"],
     getValue:(evs)=>{ const n=new Date(); const mon=new Date(n); mon.setDate(n.getDate()-((n.getDay()+6)%7));
@@ -192,10 +195,10 @@ const ALL_DASH_CARDS = [
     getValue:(evs)=>({ value:evs.length, unit:"건" }) },
   { id:"upcoming", label:"다가오는 일정", icon:"⏭️", color:"#16a34a", bg:"#f0fdf4", group:"ops",
     roles:["최고관리자","팀장","팀원"],
-    getValue:(evs)=>{ const t=fmt(new Date()); return { value:evs.filter(e=>e.start>=t).length, unit:"건" }; } },
+    getValue:(evs)=>{ const t=seoulToday(); return { value:evs.filter(e=>e.start>=t).length, unit:"건" }; } },
   { id:"team_breakdown", label:"오늘 가장 바쁜 팀", icon:"🔥", color:"#ea580c", bg:"#fff7ed", group:"team",
     roles:["최고관리자"],
-    getValue:(evs,user,cals)=>{ const t=fmt(new Date()); const cnt={};
+    getValue:(evs,user,cals)=>{ const t=seoulToday(); const cnt={};
       evs.filter(e=>_ovl(e,t,t)).forEach(e=>{ cnt[e.calId]=(cnt[e.calId]||0)+1; });
       let best=null,max=0; Object.entries(cnt).forEach(([id,c])=>{ if(c>max){max=c;best=id;} });
       const cal=(cals||[]).find(c=>c.id===best);
@@ -343,7 +346,7 @@ export function NoticeScreen() {
   const submitNotice = () => {
     if(!newTitle.trim()) return;
     // id 는 Firestore 가 발급. 실시간 스냅샷으로 목록에 자동 반영됨.
-    addNotice({ title:newTitle, body:newBody, author:currentUser.name, date:fmt(new Date()), important });
+    addNotice({ title:newTitle, body:newBody, author:currentUser.name, date:seoulToday(), important });
     setNewTitle(""); setNewBody(""); setImportant(false); setWriting(false);
   };
 
@@ -485,9 +488,10 @@ export function NoticeScreen() {
 
 // ── 최근 작업 내역 화면 (변경 로그) ───────────────────────────────────────────────
 export function ActivityLogScreen() {
-  const { activityLogs, setCurrentScreen, cals } = useC();
+  const { activityLogs, setCurrentScreen, cals, logFacets, logHasMore, logPageSize, setLogPageSize, setLogFilterActive, dataStates } = useC();
   const [filter, setFilter]   = useState("전체");
   const [userFilter, setUserFilter] = useState("전체");
+  useEffect(()=>{setLogFilterActive?.(filter!=="전체"||userFilter!=="전체");setLogPageSize?.(20);return ()=>setLogFilterActive?.(false);},[filter,userFilter,setLogFilterActive,setLogPageSize]);
   const FILTERS = ["전체","등록","수정","삭제"];
 
   const ACTION_STYLE = {
@@ -497,7 +501,7 @@ export function ActivityLogScreen() {
   };
 
   // 수정자 목록 (중복 제거)
-  const users = [...new Set(activityLogs.map(l => typeof l.user==="string"?l.user:l.user?.name||"관리자"))];
+  const users = logFacets || [...new Set(activityLogs.map(l => typeof l.user==="string"?l.user:l.user?.name||"관리자"))];
 
   const filtered = activityLogs
     .filter(l=>filter==="전체"||l.action===filter)
@@ -516,7 +520,7 @@ export function ActivityLogScreen() {
   },{});
   const groupedDates = Object.keys(grouped).sort((a,b)=>b.localeCompare(a));
 
-  const today = fmt(new Date());
+  const today = seoulToday();
   const yesterday = fmt(new Date(Date.now()-86400000));
   const dateLabel = (d) => d===today?"오늘":d===yesterday?"어제":d.slice(5).replace("-",".");
 
@@ -527,7 +531,7 @@ export function ActivityLogScreen() {
         <div className="flex items-center justify-between mb-3">
           <div>
             <h2 className="text-lg font-bold text-gray-900">변경 로그</h2>
-            <p className="text-xs text-gray-400">전체 {activityLogs.length}건</p>
+            <p className="text-xs text-gray-400">현재 {activityLogs.length}건 표시</p>
           </div>
           <button onClick={()=>setCurrentScreen("calendar")} className="p-2 rounded-full hover:bg-gray-100">
             <X size={22} className="text-gray-500"/>
@@ -603,6 +607,7 @@ export function ActivityLogScreen() {
           </div>
         ))}
       </div>
+      <MoreRows count={filtered.length} hasMore={logHasMore} loading={!dataStates?.activityLogs?.ready} onMore={()=>setLogPageSize?.(logPageSize+20)}/>
     </div>
   );
 }

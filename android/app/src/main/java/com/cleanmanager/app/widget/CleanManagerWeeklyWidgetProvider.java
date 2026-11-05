@@ -247,7 +247,7 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
 
             List<WidgetEvent> dayEvents = new ArrayList<>();
             for (WidgetEvent e : snapshot.events) {
-                if (dayIso.equals(e.start)) dayEvents.add(e);
+                if (e.start.compareTo(dayIso) <= 0 && (e.end == null || e.end.isEmpty() ? e.start : e.end).compareTo(dayIso) >= 0) dayEvents.add(e);
             }
             Collections.sort(dayEvents, Comparator.comparing(e -> e.startTime == null ? "" : e.startTime));
 
@@ -299,6 +299,7 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
             views.setOnClickPendingIntent(ROOT_IDS[dayIdx], openPending);
         }
 
+        if (!WidgetSessionStore.isSignedIn(context)) views.setTextViewText(R.id.widget_date_range, "앱에서 로그인해 주세요");
         return views;
     }
 

@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { Capacitor } from "@capacitor/core";
+import { restoreSession, endSession, watchWidgetSession } from "./lib/appAuth";
 import { db, functions, storage } from "./firebase";
 import { enablePush, disablePush, listenForeground } from "./fcm";
 import { setupNativePush } from "./nativePush";
@@ -266,26 +267,24 @@ export default function App() {
   const [authState, setAuthState] = useState("loading"); // "loading" | "login" | "app"
   const [loginUser, setLoginUser] = useState(null);
 
-  // 로그인은 전화번호/아이디 + 비밀번호 기반(Firestore 직접 조회)이며,
-  // 로그인 시 localStorage 에 사용자 정보를 저장한다. 새로고침 시 세션 복원.
+  // Restore only after Firebase Auth and live company membership validation.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("loginUser");
-      if (saved) {
-        const user = JSON.parse(saved);
-        if (user && user.companyId) {
-          setLoginUser(user);
-          setAuthState("app");
-          return;
-        }
-      }
-    } catch (e) { /* 파싱 실패 시 로그인 화면 */ }
-    setAuthState("login");
+    let cancelled = false;
+    const stopWidget = watchWidgetSession();
+    restoreSession().then(session => {
+      if (cancelled) return;
+      setLoginUser(session?.user || null);
+      setAuthState(session ? "app" : "login");
+    }).catch(async () => {
+      await endSession();
+      if (!cancelled) { setLoginUser(null); setAuthState("login"); }
+    });
+    return () => { cancelled = true; stopWidget(); };
   }, []);
 
   const handleLogout = async () => {
     try { await disablePush(loginUser); } catch { /* 무시 */ } // 이 기기 토큰 제거 → 로그아웃 상태에선 알림 안 옴
-    try { localStorage.removeItem("loginUser"); } catch (e) { /* ignore */ }
+    await endSession();
     setLoginUser(null);
     setAuthState("login");
   };

@@ -25,8 +25,6 @@ public final class WidgetPushService {
 
     private static final String TAG = "CleanManagerWidget";
 
-    static final String TOPIC = "widget_" + WidgetConfig.COMPANY_ID;
-
     private WidgetPushService() {}
 
     /** widget_changed 데이터 메시지만 처리한다. 다른 타입(공지/일정 알림 등)은 호출하는 쪽에서 별도 처리. */
@@ -34,7 +32,8 @@ public final class WidgetPushService {
         try {
             Map<String, String> data = message.getData();
             if (!"widget_changed".equals(data.get("type"))) return;
-            if (!WidgetConfig.COMPANY_ID.equals(data.get("company"))) return;
+            if (!WidgetSessionStore.isSignedIn(context)
+                    || !WidgetSessionStore.company(context).equals(data.get("company"))) return;
 
             Context ctx = context.getApplicationContext();
 
@@ -71,7 +70,8 @@ public final class WidgetPushService {
     /** 위젯이 설치돼 있을 때 이 회사 토픽을 구독한다(재설치·토큰 회전 대비 반복 호출 안전). */
     public static void ensureSubscribed(Context ctx) {
         try {
-            FirebaseMessaging.getInstance().subscribeToTopic(TOPIC);
+            if (!WidgetSessionStore.isSignedIn(ctx) || !WidgetRefresher.hasAnyWidget(ctx)) return;
+            FirebaseMessaging.getInstance().subscribeToTopic("widget_" + WidgetSessionStore.company(ctx));
         } catch (Exception e) {
             Log.w(TAG, "토픽 구독 실패", e);
         }
@@ -79,8 +79,13 @@ public final class WidgetPushService {
 
     /** 위젯이 없을 때 토픽 구독을 해제해 불필요한 알림을 막는다. */
     static void unsubscribe(Context ctx) {
+        unsubscribeCompany(WidgetSessionStore.company(ctx));
+    }
+
+    static void unsubscribeCompany(String company) {
         try {
-            FirebaseMessaging.getInstance().unsubscribeFromTopic(TOPIC);
+            if (company == null || company.isEmpty()) return;
+            FirebaseMessaging.getInstance().unsubscribeFromTopic("widget_" + company);
         } catch (Exception e) {
             Log.w(TAG, "토픽 구독 해제 실패", e);
         }

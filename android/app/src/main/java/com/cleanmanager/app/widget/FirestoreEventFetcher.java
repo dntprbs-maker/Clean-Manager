@@ -1,15 +1,13 @@
 package com.cleanmanager.app.widget;
 
 import android.graphics.Color;
+import android.content.Context;
 import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -19,261 +17,153 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 인증 없이 Firestore REST를 호출한다.
- * companies/{companyId}/events, /cals 컬렉션은 현재 Firestore 보안 규칙상 공개 읽기가
- * 열려있는 상태라 기존(구) 위젯도 이 방식으로 동작했다 — 신규로 여는 구멍이 아님.
- * description 필드(개인정보 포함 가능)는 절대 가져오지 않고 title/날짜/시간/장소/calId만 사용한다.
- */
+/** Authenticated Firebase REST requests, scoped to the native session's company. */
 final class FirestoreEventFetcher {
 
     private static final String TAG = "CleanManagerWidget";
 
     private FirestoreEventFetcher() {}
 
-    /** 성공(빈 목록 포함)이면 리스트를, 오류가 나면 null을 반환한다. */
-    static List<WidgetEvent> fetchRange(String fromIso, String toIso) {
+    private static String pendingScope = "";
+    private static Map<String, Integer> pendingCalendars;
+
+    /** The server expands recurrence and applies current company/team/private-calendar permissions. */
+    static List<WidgetEvent> fetchRange(Context context, String fromIso, String toIso) {
+        String scope = WidgetSessionStore.scope(context);
         try {
-            String urlStr = "https://firestore.googleapis.com/v1/projects/"
-                    + WidgetConfig.FIRESTORE_PROJECT_ID
-                    + "/databases/(default)/documents/companies/"
-                    + WidgetConfig.COMPANY_ID
-                    + ":runQuery?key=" + WidgetConfig.FIRESTORE_API_KEY;
-
-            JSONObject body = buildEventsQuery(fromIso, toIso);
-            String response = postJson(urlStr, body);
-            if (response == null) return null;
-
-            List<WidgetEvent> result = new ArrayList<>();
-            JSONArray arr = new JSONArray(response);
-            for (int i = 0; i < arr.length(); i++) {
-                JSONObject entry = arr.getJSONObject(i);
-                if (!entry.has("document")) continue;
-                JSONObject doc = entry.getJSONObject("document");
-                JSONObject fields = doc.optJSONObject("fields");
-                if (fields == null) continue;
-
-                // 웹앱과 동일하게 삭제 처리된 일정은 위젯에서도 숨긴다.
-                if ("deleted".equals(getString(fields, "status", ""))) continue;
-
-                String name = doc.optString("name", "");
-                String id = name.substring(name.lastIndexOf('/') + 1);
-                String title = getString(fields, "title", "(제목 없음)");
-                String start = getString(fields, "start", "");
-                String end = getString(fields, "end", start);
-                String startTime = getString(fields, "startTime", "");
-                String endTime = getString(fields, "endTime", "");
-                String place = getString(fields, "place", "");
-                String calId = getString(fields, "calId", "");
-                boolean allDay = getBool(fields, "allDay", false);
-
-                if (start.isEmpty()) continue;
-                result.add(new WidgetEvent(id, title, start, end, startTime, endTime, allDay, place, calId));
+            java.text.SimpleDateFormat format = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US);
+            format.setTimeZone(java.util.TimeZone.getTimeZone("Asia/Seoul"));
+            format.setLenient(false);
+            java.util.Calendar cursor = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Seoul"));
+            cursor.setTime(format.parse(fromIso));
+            java.util.LinkedHashMap<String, WidgetEvent> unique = new java.util.LinkedHashMap<>();
+            Map<String, Integer> calendars = new HashMap<>();
+            while (format.format(cursor.getTime()).compareTo(toIso) <= 0) {
+                String from = format.format(cursor.getTime());
+                java.util.Calendar end = (java.util.Calendar) cursor.clone();
+                end.add(java.util.Calendar.DAY_OF_MONTH, 369);
+                String to = format.format(end.getTime());
+                if (to.compareTo(toIso) > 0) to = toIso;
+                JSONObject root = request(context, new JSONObject().put("from", from).put("to", to));
+                if (root == null || !scope.equals(WidgetSessionStore.scope(context))) return null;
+                JSONArray array = root.getJSONArray("events");
+                for (int i = 0; i < array.length(); i++) {
+                    WidgetEvent event = event(array.getJSONObject(i));
+                    unique.put(event.id + ":" + event.start + ":" + event.end, event);
+                }
+                calendars.putAll(calendars(root.getJSONArray("calendars")));
+                cursor.setTime(format.parse(to));
+                cursor.add(java.util.Calendar.DAY_OF_MONTH, 1);
             }
-            return result;
-        } catch (Exception e) {
-            Log.w(TAG, "일정 조회 실패", e);
-            return null;
-        }
+            List<WidgetEvent> events = new ArrayList<>(unique.values());
+            synchronized (FirestoreEventFetcher.class) {
+                pendingScope = scope;
+                pendingCalendars = calendars;
+            }
+            return events;
+        } catch (Exception e) { Log.w(TAG, "일정 조회 실패"); return null; }
     }
 
-    /** 단건 조회 결과. deleted=true 면 위젯 캐시에서 지워야 한다. */
     static final class FetchOne {
         final boolean deleted;
         final WidgetEvent event;
-
-        FetchOne(boolean deleted, WidgetEvent event) {
-            this.deleted = deleted;
-            this.event = event;
-        }
+        FetchOne(boolean deleted, WidgetEvent event) { this.deleted = deleted; this.event = event; }
     }
 
-    /**
-     * 푸시로 알려온 eventId 하나만 읽는다. 위젯에 보이는 필드만 쓰고 description 은 안 건드린다.
-     * 문서 있음 → (deleted 상태면 삭제로 취급) / HTTP 404 → 삭제 / 그 외 오류 → null(호출자가 전체 재조회).
-     */
-    static FetchOne fetchById(String id) {
+    static FetchOne fetchById(Context context, String id) {
         try {
-            String urlStr = "https://firestore.googleapis.com/v1/projects/"
-                    + WidgetConfig.FIRESTORE_PROJECT_ID
-                    + "/databases/(default)/documents/companies/"
-                    + WidgetConfig.COMPANY_ID
-                    + "/events/" + id
-                    + "?key=" + WidgetConfig.FIRESTORE_API_KEY;
-
-            HttpResult r = httpGet(urlStr);
-            if (r.code == 404) return new FetchOne(true, null);          // 문서 없음 → 삭제
-            if (r.code < 200 || r.code >= 300) return null;              // 그 외 오류 → null
-
-            JSONObject doc = new JSONObject(r.body);
-            JSONObject fields = doc.optJSONObject("fields");
-            if (fields == null) return new FetchOne(true, null);
-            if ("deleted".equals(getString(fields, "status", ""))) return new FetchOne(true, null);
-
-            String title = getString(fields, "title", "(제목 없음)");
-            String start = getString(fields, "start", "");
-            if (start.isEmpty()) return new FetchOne(true, null);
-            String end = getString(fields, "end", start);
-            String startTime = getString(fields, "startTime", "");
-            String endTime = getString(fields, "endTime", "");
-            String place = getString(fields, "place", "");
-            String calId = getString(fields, "calId", "");
-            boolean allDay = getBool(fields, "allDay", false);
-            return new FetchOne(false, new WidgetEvent(id, title, start, end, startTime, endTime, allDay, place, calId));
-        } catch (Exception e) {
-            Log.w(TAG, "일정 단건 조회 실패", e);
-            return null;
-        }
+            JSONObject root = request(context, new JSONObject().put("eventId", id));
+            if (root == null) return null;
+            if (root.optBoolean("refreshRequired", false)) return null;
+            return root.optBoolean("deleted", false) ? new FetchOne(true, null) : new FetchOne(false, event(root.getJSONObject("event")));
+        } catch (Exception e) { Log.w(TAG, "일정 단건 조회 실패"); return null; }
     }
 
-    /** calId -> ARGB 색상(int) 맵. 실패 시 null. */
-    static Map<String, Integer> fetchCalendars() {
-        try {
-            String urlStr = "https://firestore.googleapis.com/v1/projects/"
-                    + WidgetConfig.FIRESTORE_PROJECT_ID
-                    + "/databases/(default)/documents/companies/"
-                    + WidgetConfig.COMPANY_ID
-                    + "/cals?key=" + WidgetConfig.FIRESTORE_API_KEY + "&pageSize=200";
-
-            String response = getJson(urlStr);
-            if (response == null) return null;
-
-            Map<String, Integer> map = new HashMap<>();
-            JSONObject root = new JSONObject(response);
-            JSONArray docs = root.optJSONArray("documents");
-            if (docs == null) return map;
-
-            for (int i = 0; i < docs.length(); i++) {
-                JSONObject doc = docs.getJSONObject(i);
-                JSONObject fields = doc.optJSONObject("fields");
-                if (fields == null) continue;
-                String name = doc.optString("name", "");
-                String id = name.substring(name.lastIndexOf('/') + 1);
-                String colorHex = getString(fields, "color", "#9CA3AF");
-                try {
-                    map.put(id, Color.parseColor(colorHex));
-                } catch (IllegalArgumentException ignore) {
-                    map.put(id, Color.parseColor("#9CA3AF"));
-                }
+    static Map<String, Integer> fetchCalendars(Context context) {
+        synchronized (FirestoreEventFetcher.class) {
+            if (WidgetSessionStore.scope(context).equals(pendingScope) && pendingCalendars != null) {
+                Map<String, Integer> result = pendingCalendars;
+                pendingCalendars = null;
+                return result;
             }
-            return map;
-        } catch (Exception e) {
-            Log.w(TAG, "캘린더 색상 조회 실패", e);
-            return null;
         }
+        try {
+            String[] range = WidgetRefresher.refreshRange(context);
+            JSONObject root = request(context, new JSONObject().put("from", range[0]).put("to", range[1]));
+            return root == null ? null : calendars(root.getJSONArray("calendars"));
+        } catch (Exception e) { Log.w(TAG, "캘린더 색상 조회 실패"); return null; }
     }
 
-    private static JSONObject buildEventsQuery(String from, String to) throws Exception {
-        JSONObject fromCond = new JSONObject();
-        fromCond.put("fieldFilter", new JSONObject()
-                .put("field", new JSONObject().put("fieldPath", "start"))
-                .put("op", "GREATER_THAN_OR_EQUAL")
-                .put("value", new JSONObject().put("stringValue", from)));
-
-        JSONObject toCond = new JSONObject();
-        toCond.put("fieldFilter", new JSONObject()
-                .put("field", new JSONObject().put("fieldPath", "start"))
-                .put("op", "LESS_THAN_OR_EQUAL")
-                .put("value", new JSONObject().put("stringValue", to)));
-
-        JSONArray filters = new JSONArray().put(fromCond).put(toCond);
-
-        JSONObject where = new JSONObject().put("compositeFilter",
-                new JSONObject().put("op", "AND").put("filters", filters));
-
-        JSONObject orderBy = new JSONObject()
-                .put("field", new JSONObject().put("fieldPath", "start"))
-                .put("direction", "ASCENDING");
-
-        JSONObject fromClause = new JSONObject().put("collectionId", "events");
-
-        JSONObject structuredQuery = new JSONObject()
-                .put("from", new JSONArray().put(fromClause))
-                .put("where", where)
-                .put("orderBy", new JSONArray().put(orderBy))
-                .put("limit", 500);
-
-        return new JSONObject().put("structuredQuery", structuredQuery);
+    private static WidgetEvent event(JSONObject source) throws Exception {
+        return new WidgetEvent(source.getString("id"), source.optString("title", "(제목 없음)"),
+                source.getString("start"), source.optString("end", source.getString("start")),
+                source.optString("startTime", ""), source.optString("endTime", ""),
+                source.optBoolean("allDay", false), source.optString("place", ""), source.optString("calId", ""));
     }
 
-    private static String postJson(String urlStr, JSONObject body) throws IOException {
-        URL url = new URL(urlStr);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("POST");
-        conn.setDoOutput(true);
-        conn.setConnectTimeout(8000);
-        conn.setReadTimeout(8000);
-        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-
-        try (OutputStream os = conn.getOutputStream()) {
-            os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+    private static Map<String, Integer> calendars(JSONArray array) throws Exception {
+        Map<String, Integer> result = new HashMap<>();
+        for (int i = 0; i < array.length(); i++) {
+            JSONObject item = array.getJSONObject(i);
+            int color;
+            try { color = Color.parseColor(item.optString("color", "#9CA3AF")); }
+            catch (IllegalArgumentException ignored) { color = Color.parseColor("#9CA3AF"); }
+            result.put(item.getString("id"), color);
         }
-
-        int code = conn.getResponseCode();
-        InputStream is = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
-        String response = readAll(is);
-        conn.disconnect();
-
-        if (code < 200 || code >= 300) {
-            Log.w(TAG, "요청 실패: " + code + " " + response);
-            return null;
-        }
-        return response;
+        return result;
     }
 
-    /** HTTP 상태코드와 응답 본문. 404 를 "삭제"로 구분하기 위해 코드가 필요하다. */
+    private static JSONObject request(Context context, JSONObject body) throws Exception {
+        String response = postJson(context, WidgetConfig.DATA_URL, body);
+        return response == null ? null : new JSONObject(response);
+    }
+
+    private static String requireCompany(Context context) throws IOException {
+        if (!WidgetSessionStore.isSignedIn(context)) throw new IOException("Widget login required");
+        return WidgetSessionStore.company(context);
+    }
+
+    private static String postJson(Context context, String urlStr, JSONObject body) throws IOException {
+        HttpResult result = authenticatedRequest(context, urlStr, body);
+        return result.code >= 200 && result.code < 300 ? result.body : null;
+    }
+
     private static final class HttpResult {
         final int code;
         final String body;
+        HttpResult(int code, String body) { this.code = code; this.body = body; }
+    }
 
-        HttpResult(int code, String body) {
-            this.code = code;
-            this.body = body;
+    private static HttpResult authenticatedRequest(Context context, String urlStr, JSONObject body) throws IOException {
+        String scope = WidgetSessionStore.scope(context);
+        requireCompany(context);
+        if (!WidgetConfig.DATA_URL.equals(urlStr)) throw new IOException("Widget endpoint mismatch");
+        for (int attempt = 0; attempt < 2; attempt++) {
+            String token = WidgetSessionStore.token(context, scope, attempt > 0);
+            HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+            conn.setRequestMethod(body == null ? "GET" : "POST");
+            conn.setConnectTimeout(8000); conn.setReadTimeout(8000);
+            conn.setRequestProperty("Authorization", "Bearer " + token);
+            if (body != null) {
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            }
+            try {
+                if (body != null) try (OutputStream out = conn.getOutputStream()) { out.write(body.toString().getBytes(StandardCharsets.UTF_8)); }
+                int code = conn.getResponseCode();
+                String response = WidgetSessionStore.read(code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream());
+                if (!scope.equals(WidgetSessionStore.scope(context))) throw new IOException("Widget session changed");
+                if (code == 401 && attempt == 0) continue;
+                if (code == 401 || code == 403) {
+                    WidgetSessionStore.clearIfScope(context, scope);
+                    WidgetRefresher.redrawAll(context);
+                }
+                // Error bodies may contain private document names: log only the status.
+                if (code < 200 || code >= 300) Log.w(TAG, "Widget request failed: " + code);
+                return new HttpResult(code, response);
+            } finally { conn.disconnect(); }
         }
+        throw new IOException("Widget authentication failed");
     }
 
-    private static HttpResult httpGet(String urlStr) throws IOException {
-        URL url = new URL(urlStr);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("GET");
-        conn.setConnectTimeout(8000);
-        conn.setReadTimeout(8000);
-
-        int code = conn.getResponseCode();
-        InputStream is = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
-        String response = readAll(is);
-        conn.disconnect();
-        return new HttpResult(code, response);
-    }
-
-    private static String getJson(String urlStr) throws IOException {
-        HttpResult r = httpGet(urlStr);
-        if (r.code < 200 || r.code >= 300) {
-            Log.w(TAG, "요청 실패: " + r.code + " " + r.body);
-            return null;
-        }
-        return r.body;
-    }
-
-    private static String getString(JSONObject fields, String key, String fallback) {
-        JSONObject f = fields.optJSONObject(key);
-        if (f == null) return fallback;
-        return f.optString("stringValue", fallback);
-    }
-
-    private static boolean getBool(JSONObject fields, String key, boolean fallback) {
-        JSONObject f = fields.optJSONObject(key);
-        if (f == null) return fallback;
-        return f.optBoolean("booleanValue", fallback);
-    }
-
-    private static String readAll(InputStream is) throws IOException {
-        if (is == null) return "";
-        StringBuilder sb = new StringBuilder();
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = br.readLine()) != null) sb.append(line);
-        }
-        return sb.toString();
-    }
 }

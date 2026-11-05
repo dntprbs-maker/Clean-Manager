@@ -26,7 +26,11 @@ export const add  = (s,n)=>{ const d=pd(s); d.setDate(d.getDate()+n); return fmt
 export const addMonths = (s,n)=>{ const d=pd(s); d.setMonth(d.getMonth()+n); return fmt(d); };
 
 // 앱 로드 시점의 "오늘" 날짜 문자열 — 여러 화면에서 "오늘/어제" 라벨링에 공용으로 씀
-export const today = fmt(new Date());
+export const seoulToday = (at = new Date()) => {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(at).map(p=>[p.type,p.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
+export const today = seoulToday();
 
 // 시간 포맷: "09:00" → "오전 9:00"
 export const fmtTime = t => {

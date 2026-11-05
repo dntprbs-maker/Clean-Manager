@@ -33,3 +33,8 @@ skills-lock.json
 *.njsproj
 *.sln
 *.sw?
+
+# Local emulator/browser verification artifacts
+test/.artifacts/
+
+.qa-*.json
