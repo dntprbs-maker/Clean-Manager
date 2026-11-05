@@ -16,3 +16,9 @@ test('unknown index body or unrelated source changes keep broad fallback',()=>{
 test('test and rules changes alone do not overwrite production functions',()=>{
   assert.equal(deploymentTargets(['functions/test/appAuth.test.js','firestore.rules']),'firestore:rules,firestore:indexes');
 });
+test('scoped read helper stays within app functions',()=>{
+  const plan=deploymentTargets(['functions/lib/appAuth.js','functions/lib/appScopedReads.js']);
+  assert.ok(plan.includes('functions:appReadData'));
+  assert.ok(plan.includes('functions:appWidgetData'));
+  assert.ok(!plan.split(',').includes('functions'));
+});

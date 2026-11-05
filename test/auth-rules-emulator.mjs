@@ -1,8 +1,9 @@
+import { authHost, firestoreHost, functionsOrigin } from './emulatorConfig.mjs';
 import assert from 'node:assert/strict';
-const base='http://127.0.0.1:5001/demo-clean-manager/asia-northeast3/';
+const base=`${functionsOrigin}/demo-clean-manager/asia-northeast3/`;
 async function call(name,data,token){const r=await fetch(base+name,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify({data})});const d=await r.json();if(d.error){const e=Error(d.error.message);e.code=d.error.status;throw e;}return d.result;}
-async function login(identifier){const d=await call('appAuth',{identifier,password:'qa-local-only'});const r=await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=fake-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:d.token,returnSecureToken:true})});const a=await r.json();assert.ok(a.idToken);return a.idToken;}
-const root='http://127.0.0.1:8080/v1/projects/demo-clean-manager/databases/(default)/documents/';
+async function login(identifier){const d=await call('appAuth',{identifier,password:'qa-local-only'});const r=await fetch(`http://${authHost}/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=fake-key`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:d.token,returnSecureToken:true})});const a=await r.json();assert.ok(a.idToken);return a.idToken;}
+const root=`http://${firestoreHost}/v1/projects/demo-clean-manager/databases/(default)/documents/`;
 const owner=await login('qaowner'),staff=await login('01000001234');
 async function code(path,token){return(await fetch(root+path,{headers:token?{Authorization:'Bearer '+token}:{}})).status;}
 assert.equal(await code('companies/qa_pagination/events/event_000'),403);

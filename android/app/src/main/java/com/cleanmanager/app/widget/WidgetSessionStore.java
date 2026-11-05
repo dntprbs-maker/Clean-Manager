@@ -37,7 +37,7 @@ public final class WidgetSessionStore {
     }
 
     /** Validate the token's company binding; Firebase verifies its signature on every request. */
-    public static void set(Context context, String token, String refresh, String company, String user) throws Exception {
+    public static boolean set(Context context, String token, String refresh, String company, String user) throws Exception {
         if (!company.matches("[A-Za-z0-9_-]+") || user.isEmpty() || refresh.isEmpty()) throw new IllegalArgumentException("Invalid widget session");
         JSONObject claims = claims(token);
         if (!company.equals(claims.optString("cmCompany")) || !user.equals(claims.optString("user_id"))) {
@@ -54,10 +54,26 @@ public final class WidgetSessionStore {
             p.edit().putString("token", token).putString("refresh", refresh).putString("company", company)
                     .putString("user", user).putString("version", claims.optString("cmv"))
                     .putString("generation", generation).putLong("expires", claims.optLong("exp", 0) * 1000L).commit();
-            if (changed) WidgetCache.clear(context);
+            if (changed) {
+                p.edit().putLong("dataRevision", 0L).commit();
+                WidgetCache.clear(context);
+            }
         }
         if (changed) WidgetPushService.unsubscribeCompany(previousCompany);
         WidgetPushService.ensureSubscribed(context);
+        return changed;
+    }
+
+    static long dataRevision(Context context) { return prefs(context).getLong("dataRevision", 0L); }
+
+    /** Called only after a web mutation has been acknowledged by the server. */
+    public static void invalidateData(Context context) {
+        synchronized (LOCK) {
+            if (!isSignedIn(context)) return;
+            long revision = dataRevision(context);
+            if (revision == Long.MAX_VALUE) { WidgetCache.clear(context); revision = 0; }
+            prefs(context).edit().putLong("dataRevision", revision + 1).commit();
+        }
     }
 
     public static void clear(Context context) {

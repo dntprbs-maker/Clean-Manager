@@ -24,6 +24,7 @@ final class WidgetCache {
         final String rangeTo;          // 조회한 기간 끝(YYYY-MM-DD), 없으면 null
         final long eventsFetchedAt;    // 일정 조회 시각(ms), 없으면 0
         final long calendarsFetchedAt; // 캘린더 조회 시각(ms), 없으면 0
+        final long dataRevision;       // 조회 시작 시점의 웹 변경 revision
 
         Snapshot(List<WidgetEvent> events, Map<String, Integer> calendars) {
             this(events, calendars, null, null, 0L, 0L);
@@ -31,12 +32,18 @@ final class WidgetCache {
 
         Snapshot(List<WidgetEvent> events, Map<String, Integer> calendars,
                  String rangeFrom, String rangeTo, long eventsFetchedAt, long calendarsFetchedAt) {
+            this(events, calendars, rangeFrom, rangeTo, eventsFetchedAt, calendarsFetchedAt, -1L);
+        }
+
+        Snapshot(List<WidgetEvent> events, Map<String, Integer> calendars,
+                 String rangeFrom, String rangeTo, long eventsFetchedAt, long calendarsFetchedAt, long dataRevision) {
             this.events = events;
             this.calendars = calendars;
             this.rangeFrom = rangeFrom;
             this.rangeTo = rangeTo;
             this.eventsFetchedAt = eventsFetchedAt;
             this.calendarsFetchedAt = calendarsFetchedAt;
+            this.dataRevision = dataRevision;
         }
     }
 
@@ -88,7 +95,7 @@ final class WidgetCache {
             String rangeTo = root.isNull("rangeTo") ? null : root.optString("rangeTo", null);
             long eventsFetchedAt = root.optLong("eventsFetchedAt", 0L);
             long calendarsFetchedAt = root.optLong("calendarsFetchedAt", 0L);
-            return new Snapshot(events, cals, rangeFrom, rangeTo, eventsFetchedAt, calendarsFetchedAt);
+            return new Snapshot(events, cals, rangeFrom, rangeTo, eventsFetchedAt, calendarsFetchedAt, root.optLong("dataRevision", -1L));
         } catch (Exception e) {
             Log.w(TAG, "캐시 읽기 실패", e);
             return new Snapshot(new ArrayList<>(), new HashMap<>());
@@ -99,17 +106,27 @@ final class WidgetCache {
         // 범위 정보 없이 저장 요청이 오면 기존 범위·시각을 유지한다.
         Snapshot current = load(context);
         save(context, events, calendars, current.rangeFrom, current.rangeTo,
-                current.eventsFetchedAt, current.calendarsFetchedAt);
+                current.eventsFetchedAt, current.calendarsFetchedAt, current.dataRevision);
     }
 
     static void saveScoped(Context context, String expectedScope, List<WidgetEvent> events, Map<String, Integer> calendars,
                            String from, String to, long eventsAt, long calendarsAt) {
+        saveScoped(context, expectedScope, events, calendars, from, to, eventsAt, calendarsAt, WidgetSessionStore.dataRevision(context));
+    }
+
+    static void saveScoped(Context context, String expectedScope, List<WidgetEvent> events, Map<String, Integer> calendars,
+                           String from, String to, long eventsAt, long calendarsAt, long dataRevision) {
         WidgetSessionStore.runIfCurrent(context, expectedScope,
-                () -> save(context, events, calendars, from, to, eventsAt, calendarsAt));
+                () -> save(context, events, calendars, from, to, eventsAt, calendarsAt, dataRevision));
     }
 
     static void save(Context context, List<WidgetEvent> events, Map<String, Integer> calendars,
                      String rangeFrom, String rangeTo, long eventsFetchedAt, long calendarsFetchedAt) {
+        save(context, events, calendars, rangeFrom, rangeTo, eventsFetchedAt, calendarsFetchedAt, WidgetSessionStore.dataRevision(context));
+    }
+
+    private static void save(Context context, List<WidgetEvent> events, Map<String, Integer> calendars,
+                     String rangeFrom, String rangeTo, long eventsFetchedAt, long calendarsFetchedAt, long dataRevision) {
         try {
             JSONArray evArr = new JSONArray();
             for (WidgetEvent e : events) {
@@ -140,6 +157,7 @@ final class WidgetCache {
             root.put("rangeTo", rangeTo);
             root.put("eventsFetchedAt", eventsFetchedAt);
             root.put("calendarsFetchedAt", calendarsFetchedAt);
+            root.put("dataRevision", dataRevision);
 
             SharedPreferences prefs = context.getSharedPreferences(WidgetConfig.PREFS_NAME, Context.MODE_PRIVATE);
             prefs.edit().putString(WidgetConfig.PREF_KEY_CACHE_BLOB, root.toString()).apply();

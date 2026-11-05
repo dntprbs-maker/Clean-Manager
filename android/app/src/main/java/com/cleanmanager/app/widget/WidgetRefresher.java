@@ -16,7 +16,6 @@ import java.util.Map;
  */
 public final class WidgetRefresher {
 
-    private static final long REUSE_WINDOW_MS = 5 * 60 * 1000L;       // 일정 조회 결과 재사용 시간
     private static final long CALENDAR_TTL_MS = 6 * 60 * 60 * 1000L;  // 캘린더 색상 재조회 간격
     private static final Object LOCK = new Object();
 
@@ -30,16 +29,17 @@ public final class WidgetRefresher {
             if (!WidgetSessionStore.isSignedIn(appContext)) { WidgetCache.clear(appContext); return false; }
             // 락을 잡은 뒤 다시 확인한다 — 다른 위젯이 그새 채워 놨을 수 있다.
             WidgetCache.Snapshot cached = WidgetCache.load(appContext);
+            long dataRevision = WidgetSessionStore.dataRevision(appContext);
             long now = System.currentTimeMillis();
             boolean covers = cached.rangeFrom != null && cached.rangeTo != null
                     && cached.rangeFrom.compareTo(from) <= 0 && cached.rangeTo.compareTo(to) >= 0;
-            boolean fresh = cached.eventsFetchedAt > 0 && now - cached.eventsFetchedAt <= REUSE_WINDOW_MS;
-            if (!force && covers && fresh) return false;
+            if (!WidgetRefreshPolicy.needsFetch(force, covers, cached.eventsFetchedAt, now, cached.dataRevision, dataRevision)) return false;
 
             List<WidgetEvent> events = FirestoreEventFetcher.fetchRange(appContext, from, to);
             if (events == null) return false; // 실패하면 기존 캐시를 그대로 둔다
 
             boolean needCals = force
+                    || cached.dataRevision != dataRevision
                     || cached.calendars.isEmpty()
                     || cached.calendarsFetchedAt <= 0
                     || now - cached.calendarsFetchedAt > CALENDAR_TTL_MS;
@@ -54,7 +54,7 @@ public final class WidgetRefresher {
             }
 
             if (!sessionScope.equals(WidgetSessionStore.scope(appContext))) return false;
-            WidgetCache.saveScoped(appContext, sessionScope, events, cals, from, to, now, calsAt);
+            WidgetCache.saveScoped(appContext, sessionScope, events, cals, from, to, now, calsAt, dataRevision);
             return true;
         }
     }

@@ -35,9 +35,9 @@ export const functions     = getFunctions(app, "asia-northeast3"); // Cloud Func
 export const storage       = getStorage(app); // AI 상담 분석 등 Cloud Functions 호출용
 
 if (import.meta.env.VITE_USE_EMULATORS === 'true') {
-  connectFirestoreEmulator(db, '127.0.0.1', 8080);
-  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+  connectFirestoreEmulator(db, '127.0.0.1', Number(import.meta.env.VITE_FIRESTORE_EMULATOR_PORT || 8080));
+  connectAuthEmulator(auth, `http://127.0.0.1:${Number(import.meta.env.VITE_AUTH_EMULATOR_PORT || 9099)}`, { disableWarnings: true });
+  connectFunctionsEmulator(functions, '127.0.0.1', Number(import.meta.env.VITE_FUNCTIONS_EMULATOR_PORT || 5001));
   connectStorageEmulator(storage, '127.0.0.1', 9199);
 }
 

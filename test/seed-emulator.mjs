@@ -1,7 +1,8 @@
+import './emulatorConfig.mjs';
 import {createRequire} from 'node:module';
 import fs from 'node:fs';
 const require=createRequire(new URL('../functions/package.json',import.meta.url));
-process.env.FIRESTORE_EMULATOR_HOST='127.0.0.1:8080';process.env.FIREBASE_AUTH_EMULATOR_HOST='127.0.0.1:9099';
+
 const {initializeApp}=require('firebase-admin/app');const {getFirestore}=require('firebase-admin/firestore');
 initializeApp({projectId:'demo-clean-manager'});const db=getFirestore();
 const co='qa_pagination';const date='2026-11-05';

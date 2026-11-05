@@ -100,7 +100,7 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
         } else if (ACTION_REFRESH.equals(action) || AppWidgetManager.ACTION_APPWIDGET_UPDATE.equals(action)) {
             int[] ids = intent.getIntArrayExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS);
             if (ids == null || ids.length == 0) return;
-            refreshDataInBackground(context, ids);
+            refreshDataInBackground(context, ids, ACTION_REFRESH.equals(action));
         }
     }
 
@@ -151,14 +151,14 @@ public class CleanManagerWeeklyWidgetProvider extends AppWidgetProvider {
     }
 
     /** goAsync()로 브로드캐스트 우선순위를 유지한 채 백그라운드에서 최신 데이터를 받아온다. */
-    private void refreshDataInBackground(Context context, int[] appWidgetIds) {
+    private void refreshDataInBackground(Context context, int[] appWidgetIds, boolean force) {
         Context appContext = context.getApplicationContext();
         PendingResult pendingResult = goAsync();
         new Thread(() -> {
             try {
                 // 설치된 위젯들이 보이는 기간을 한 번에 덮는 범위로 조회한다 (4종이 겹쳐도 5분 내 1회).
                 String[] range = WidgetRefresher.refreshRange(appContext);
-                WidgetRefresher.ensureRange(appContext, range[0], range[1], false);
+                WidgetRefresher.ensureRange(appContext, range[0], range[1], force);
 
                 AppWidgetManager mgr = AppWidgetManager.getInstance(appContext);
                 for (int id : appWidgetIds) {

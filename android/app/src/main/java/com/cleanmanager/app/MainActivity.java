@@ -23,9 +23,9 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onPause() {
         super.onPause();
-        // 앱에서 일정을 고치고 나가면 위젯에 바로 반영되도록 한 번만 강제 조회한다.
-        // (위젯 4종이 각자 조회하던 것을 한 곳으로 모아 중복 조회를 없앤다.)
-        WidgetRefresher.refreshAllAsync(this, true);
+        // 단순 앱 이탈은 캐시를 재사용한다. 실제 저장은 invalidateData bridge가
+        // 별도 revision을 올려 즉시 갱신하며, 푸시·수동 새로고침은 강제 조회를 유지한다.
+        WidgetRefresher.refreshAllAsync(this, false);
     }
 
     @Override
