@@ -1,6 +1,7 @@
 package com.cleanmanager.app.widget;
 
 import android.content.Context;
+import android.content.ContextWrapper;
 import android.util.Base64;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -19,7 +20,14 @@ import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 public class WidgetSessionInstrumentedTest {
     private Context context;
-    @Before public void before() { context = InstrumentationRegistry.getInstrumentation().getContext(); WidgetSessionStore.clear(context); }
+    @Before public void before() {
+        Context target = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        context = new ContextWrapper(target) {
+            @Override public android.content.SharedPreferences getSharedPreferences(String name, int mode) { return target.getSharedPreferences("qa_unit_" + name, mode); }
+            @Override public Context getApplicationContext() { return this; }
+        };
+        WidgetSessionStore.clear(context);
+    }
     @After public void after() { WidgetSessionStore.clear(context); }
 
     private String token(String company, String user, String version) throws Exception {
