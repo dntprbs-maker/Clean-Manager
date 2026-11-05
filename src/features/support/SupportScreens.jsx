@@ -1,4 +1,6 @@
-import { useState, useRef } from "react";
+import { seoulToday } from "../../lib/dateTime";
+import { MoreRows } from "../../components/shared/MoreRows";
+import { useState, useRef, useEffect } from "react";
 import { Search, X, ChevronDown, ChevronLeft, Camera } from "lucide-react";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage } from "../../firebase";
@@ -140,16 +142,17 @@ export function FaqScreen() {
 }
 
 export function ReportHistoryScreen() {
-  const { setCurrentScreen, reports, currentUser, updateReport, companyId, isDemo } = useC();
+  const { setCurrentScreen, reports, currentUser, updateReport, companyId, isDemo, reportRows, reportFacets, reportHasMore, reportPageSize, setReportPageSize, setReportFilterActive, dataStates } = useC();
 
   // 현장 완료 보고에서 저장된 실제 데이터 (Firestore reports)
-  const sampleReports = reports;
+  const sampleReports = reportRows || reports;
 
   const [selected, setSelected] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [dateFilter, setDateFilter]   = useState("전체");
   const [teamFilter, setTeamFilter]   = useState("전체");
   const [showSearch, setShowSearch]   = useState(false);
+  useEffect(()=>{setReportFilterActive?.(!!searchQuery || dateFilter!=="전체" || teamFilter!=="전체");setReportPageSize?.(20);return ()=>setReportFilterActive?.(false);},[searchQuery,dateFilter,teamFilter,setReportFilterActive,setReportPageSize]);
   const [viewMode, setViewMode]       = useState("list"); // "list" | "gallery"
 
   // 사장(최고관리자)만 완료 보고 내용을 수정 가능
@@ -214,7 +217,7 @@ export function ReportHistoryScreen() {
   };
 
   // 날짜 필터 옵션
-  const today = fmt(new Date());
+  const today = seoulToday();
   const weekAgo = fmt(new Date(Date.now() - 86400000 * 7));
   const monthAgo = fmt(new Date(Date.now() - 86400000 * 30));
 
@@ -232,7 +235,7 @@ export function ReportHistoryScreen() {
       : dateFilter === "week"  ? r.date >= weekAgo
       : r.date >= monthAgo;
     const matchTeam   = teamFilter === "전체" || r.teamName === teamFilter;
-    const matchSearch = !searchQuery || r.title.includes(searchQuery) || r.memo.includes(searchQuery);
+    const matchSearch = !searchQuery || (r.title||"").includes(searchQuery) || (r.memo||"").includes(searchQuery);
     return matchDate && matchTeam && matchSearch;
   });
 
@@ -453,7 +456,7 @@ export function ReportHistoryScreen() {
               borderColor:teamFilter==="전체"?"#111827":"#e5e7eb"}}>
             전체팀
           </button>
-          {[...new Set(sampleReports.map(r=>r.teamName))].map(t=>(
+          {(reportFacets || [...new Set(sampleReports.map(r=>r.teamName))]).map(t=>(
             <button key={t} onClick={()=>setTeamFilter(teamFilter===t?"전체":t)}
               className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all"
               style={{background:teamFilter===t?"#374151":"white",
@@ -541,6 +544,7 @@ export function ReportHistoryScreen() {
           </div>
         ))}
       </div>
+      <MoreRows count={filtered.length} hasMore={reportHasMore} loading={!(dataStates?.reportList || dataStates?.reportRelated)?.ready} onMore={()=>setReportPageSize?.(reportPageSize+20)}/>
     </div>
   );
 }

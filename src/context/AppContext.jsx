@@ -1,13 +1,17 @@
+import { seoulToday } from "../lib/dateTime";
 import {
   useState, useContext, createContext, useCallback,
   useMemo, useRef, useEffect
 } from "react";
 
-import { db, storage } from "../firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, storage, functions } from "../firebase";
 import {
   collection, doc, setDoc, updateDoc, onSnapshot,
-  query, orderBy, where, getDocs, deleteDoc, arrayUnion,
+  query, where, getDocs, getDocsFromServer, deleteDoc, arrayUnion,
 } from "firebase/firestore";
+import { calendarRange, subscribeGroup } from "../lib/scopedData";
+import { DataSyncBanner } from "../components/shared/DataSyncBanner";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getPendingPhotosByReport, getAllPendingPhotos, deletePendingPhoto } from "../pendingUploads";
 
@@ -24,6 +28,9 @@ export const useC = () => useContext(Ctx);
 
 export function Provider({ children, loginUser, onLogout }) {
   const companyRef = doc(db, "companies", loginUser.companyId);
+  const [currentUser, setCurrentUser] = useState(loginUser);
+  useEffect(() => { setCurrentUser(loginUser); }, [loginUser]);
+
 
   // Firestore 데이터
   const [events, setEvents] = useState([]);
@@ -46,57 +53,71 @@ export function Provider({ children, loginUser, onLogout }) {
   const [monthlySettlements, setMonthlySettlements] = useState([]); // 정기청소 월정산
   const [transactions, setTransactions] = useState([]); // 통합 수입·지출 내역 (MVP, 세금/부가세 계산 없음)
 
+  const [kstToday,setKstToday]=useState(seoulToday);
+  useEffect(()=>{const tick=()=>setKstToday(seoulToday());const timer=setInterval(tick,30000);document.addEventListener("visibilitychange",tick);return()=>{clearInterval(timer);document.removeEventListener("visibilitychange",tick);};},[]);
+  const [dataStates, setDataStates] = useState({});
+
   // 모듈 전역 CALS 미러를 항상 최신 cals로 유지 (calById/CALS.find 호출부가 전부 이걸 본다)
   useEffect(() => { CALS.splice(0, CALS.length, ...cals); }, [cals]);
 
   useEffect(() => {
-    const unsubEvents = onSnapshot(collection(companyRef, "events"), snap => {
-      // 동기화(ICS·구글 실시간)가 지운 일정은 문서를 지우지 않고 status:"deleted"로 표시만 한다 → 화면에서는 숨김
-      setEvents(snap.docs.filter(d => d.data().status !== "deleted").map(d => ({ ...d.data(), id: d.id })));
-    });
-    const unsubCompanyDoc = onSnapshot(companyRef, snap => {
+    const listen = (name, target, receive) => {
+      setDataStates(prev=>({...prev,[name]:{ready:false,cached:true,error:null}}));
+      return onSnapshot(target,{includeMetadataChanges:true},snap=>{
+        receive(snap);
+        setDataStates(prev=>({...prev,[name]:{ready:!snap.metadata.fromCache&&!snap.metadata.hasPendingWrites,cached:snap.metadata.fromCache,error:null}}));
+      },err=>{setDataStates(prev=>({...prev,[name]:{ready:false,cached:false,error:err.code}}));if(["permission-denied","unauthenticated"].includes(err.code))onLogout();});
+    };
+    const unsubCompanyDoc = listen("CompanyDoc", companyRef, snap => {
       if (snap.exists()) setCompanyDoc(snap.data());
     });
-    const unsubUsers = onSnapshot(collection(companyRef, "users"), snap => {
-      if(!snap.empty) setUsers(snap.docs.filter(d => d.data().status !== "deleted").map(d => ({ ...d.data(), id: d.id })));
+    const unsubUsers = listen("Users", collection(companyRef, "profiles"), snap => {
+      setUsers(snap.docs.filter(d => d.data().status !== "deleted").map(d => ({ ...d.data(), id: d.id })));
     });
     // 팀 목록 + 링크 카테고리는 단일 설정 문서(meta/config)에 배열로 저장 (순서 보존)
-    const unsubConfig = onSnapshot(doc(companyRef, "meta", "config"), snap => {
+    const unsubConfig = listen("Config", doc(companyRef, "meta", "config"), snap => {
       const data = snap.data();
       if (data?.teams)          setTeams(data.teams);
       if (data?.linkCategories) setLinkCategories(data.linkCategories);
       if (data?.titleRule)      setTitleRule(data.titleRule);
       if (data?.typeKeywords)   setTypeKeywords(data.typeKeywords);
     });
-    const unsubNotices = onSnapshot(collection(companyRef, "notices"), snap => {
+    const unsubNotices = listen("Notices", collection(companyRef, "notices"), snap => {
       // 최신순 정렬 (date 내림차순)
       setNotices(snap.docs.map(d => ({ ...d.data(), id: d.id }))
         .sort((a,b) => (b.date||"").localeCompare(a.date||"")));
     });
     // activityLogs/links는 각자 전용 화면(활동 로그/외부 링크)에서만 쓰여서 지연 로딩 useEffect로 뺌 — 아래 currentScreen 선언부 뒤 참고
-    const unsubCals = onSnapshot(collection(companyRef, "cals"), snap => {
-      if (!snap.empty) setCals(snap.docs.filter(d => d.data().status !== "deleted").map(d => ({ ...d.data(), id: d.id })));
+    const unsubCals = !isSuperAdmin(loginUser) ? (()=>{}) : listen("Cals", collection(companyRef, "cals"), snap => {
+      setCals(snap.docs.filter(d => d.data().status !== "deleted").map(d => ({ ...d.data(), id: d.id })));
       setCalsLoaded(true);
     });
-    const unsubReports = onSnapshot(collection(companyRef, "reports"), snap => {
-      setReports(snap.docs.map(d => ({ ...d.data(), id: d.id }))
-        .sort((a,b) => (b.date||"").localeCompare(a.date||"")));
-    });
-    const unsubSites = onSnapshot(collection(companyRef, "sites"), snap => {
+    const unsubSites = listen("Sites", collection(companyRef, "sites"), snap => {
       setSites(snap.docs.filter(d => d.data().status !== "deleted").map(d => ({ ...d.data(), id: d.id })));
     });
-    const unsubAssignments = onSnapshot(collection(companyRef, "assignments"), snap => {
+    const unsubAssignments = listen("Assignments", collection(companyRef, "assignments"), snap => {
       setAssignments(snap.docs.map(d => ({ ...d.data(), id: d.id })));
-    });
-    const unsubAttendance = onSnapshot(collection(companyRef, "attendance"), snap => {
-      setAttendanceList(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     });
     // extraPayments/monthlySettlements는 정산 화면에서만 쓰여서 지연 로딩 useEffect로 뺌 — 아래 currentScreen 선언부 뒤 참고
 
     return () => {
-      unsubEvents(); unsubUsers(); unsubConfig(); unsubNotices(); unsubCals(); unsubReports(); unsubCompanyDoc(); unsubSites(); unsubAssignments(); unsubAttendance();
+      unsubUsers(); unsubConfig(); unsubNotices(); unsubCals(); unsubCompanyDoc(); unsubSites(); unsubAssignments();
     };
   }, [loginUser.companyId]);
+
+  async function writeEntity(kind,id,value,mode='set') {
+    const clean=value?Object.fromEntries(Object.entries(value).filter(([k])=>!k.startsWith('_'))):undefined;
+    if(!isSuperAdmin(loginUser) && ['events','reports'].includes(kind)) {
+      const expectedVersion=kind==='events'?(value?.__readVersion||events.find(e=>e.id===id)?.__readVersion):undefined;
+      const {data}=await httpsCallable(functions,'appWriteData')({kind,id,...(clean?{value:clean}:{}),merge:mode==='update',remove:mode==='delete',...(expectedVersion?{expectedVersion}:{})});
+      setRetryGeneration(n=>n+1);
+      return data;
+    }
+    const target=doc(companyRef,kind,id);
+    if(mode==='delete')return deleteDoc(target);
+    if(mode==='update')return updateDoc(target,clean);
+    return setDoc(target,clean);
+  }
 
   // ── 공지 CRUD (Firestore 영속) ──
   const addNotice = useCallback(n => {
@@ -145,12 +166,12 @@ export function Provider({ children, loginUser, onLogout }) {
   // 저장 성공/실패를 호출부에서 확인할 수 있도록 Promise를 그대로 반환(await 가능)
   const addReport = useCallback(async r => {
     const ref = doc(collection(companyRef, "reports"));
-    await setDoc(ref, { ...r, id: ref.id });
+    await writeEntity("reports",ref.id,{...r,id:ref.id});
     return ref.id;
   }, [companyRef]);
 
   const updateReport = useCallback((id, patch) => {
-    return updateDoc(doc(companyRef, "reports", id), patch);
+    return writeEntity("reports",id,patch,"update");
   }, [companyRef]);
 
   // 일정 추가/수정 모달(EventModal)의 "저장 안 한 변경 확인" 닫기 함수(tryClose)를 담는 ref.
@@ -173,7 +194,10 @@ export function Provider({ children, loginUser, onLogout }) {
           const sRef = storageRef(storage, path);
           await uploadBytes(sRef, item.blob);
           const url = await getDownloadURL(sRef);
-          await updateReport(reportId, { [`${item.tag}Photos`]: arrayUnion({ name: item.name, url }) });
+          if(!isSuperAdmin(loginUser)) {
+            await httpsCallable(functions,'appWriteData')({kind:'reports',id:reportId,arrayUnionFields:{[`${item.tag}Photos`]:[{name:item.name,url}]}});
+            setRetryGeneration(n=>n+1);
+          } else await updateReport(reportId, { [`${item.tag}Photos`]: arrayUnion({ name: item.name, url }) });
           await deletePendingPhoto(item.id);
         } catch (e) {
           console.error("[사진 업로드 대기열] 실패, 다음에 다시 시도:", item.name, e);
@@ -224,10 +248,10 @@ export function Provider({ children, loginUser, onLogout }) {
     // 전제로 했었는데, 상태 동기화 타이밍에 따라 누락될 수 있어 여기서 직접 최신 상태를
     // Firestore에서 다시 조회해 확실하게 정리한다).
     const assignSnap = await getDocs(query(collection(companyRef, "assignments"), where("siteId", "==", id)));
-    const yesterday = add(fmt(new Date()), -1);
+    const yesterday = add(seoulToday(), -1);
     await Promise.all(assignSnap.docs.map(async d => {
       const a = d.data();
-      if (a.eventId) await setDoc(doc(companyRef, "events", a.eventId), { repeatUntil: yesterday }, { merge: true });
+      if (a.eventId) await writeEntity("events",a.eventId,{repeatUntil:yesterday},"update");
       await deleteDoc(d.ref);
     }));
     await deleteDoc(doc(companyRef, "sites", id));
@@ -246,11 +270,11 @@ export function Provider({ children, loginUser, onLogout }) {
       && pickRepeatFields(prevAssignment) === pickRepeatFields(assignment);
     if (sameRule) return;
 
-    const todayStr = fmt(new Date());
+    const todayStr = seoulToday();
     const yesterday = add(todayStr, -1);
 
     if (prevAssignment?.eventId) {
-      await setDoc(doc(companyRef, "events", prevAssignment.eventId), { repeatUntil: yesterday }, { merge: true });
+      await writeEntity("events",prevAssignment.eventId,{repeatUntil:yesterday},"update");
     }
 
     // "정기청소" 담당팀 캘린더는 팀 관리와 무관하게 이 기능 전용으로 고정 id로 자동 생성/재사용.
@@ -262,7 +286,7 @@ export function Provider({ children, loginUser, onLogout }) {
       setCals(prev => prev.some(c => c.id === REGULAR_CAL_ID) ? prev : [...prev, regularCal]);
     }
     const newRef = doc(collection(companyRef, "events"));
-    await setDoc(newRef, {
+    await writeEntity("events",newRef.id,{
       title: `${site.name} 정기청소`,
       start: todayStr, end: todayStr, allDay: true,
       repeat: assignment.repeat, repeatInterval: assignment.repeatInterval || 1,
@@ -288,7 +312,7 @@ export function Provider({ children, loginUser, onLogout }) {
   // ── 정기청소 배정 CRUD (Firestore 영속) ──
   const addAssignment = useCallback(async a => {
     const ref = doc(collection(companyRef, "assignments"));
-    const newAssignment = { ...a, id: ref.id, start: fmt(new Date()) };
+    const newAssignment = { ...a, id: ref.id, start: seoulToday() };
     await setDoc(ref, newAssignment);
     const emp = users.find(u => u.id === a.employeeId);
     const site = sites.find(s => s.id === a.siteId);
@@ -313,7 +337,7 @@ export function Provider({ children, loginUser, onLogout }) {
       const site = sites.find(s => s.id === target.siteId);
       addLog("삭제", `${emp?.name || "직원"} - ${site?.name || "현장"} 배정을 삭제했습니다.`);
       if (target.eventId) {
-        await setDoc(doc(companyRef, "events", target.eventId), { repeatUntil: add(fmt(new Date()), -1) }, { merge: true });
+        await writeEntity("events",target.eventId,{repeatUntil:add(seoulToday(),-1)},"update");
       }
     }
   }, [companyRef, assignments, sites, users, addLog]);
@@ -342,40 +366,43 @@ export function Provider({ children, loginUser, onLogout }) {
   // ── 정기청소 월정산 확정 — employeeId+yearMonth를 문서id로 고정해 upsert ──
   // breakdown(일급/주급/월급/보조금/추가지급 구성내역)을 같이 저장해 직원용 "내 급여"
   // 명세에서 확정 당시 계산 근거를 보여준다 (레거시 문서는 breakdown 없이 finalAmount만 있음)
-  const confirmSettlement = useCallback((employeeId, yearMonth, finalAmount, breakdown = null) => {
-    const id = `${employeeId}_${yearMonth}`;
-    setDoc(doc(companyRef, "monthlySettlements", id), {
-      employeeId, yearMonth, finalAmount, breakdown, confirmedAt: new Date().toISOString(),
-    }, { merge: true });
-  }, [companyRef]);
+  const confirmSettlement = useCallback(async (employeeId, yearMonth, finalAmount, breakdown = null) => {
+    if(!Object.values(dataStates).every(s=>s.ready) || !Object.keys(dataStates).length) throw Error("서버 자료 확인이 끝난 뒤 확정해주세요.");
+    const existing = monthlySettlements.find(s=>s.employeeId===employeeId && s.yearMonth===yearMonth);
+    const {data} = await httpsCallable(functions,"confirmMonthlySettlement")({employeeId,yearMonth,finalAmount,breakdown,expectedConfirmedAt:existing?.confirmedAt||null});
+    return data;
+  }, [dataStates,monthlySettlements]);
 
   const addEvent = useCallback(ev => {
     const { _id, ...evData } = ev;
     const evRef = _id ? doc(companyRef, "events", _id) : doc(collection(companyRef, "events"));
-    setDoc(evRef, evData);
     addLog("등록", `'${ev.title}' 일정을 등록했습니다.`);
+    return writeEntity("events",evRef.id,evData);
   }, [addLog, companyRef]);
 
   const updateEvent = useCallback(ev => {
-    setDoc(doc(companyRef, "events", ev.id), ev);
+    const saved=writeEntity("events",ev.id,ev);
     addLog("수정", `'${ev.title}' 일정을 수정했습니다.`);
+    return saved;
   }, [addLog, companyRef]);
 
   const deleteEvent = useCallback(id => {
     const target = events.find(e => e.id === id);
-    deleteDoc(doc(companyRef, "events", id));
+    const saved=writeEntity("events",id,null,"delete");
     if (target) addLog("삭제", `'${target.title}' 일정을 삭제했습니다.`);
+    return saved;
   }, [events, addLog, companyRef]);
 
   // 팀장 코멘트 — 일정 본문은 못 건드리고 이 코멘트만 남기고 지울 수 있음
   const updateLeaderComment = useCallback((eventId, comment, authorName) => {
     const target = events.find(e => e.id === eventId);
-    updateDoc(doc(companyRef, "events", eventId), {
+    const saved=writeEntity("events",eventId,{
       leaderComment: comment,
       leaderCommentBy: comment ? authorName : null,
       leaderCommentAt: comment ? new Date().toISOString() : null,
-    });
+    },"update");
     if (target) addLog(comment ? "코멘트" : "삭제", `'${target.title}' 일정에 팀장 코멘트를 ${comment ? "남겼습니다" : "삭제했습니다"}.`);
+    return saved;
   }, [events, addLog, companyRef]);
 
   // 반복일정 수정 — scope: "instance"(이 일정만) | "following"(이후 전체) | "all"(전체)
@@ -383,8 +410,7 @@ export function Provider({ children, loginUser, onLogout }) {
   const updateEventScoped = useCallback((clickedEv, scope, patch) => {
     const seriesId = clickedEv.id;
     if (!clickedEv._recurring || scope === "all") {
-      updateEvent({ ...patch, id: seriesId });
-      return;
+      return updateEvent({ ...patch, id: seriesId });
     }
     const dateStr = clickedEv._origDate || clickedEv.start;
     const original = events.find(e => e.id === seriesId);
@@ -396,38 +422,32 @@ export function Provider({ children, loginUser, onLogout }) {
         repeatMonthlyType, repeatMonthlyDay, repeatMonthlyOrdinal, repeatMonthlyWeekday,
         repeatYearlyType, repeatYearlyMonth, repeatYearlyDay, repeatYearlyOrdinal, repeatYearlyWeekday,
         ...rest } = patch;
-      updateDoc(doc(companyRef, "events", seriesId), { [`exceptions.${dateStr}`]: rest });
-      addLog("수정", `'${patch.title}' 반복일정 중 ${dateStr} 1회만 수정했습니다.`);
-      return;
+      return writeEntity("events",seriesId,{ [`exceptions.${dateStr}`]: rest },"update").then(()=>addLog("수정", `'${patch.title}' 반복일정 중 ${dateStr} 1회만 수정했습니다.`));
     }
 
     if (scope === "following") {
-      if (dateStr <= original.start) { updateEvent({ ...patch, id: seriesId }); return; }
-      updateDoc(doc(companyRef, "events", seriesId), { repeatUntil: add(dateStr, -1) });
+      if (dateStr <= original.start) return updateEvent({ ...patch, id: seriesId });
+      const saved=writeEntity("events",seriesId,{ repeatUntil: add(dateStr, -1) },"update");
       const { id, _recurring, _hasException, _origDate, ...rest } = patch;
-      addEvent({ ...rest, start: dateStr, repeatUntil: original.repeatUntil || "" });
-      addLog("수정", `'${patch.title}' 반복일정을 ${dateStr}부터 분리해 수정했습니다.`);
+      return saved.then(()=>addEvent({ ...rest, start: dateStr, repeatUntil: original.repeatUntil || "" }));
     }
   }, [events, addLog, companyRef, updateEvent, addEvent]);
 
   // 반복일정 삭제 — scope: "instance" | "following" | "all"
   const deleteEventScoped = useCallback((clickedEv, scope) => {
     const seriesId = clickedEv.id;
-    if (!clickedEv._recurring || scope === "all") { deleteEvent(seriesId); return; }
+    if (!clickedEv._recurring || scope === "all") return deleteEvent(seriesId);
     const dateStr = clickedEv._origDate || clickedEv.start;
     const original = events.find(e => e.id === seriesId);
     if (!original) return;
 
     if (scope === "instance") {
-      updateDoc(doc(companyRef, "events", seriesId), { [`exceptions.${dateStr}`]: { _deleted: true } });
-      addLog("삭제", `'${clickedEv.title}' 반복일정 중 ${dateStr} 1회만 삭제했습니다.`);
-      return;
+      return writeEntity("events",seriesId,{ [`exceptions.${dateStr}`]: { _deleted: true } },"update").then(()=>addLog("삭제", `'${clickedEv.title}' 반복일정 중 ${dateStr} 1회만 삭제했습니다.`));
     }
 
     if (scope === "following") {
-      if (dateStr <= original.start) { deleteEvent(seriesId); return; }
-      updateDoc(doc(companyRef, "events", seriesId), { repeatUntil: add(dateStr, -1) });
-      addLog("삭제", `'${clickedEv.title}' 반복일정을 ${dateStr} 이후 모두 삭제했습니다.`);
+      if (dateStr <= original.start) return deleteEvent(seriesId);
+      return writeEntity("events",seriesId,{ repeatUntil: add(dateStr, -1) },"update").then(()=>addLog("삭제", `'${clickedEv.title}' 반복일정을 ${dateStr} 이후 모두 삭제했습니다.`));
     }
   }, [events, addLog, companyRef, deleteEvent]);
 
@@ -436,7 +456,7 @@ export function Provider({ children, loginUser, onLogout }) {
     if(target) {
       const nextCals = cals.map(c=>c.id===id?{...c,checked:!c.checked}:c);
       setCals(nextCals);
-      nextCals.forEach(c => setDoc(doc(companyRef, "cals", c.id), c));
+      updateDoc(doc(companyRef,"cals",target.id),{checked:!target.checked}).catch(()=>{setCals(cals);});
     }
   }, [cals, companyRef]);
 
@@ -448,7 +468,7 @@ export function Provider({ children, loginUser, onLogout }) {
         ? prev.map(c => c.id === updated.id ? {...c, ...updated} : c)
         : [...prev, updated];
     });
-    setDoc(doc(companyRef, "cals", updated.id), updated);
+    setDoc(doc(companyRef, "cals", updated.id), updated, {merge:true});
   }, [companyRef]);
 
   const deleteCal = useCallback(calId => {
@@ -470,10 +490,10 @@ export function Provider({ children, loginUser, onLogout }) {
   } catch { return null; }
 })();
 const [current,setCurrent]   = useState(() => {
-  const d = widgetDate?.d || new Date();
+  const d = widgetDate?.d || new Date(seoulToday()+"T00:00:00");
   return new Date(d.getFullYear(), d.getMonth(), 1);
 });
-const [selDate,setSelDate]   = useState(() => widgetDate?.raw || fmt(new Date()));
+const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
   const [detEv,setDetEv]       = useState(null);
   const [fieldReportEv, setFieldReportEv] = useState(null);
   const [drawer,setDrawer]     = useState(false);
@@ -491,42 +511,183 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || fmt(new Date())
   const [extraCalFilterModal, setExtraCalFilterModal] = useState(false);
   const [financeModal, setFinanceModal] = useState({ open: false, editId: null });
 
-  // ── 지연 로딩 리스너 — activityLogs/links/extraPayments/monthlySettlements는 각자 전용 화면에서만
-  // 쓰이는 게 확인돼서, 로그인 즉시 다 열지 않고 그 화면에 처음 들어갈 때만 붙인다. (notices/sites/
-  // assignments/attendance는 캘린더 헤더 배지·상세시트·필터 등 메인 화면에서도 쓰여서 그대로 즉시 로드)
-  const lazyStarted = useRef({});
-  const lazyUnsubs   = useRef({});
-  useEffect(() => {
-    const start = (key, ref, mapSnap) => {
-      if (lazyStarted.current[key]) return;
-      lazyStarted.current[key] = true;
-      lazyUnsubs.current[key] = onSnapshot(ref, mapSnap);
-    };
-    if (currentScreen === "activity_log") {
-      start("activityLogs", query(collection(companyRef, "activityLogs"), orderBy("time", "desc")), snap =>
-        setActivityLogs(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
-    }
-    if (currentScreen === "links") {
-      start("links", collection(companyRef, "links"), snap =>
-        setLinks(snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a,b) => (a.order ?? 0) - (b.order ?? 0))));
-    }
-    if (currentScreen === "reg_settlement") {
-      start("extraPayments", collection(companyRef, "extraPayments"), snap =>
-        setExtraPayments(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
-    }
-    if (currentScreen === "reg_my" || currentScreen === "reg_settlement") {
-      start("monthlySettlements", collection(companyRef, "monthlySettlements"), snap =>
-        setMonthlySettlements(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
-    }
-    if (currentScreen === "finance") {
-      start("transactions", collection(companyRef, "transactions"), snap =>
-        setTransactions(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
-    }
-  }, [currentScreen]);
-  useEffect(() => () => { Object.values(lazyUnsubs.current).forEach(u => u && u()); }, []);
+  const [retryGeneration, setRetryGeneration] = useState(0);
+  const [calendarDay, setCalendarDay] = useState(null);
+  const [financeMonth,setFinanceMonth]=useState(seoulToday().slice(0,7));
+  const [financeMonths,setFinanceMonths]=useState([]);
+  const [settlementMonth, setSettlementMonth] = useState(seoulToday().slice(0,7));
+  const [reportPageSize, setReportPageSize] = useState(20);
+  const [logPageSize, setLogPageSize] = useState(20);
+  const [reportFilterActive, setReportFilterActive] = useState(false);
+  const [logFilterActive, setLogFilterActive] = useState(false);
+  const [reportRows, setReportRows] = useState([]);
+  const [reportRelated, setReportRelated] = useState([]);
+  const [reportFacets, setReportFacets] = useState([]);
+  const facetAudit = useRef({});
+  const [reportLegacyMode,setReportLegacyMode] = useState(false);
+  const [logFacets, setLogFacets] = useState([]);
+  const [reportHasMore, setReportHasMore] = useState(false);
+  const [logHasMore, setLogHasMore] = useState(false);
+  const range = calendarRange(current, selDate, calendarDay);
+  const fullEvents = searchOpen || currentScreen === "dashboard" || modal.open;
+  const serverRead = !isSuperAdmin(loginUser);
+  const principalKey = JSON.stringify([currentUser.uid,currentUser.role,currentUser.team,currentUser.memberships]);
+  const [serverReportRows,setServerReportRows]=useState([]);
+  const [serverConfirmedAt,setServerConfirmedAt]=useState(null);
+  const pinnedIds = [...new Set([detEv?.id, fieldReportEv?.id].filter(Boolean))].sort().join('|');
+  const group = (name, specs, receive) => subscribeGroup(loginUser.companyId,
+    specs.map(s => ({ db, ...s })), receive,
+    state => setDataStates(prev => ({ ...prev, [name]: state })));
 
-  const [currentUser, setCurrentUser] = useState(loginUser);
-  useEffect(() => { setCurrentUser(loginUser); }, [loginUser]);
+  useEffect(() => {
+    if(serverRead) return;
+    const specs = fullEvents ? [{collection:"events"}] : [
+      // Union preserves missing end (=start), long events that started before
+      // the range, and moved recurring exceptions without a data migration.
+      {collection:"events",where:[["start",">=",range.start],["start","<=",range.end]]},
+      {collection:"events",where:[["end",">=",range.start],["start","<=",range.end]]},
+      {collection:"events",where:[["repeat","in",["daily","weekly","monthly","yearly"]]]},
+    ];
+    pinnedIds.split('|').filter(Boolean).forEach(id => specs.push({collection:"events",id}));
+    return group('events', specs, rows => setEvents(rows.filter(e => e.status !== "deleted")));
+  }, [loginUser.companyId, fullEvents, range.start, range.end, pinnedIds, retryGeneration,serverRead,principalKey]);
+
+  useEffect(()=>{
+    if(!serverRead)return;
+    let active=true,inFlight=false,queued=false;
+    const load=async()=>{
+      if(!active)return;
+      if(inFlight){queued=true;return;}
+      inFlight=true;
+      setDataStates(prev=>({...prev,events:{ready:false,cached:true,error:null},reportRelated:{ready:false,cached:true,error:null}}));
+      try {
+        const {data}=await httpsCallable(functions,"appReadData")({full:fullEvents||currentScreen==='report_history',from:range.start,to:range.end,eventIds:pinnedIds.split('|').filter(Boolean)});
+        if(!active)return;
+        setEvents([...(data.events||[]),...(data.instances||[])]);setCals(data.cals||[]);setCalsLoaded(true);setReportRelated(data.reports||[]);setServerReportRows(data.reports||[]);setServerConfirmedAt(data.serverAt);
+        setDataStates(prev=>({...prev,events:{ready:true,cached:false,error:null},reportRelated:{ready:true,cached:false,error:null}}));
+      } catch(err) {if(active){setDataStates(prev=>({...prev,events:{ready:false,cached:false,error:err.code},reportRelated:{ready:false,cached:false,error:err.code}}));if(['functions/permission-denied','functions/unauthenticated'].includes(err.code)){setEvents([]);setReports([]);setReportRows([]);setReportRelated([]);setDetEv(null);setFieldReportEv(null);onLogout();}}}
+      finally {inFlight=false;if(queued){queued=false;load();}}
+    };
+    load();
+    const unsub=onSnapshot(doc(companyRef,'meta','readRevision'),()=>load(),()=>{});
+    const timer=setInterval(()=>{if(document.visibilityState==='visible')load();},60000);
+    const resume=()=>{if(document.visibilityState==='visible')load();};
+    document.addEventListener('visibilitychange',resume);window.addEventListener('online',resume);
+    return ()=>{active=false;clearInterval(timer);unsub();document.removeEventListener('visibilitychange',resume);window.removeEventListener('online',resume);};
+  },[serverRead,principalKey,loginUser.companyId,fullEvents,currentScreen,range.start,range.end,pinnedIds,retryGeneration]);
+  useEffect(()=>{
+    if(!serverRead)return;
+    const rows=[...serverReportRows].sort((a,b)=>(b.date||'').localeCompare(a.date||'')||b.id.localeCompare(a.id));
+    setReportFacets([...new Set(rows.map(r=>r.teamName).filter(Boolean))]);
+    setReportHasMore(!reportFilterActive&&rows.length>reportPageSize);
+    setReportRows(currentScreen==='report_history'?(reportFilterActive?rows:rows.slice(0,reportPageSize)):[]);
+  },[serverRead,serverReportRows,currentScreen,reportPageSize,reportFilterActive]);
+
+  const relatedIds = [...new Set(expandRecurring(events, fullEvents ? {} : range).map(e => e.id))].sort().join('|');
+  useEffect(() => {
+    if(serverRead) return;
+    const ids = relatedIds.split('|').filter(Boolean), specs = [];
+    for(let i=0;i<ids.length;i+=30) specs.push({collection:"reports",where:[["eventId","in",ids.slice(i,i+30)]]});
+    return group('reportRelated', specs, setReportRelated);
+  }, [loginUser.companyId, relatedIds, retryGeneration,serverRead,principalKey]);
+  useEffect(() => {
+    const map = new Map();
+    [...reportRows,...reportRelated].forEach(r => map.set(r.id,r));
+    setReports([...map.values()].sort((a,b)=>(b.date||"").localeCompare(a.date||"") || b.id.localeCompare(a.id)));
+  },[reportRows,reportRelated]);
+
+  useEffect(() => {
+    if(serverRead || currentScreen !== 'report_history') { if(!serverRead)setReportRows([]); return; }
+    // One full audit per company/session: complete facets and missing sort dates.
+    let active = true;
+    const auditKey=loginUser.companyId+':reports';
+    if(facetAudit.current[auditKey]) {
+      setReportFacets(facetAudit.current[auditKey].facets);
+      setReportLegacyMode(facetAudit.current[auditKey].legacy);
+    } else {
+      setDataStates(prev=>({...prev,reportAudit:{ready:false,cached:true,error:null}}));
+      getDocsFromServer(collection(companyRef,'reports')).then(snap=>{
+        if(!active)return;
+        const result={facets:[...new Set(snap.docs.map(d=>d.data().teamName).filter(Boolean))],legacy:snap.docs.some(d=>!d.data().date)};
+        facetAudit.current[auditKey]=result;setReportFacets(result.facets);setReportLegacyMode(result.legacy);
+        setDataStates(prev=>({...prev,reportAudit:{ready:true,cached:false,error:null}}));
+      }).catch(err=>{if(active)setDataStates(prev=>({...prev,reportAudit:{ready:false,cached:false,error:err.code}}));});
+    }
+    const unsubscribe = group('reportList', [{collection:'reports', ...((reportFilterActive||reportLegacyMode) ? {} : {order:[['date','desc'],['__name__','desc']],limit:reportPageSize+1})}], rows => {
+      setReportHasMore(!reportFilterActive && rows.length>reportPageSize);
+      rows.sort((a,b)=>(b.date||'').localeCompare(a.date||'')||b.id.localeCompare(a.id));
+      setReportRows(reportFilterActive ? rows : rows.slice(0,reportPageSize));
+    });
+    return () => { active=false; unsubscribe(); setDataStates(prev=>{const n={...prev};delete n.reportList;delete n.reportAudit;return n;}); };
+  },[loginUser.companyId,currentScreen,reportPageSize,reportFilterActive,reportLegacyMode,retryGeneration,serverRead]);
+
+  useEffect(() => {
+    if(currentScreen !== 'activity_log') { setActivityLogs([]); return; }
+    let active=true;
+    getDocs(collection(companyRef,'activityLogs')).then(snap=>{if(active)setLogFacets([...new Set(snap.docs.map(d=>{const u=d.data().user;return typeof u==='string'?u:u?.name||'관리자';}))]);}).catch(()=>{});
+    const unsubscribe=group('activityLogs',[{collection:'activityLogs',...(logFilterActive?{}:{order:[['time','desc'],['__name__','desc']],limit:logPageSize+1})}],rows=>{
+      setLogHasMore(!logFilterActive&&rows.length>logPageSize);
+      setActivityLogs(rows.sort((a,b)=>(b.time||'').localeCompare(a.time||'')||b.id.localeCompare(a.id)).slice(0,logFilterActive?undefined:logPageSize));
+    });
+    return ()=>{active=false;unsubscribe();setDataStates(prev=>{const n={...prev};delete n.activityLogs;return n;});};
+  },[loginUser.companyId,currentScreen,logPageSize,logFilterActive,retryGeneration]);
+
+  useEffect(() => {
+    const unsubs=[];
+    const watch=(name,specs,setter)=>unsubs.push(group(name,specs,setter));
+    const regular=currentScreen.startsWith('reg_') || detEv?.source==='regular';
+    if(currentScreen==='links') watch('links',[{collection:'links'}],rows=>setLinks(rows.sort((a,b)=>(a.order??0)-(b.order??0))));
+    else setLinks([]);
+    if(currentScreen==='reg_settlement') {
+      watch('attendance',[{collection:'attendance',where:[['date','>=',settlementMonth+'-01'],['date','<=',settlementMonth+'-31']]}],setAttendanceList);
+      watch('extraPayments',[{collection:'extraPayments',where:[['date','>=',settlementMonth+'-01'],['date','<=',settlementMonth+'-31']]}],setExtraPayments);
+      watch('monthlySettlements',[{collection:'monthlySettlements',where:[['yearMonth','==',settlementMonth]]}],setMonthlySettlements);
+    } else {
+      setExtraPayments([]);
+      const date=detEv?.source==='regular'?detEv.start:seoulToday();
+      if(currentScreen==='reg_my') {
+        watch('attendance',[{collection:'attendance',where:[['employeeId','==',loginUser.id||loginUser.uid]]}],setAttendanceList);
+        watch('monthlySettlements',[{collection:'monthlySettlements',where:[['employeeId','==',loginUser.id||loginUser.uid]]}],setMonthlySettlements);
+      } else {
+        setMonthlySettlements([]);
+        if(regular) watch('attendance',[{collection:'attendance',where:[['date','==',date]]}],setAttendanceList);
+        else setAttendanceList([]);
+      }
+    }
+    if(currentScreen==='finance') watch('transactions',[{collection:'transactions',where:[['date','>=',financeMonth+'-01'],['date','<=',financeMonth+'-31']]}],setTransactions);
+    else setTransactions([]);
+    return ()=>{unsubs.forEach(u=>u());setDataStates(prev=>Object.fromEntries(Object.entries(prev).filter(([k])=>!['links','attendance','extraPayments','monthlySettlements','transactions'].includes(k))));};
+  },[loginUser.companyId,currentScreen,settlementMonth,financeMonth,kstToday,detEv?.source,detEv?.start,retryGeneration]);
+
+
+  useEffect(()=>{
+    if(currentScreen!=='finance')return;
+    let active=true;
+    const load=()=>getDocs(collection(companyRef,'transactions')).then(snap=>{if(active)setFinanceMonths([...new Set(snap.docs.map(d=>(d.data().date||'').slice(0,7)).filter(Boolean))]);}).catch(()=>{});
+    load();const timer=setInterval(()=>{if(document.visibilityState==='visible')load();},60000);
+    return ()=>{active=false;clearInterval(timer);};
+  },[loginUser.companyId,currentScreen,financeModal.open]);
+
+  // Pin by ID, then keep open details tied to the authoritative source.
+  useEffect(()=>{
+    if(!dataStates.events?.ready)return;
+    const refresh=(selected,setSelected)=>{
+      if(!selected)return;
+      const source=events.find(e=>e.id===selected.id);
+      if(!source){setSelected(null);return;}
+      let next=source;
+      if(selected._recurring && !source.__occurrenceOnly){
+        const key=selected._origDate||selected.start;
+        const ex=source.exceptions?.[key];
+        if(ex?._deleted){setSelected(null);return;}
+        const target=ex?.start||key;
+        next=expandRecurring([source],{start:target,end:ex?.end||target}).find(e=>e._origDate===key);
+        if(!next){setSelected(null);return;}
+      }
+      if(JSON.stringify(next)!==JSON.stringify(selected))setSelected(next);
+    };
+    refresh(detEv,setDetEv);refresh(fieldReportEv,setFieldReportEv);
+  },[events,dataStates.events?.ready,detEv,fieldReportEv]);
 
   // 로그인 세션(loginUser)은 로그인 시점에 localStorage에 캐시해둔 값이라,
   // 관리자가 직원관리에서 이름/팀/직급을 바꿔도 이미 로그인해있는 그 직원의
@@ -537,7 +698,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || fmt(new Date())
     if (!loginUser?.uid || currentUser.uid !== loginUser.uid) return;
     const fresh = users.find(u => u.id === loginUser.uid);
     if (!fresh) return;
-    const scalarFields = ["name", "phone", "team", "role", "pw"];
+    const scalarFields = ["name", "phone", "team", "role"];
     // memberships는 배열이라 onSnapshot마다 참조가 새로 생겨 ===로 비교하면 무한 루프에
     // 빠질 수 있어, 값(JSON) 기준으로만 비교한다.
     const membershipsChanged = JSON.stringify(fresh.memberships || null) !== JSON.stringify(currentUser.memberships || null);
@@ -604,7 +765,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || fmt(new Date())
   // ── 통합 수입·지출 CRUD (MVP) — 세금/부가세/일반관리비 계산 없음, 단순 금액 기록만 ──
   const addTransaction = useCallback(t => {
     const ref = doc(collection(companyRef, "transactions"));
-    setDoc(ref, { ...t, id: ref.id, createdBy: myUserId, createdAt: new Date().toISOString() });
+    return setDoc(ref, { ...t, id: ref.id, createdBy: myUserId, createdAt: new Date().toISOString() }).then(()=>setFinanceMonths(prev=>[...new Set([...prev,(t.date||"").slice(0,7)])]));
   }, [companyRef, myUserId]);
   const updateTransaction = useCallback((id, patch) => {
     updateDoc(doc(companyRef, "transactions", id), patch);
@@ -649,11 +810,13 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || fmt(new Date())
         );
       }
     }
-    return expandRecurring(evs);
-  }, [events, checkedIds, cals, currentUser, isMine, assignments, myUserId, extraCalFilter]);
+    return expandRecurring(evs, fullEvents ? {} : range);
+  }, [events, checkedIds, cals, currentUser, isMine, assignments, myUserId, extraCalFilter, fullEvents, range.start, range.end]);
 
   return (
     <Ctx.Provider value={{
+      serverConfirmedAt, dataStates, dataReady: Object.values(dataStates).length > 0 && Object.values(dataStates).every(s=>s.ready),
+      financeMonth,setFinanceMonth,financeMonths,setCalendarDay, settlementMonth, setSettlementMonth, reportPageSize, setReportPageSize, reportHasMore, reportFacets, reportRows, setReportFilterActive, logPageSize, setLogPageSize, logHasMore, logFacets, setLogFilterActive,
       events,visibleEvents,addEvent,updateEvent,deleteEvent,updateEventScoped,deleteEventScoped,updateLeaderComment,
       fieldReportEv,setFieldReportEv,
       cals,visibleCals,toggleCal,updateCal,deleteCal,
@@ -691,6 +854,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || fmt(new Date())
       eventModalGuardRef,
       companyId: loginUser.companyId
     }}>
+      <DataSyncBanner lastConfirmedAt={serverConfirmedAt} states={dataStates} retry={()=>setRetryGeneration(n=>n+1)}/>
       {children}
     </Ctx.Provider>
   );

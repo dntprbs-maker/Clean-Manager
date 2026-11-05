@@ -19,6 +19,8 @@ import { handleWebhook, runMaintenance } from "./lib/gcal/service.js";
 import { handleAdmin } from "./lib/gcal/adminPage.js";
 import process from "node:process";
 export { mcp } from "./mcp/index.js";
+export { appAuth, appAccount, appWidgetData, appReadData, appWriteData, appProfileChanged, appAdminCredentialChanged, appStaffCredentialChanged,
+  appReadEventChanged, appReadReportChanged, appReadCalendarChanged, appReadAssignmentChanged, appReadUserChanged } from './lib/appAuth.js';
 export { hubEventChanged, hubCalendarChanged, hubReportChanged } from './lib/hubChangeTriggers.js';
 export { widgetEventChanged, widgetCalChanged } from './lib/widgetPush.js';
 // mcp/index.js가 (ESM import 순서상 이 줄보다 먼저 평가되며) lib/db.js를 통해
@@ -564,7 +566,7 @@ export const calendarFeed = onRequest({ region: REGION, cors: true }, async (req
     const expanded = expandRecurringForFeed(events, { end: horizon });
 
     // 지난 7일 이전 회차는 굳이 개인 캘린더에 안 보여줘도 됨 (앞으로의 일정 위주)
-    const visible = expanded.filter(ev => ev.start >= cutoff && ev.start <= horizon);
+    const visible = expanded.filter(ev => ev.calId === cal && ev.start >= cutoff && ev.start <= horizon);
 
     const now = new Date();
     const dtstamp = `${now.getUTCFullYear()}${String(now.getUTCMonth()+1).padStart(2,"0")}${String(now.getUTCDate()).padStart(2,"0")}T${String(now.getUTCHours()).padStart(2,"0")}${String(now.getUTCMinutes()).padStart(2,"0")}${String(now.getUTCSeconds()).padStart(2,"0")}Z`;
@@ -841,3 +843,5 @@ export const gcalMaintenance = onSchedule(
   { region: REGION, schedule: "15 * * * *", timeZone: "Asia/Seoul", secrets: GCAL_SECRETS, timeoutSeconds: 540 },
   async () => { await runMaintenance(gcalDeps()); }
 );
+
+export { confirmMonthlySettlement } from "./lib/settlementApi.js";

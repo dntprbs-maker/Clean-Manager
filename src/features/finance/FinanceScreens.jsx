@@ -1,6 +1,7 @@
+import { seoulToday } from "../../lib/dateTime";
+import { MoreRows } from "../../components/shared/MoreRows";
 import { useState, useMemo, useEffect } from "react";
 import { X, Plus, Trash2, TrendingUp, TrendingDown } from "lucide-react";
-import { fmt } from "../../lib/dateTime";
 import { computeFinanceSummary, groupByMonth, filterByPeriod } from "../../lib/finance";
 import { useC } from "../../context/AppContext";
 
@@ -11,9 +12,11 @@ const won = n => `${Number(n || 0).toLocaleString()}원`;
 // 기준이 아직 미확정이라 넣지 않음 — 단순 수입-지출 합계·월별 집계만 보여준다.
 // Notion "Clean-Manager V2 통합 설계 문서"(5원장 통합설계)의 축소 1단계.
 export function FinanceScreen() {
-  const { transactions, setCurrentScreen, setFinanceModal, deleteTransaction } = useC();
-  const thisYm = fmt(new Date()).slice(0, 7);
+  const { transactions, setCurrentScreen, setFinanceModal, deleteTransaction,financeMonths,setFinanceMonth,dataReady } = useC();
+  const thisYm = seoulToday().slice(0, 7);
   const [selectedYm, setSelectedYm] = useState(thisYm);
+  const [pageSize,setPageSize]=useState(20);
+  useEffect(()=>{setFinanceMonth?.(selectedYm);},[selectedYm,setFinanceMonth]);
 
   const months = useMemo(() => groupByMonth(transactions), [transactions]);
   const currentMonthItems = useMemo(
@@ -27,9 +30,9 @@ export function FinanceScreen() {
   );
 
   const monthOptions = useMemo(() => {
-    const set = new Set([thisYm, ...months.map(m => m.ym)]);
+    const set = new Set([thisYm, ...(financeMonths||months.map(m => m.ym))]);
     return [...set].sort((a, b) => b.localeCompare(a));
-  }, [months, thisYm]);
+  }, [months, thisYm,financeMonths]);
 
   return (
     <div className="flex-1 overflow-y-auto bg-gray-50 flex flex-col">
@@ -46,7 +49,7 @@ export function FinanceScreen() {
 
       <div className="px-4 py-4 flex flex-col gap-4">
         {/* 월 선택 */}
-        <select value={selectedYm} onChange={e => setSelectedYm(e.target.value)}
+        <select value={selectedYm} onChange={e => {setSelectedYm(e.target.value);setPageSize(20);}}
           className="w-full py-3 px-4 rounded-xl bg-white border border-gray-200 text-sm font-bold outline-none focus:border-blue-500">
           {monthOptions.map(ym => <option key={ym} value={ym}>{ym.replace("-", "년 ")}월</option>)}
         </select>
@@ -74,7 +77,7 @@ export function FinanceScreen() {
               <div className="text-5xl mb-4">💰</div>
               <p className="text-sm font-bold">이 달 등록된 내역이 없어요</p>
             </div>
-          ) : sortedItems.map(t => (
+          ) : sortedItems.slice(0,pageSize).map(t => (
             <div key={t.id} className="bg-white rounded-2xl p-4 flex items-center gap-3"
               style={{border:"1.5px solid #f3f4f6"}}>
               <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
@@ -97,6 +100,7 @@ export function FinanceScreen() {
         </div>
       </div>
 
+      <MoreRows count={Math.min(sortedItems.length,pageSize)} hasMore={sortedItems.length>pageSize} loading={dataReady===false} onMore={()=>setPageSize(n=>n+20)}/>
       {/* 등록 버튼 */}
       <button onClick={() => setFinanceModal({ open: true, editId: null })}
         className="fixed bottom-6 right-6 w-14 h-14 rounded-full text-white flex items-center justify-center shadow-xl"
@@ -111,13 +115,13 @@ export function FinanceScreen() {
 export function FinanceFormModal() {
   const { financeModal, setFinanceModal, addTransaction } = useC();
   const [type, setType] = useState("income");
-  const [date, setDate] = useState(fmt(new Date()));
+  const [date, setDate] = useState(seoulToday());
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("");
   const [memo, setMemo] = useState("");
 
   useEffect(() => {
-    if (financeModal.open) { setType("income"); setDate(fmt(new Date())); setAmount(""); setCategory(""); setMemo(""); }
+    if (financeModal.open) { setType("income"); setDate(seoulToday()); setAmount(""); setCategory(""); setMemo(""); }
   }, [financeModal.open]);
 
   if (!financeModal.open) return null;

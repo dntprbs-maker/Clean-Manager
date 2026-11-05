@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(WidgetSessionPlugin.class);
         super.onCreate(savedInstanceState);
         applyWidgetDate(getIntent());
         // 위젯이 설치돼 있으면 일정 변경 푸시(widget_{companyId} 토픽) 구독을 보장한다.

@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -28,6 +30,9 @@ jobs:
       # 피하려고), npx로 그때그때 최신 버전을 받아 쓴다. --token은 firebase login:ci로
       # 발급한 CI 토큰 — FIREBASE_TOKEN이라는 이름의 GitHub Actions 시크릿으로 등록해야 함
       # (저장소 Settings → Secrets and variables → Actions).
-      - run: npx firebase-tools@latest deploy --only functions,firestore:rules --project clean-manager-60bc9 --token "$FIREBASE_TOKEN" --non-interactive
+      - name: Select changed function scope
+        id: scope
+        run: echo "targets=$(node functions/scripts/deploy-targets.mjs '${{ github.event.before }}' '${{ github.sha }}')" >> "$GITHUB_OUTPUT"
+      - run: npx firebase-tools@latest deploy --only "${{ steps.scope.outputs.targets }}" --project clean-manager-60bc9 --token "$FIREBASE_TOKEN" --non-interactive
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}

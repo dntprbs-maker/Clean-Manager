@@ -1,3 +1,5 @@
+import { seoulToday } from "../../lib/dateTime";
+import { authenticate, endSession } from "../../lib/appAuth";
 import {
   useState, useCallback,
   useMemo, useRef, useEffect
@@ -12,7 +14,7 @@ import {
 
 import { db, functions, storage } from "../../firebase";
 import { enablePush } from "../../fcm";
-import { collection, doc, getDoc, getDocs, updateDoc, query, where } from "firebase/firestore";
+import { collection, doc } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
 
@@ -21,7 +23,6 @@ import { toLunarLabel } from "../../lib/lunar";
 import { CALS, calById, REGULAR_CAL_ID } from "../../lib/calendars";
 import { REPEAT_OPTS } from "../../lib/repeat";
 import { getReportStatus } from "../../lib/reports";
-import { fmtPhone } from "../../lib/phone";
 import { parseEventText } from "../../lib/eventTextParser";
 import { isSuperAdmin, isAdminStaff, isLeaderOf, isMemberOf, myTeamNames, hasLeadershipSomewhere, teamsLabel } from "../../lib/membership";
 import { useC } from "../../context/AppContext";
@@ -91,7 +92,7 @@ const MAX_BARS_FULL = 4;
 
 export function FullMonthCell({ ds, isCm, items, onDate, onEvt }) {
   const [pressed, setPressed] = useState(false);
-  const today=fmt(new Date()), isToday=ds===today;
+  const today=seoulToday(), isToday=ds===today;
   const d=pd(ds), dow=d.getDay();
   const isHol=!!HOLIDAYS[ds], isSun=dow===0, isSat=dow===6;
   let nc="text-gray-800";
@@ -131,7 +132,7 @@ export function FullMonthCell({ ds, isCm, items, onDate, onEvt }) {
 
 // ── MODE 1: 도트 그리드 셀 ───────────────────────────────────────
 export function DotCell({ ds, isCm, dots, onDate, selDate }) {
-  const today=fmt(new Date()), isToday=ds===today, isSel=ds===selDate;
+  const today=seoulToday(), isToday=ds===today, isSel=ds===selDate;
   const d=pd(ds), dow=d.getDay();
   const isHol=!!HOLIDAYS[ds], isSun=dow===0, isSat=dow===6;
 
@@ -972,20 +973,20 @@ export function DetailSheet() {
     if (commentDirty && !window.confirm("입력한 추가사항을 저장하지 않고 나가시겠습니까?")) return;
     close();
   };
-  const appendComment = () => {
+  const appendComment = async () => {
     const text = commentDraft.trim();
     if (!text) return;
     const now = new Date();
     const stamp = `${String(now.getMonth()+1).padStart(2,"0")}/${String(now.getDate()).padStart(2,"0")} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
     const entry = `👷 현장팀장입력사항 · ${currentUser.name} · ${stamp}\n${text}`;
     const merged = savedComment ? `${savedComment}\n\n─────────────────\n${entry}` : entry;
-    updateLeaderComment(detEv.id, merged, currentUser.name);
+    try {await updateLeaderComment(detEv.id, merged, currentUser.name);} catch(e){alert(e.message||"코멘트 저장 실패");return;}
     setSavedComment(merged);
     setCommentDraft("");
   };
   const handleEdit = async () => {
     if (detEv._recurring) {
-      const scope = await askRecurringScope(detEv, "edit");
+      const scope = detEv.__occurrenceOnly ? "instance" : await askRecurringScope(detEv, "edit");
       if (!scope) return;
       close(); setTimeout(()=>openModal(null, detEv.id, scope, detEv), 300);
     } else {
@@ -996,13 +997,17 @@ export function DetailSheet() {
   // 어차피 반복 설정을 뺀 단발 일정 하나를 새로 만드는 것이라 클릭한 회차 내용만 가져오면 된다.
   const handleCopy = () => { close(); setTimeout(()=>openCopyModal(detEv), 300); };
   const handleDelete = async () => {
+    try {
     if (detEv._recurring) {
-      const scope = await askRecurringScope(detEv, "delete");
+      const scope = detEv.__occurrenceOnly ? "instance" : await askRecurringScope(detEv, "delete");
       if (!scope) return;
-      deleteEventScoped(detEv, scope);
+      await deleteEventScoped(detEv, scope);
       close();
     } else {
-      if (window.confirm("이 일정을 삭제하시겠습니까?")) { deleteEvent(detEv.id); close(); }
+      if (window.confirm("이 일정을 삭제하시겠습니까?")) { await deleteEvent(detEv.id); close(); }
+    }
+    } catch (error) {
+      window.alert(error?.message || "일정을 삭제하지 못했습니다. 다시 시도해 주세요.");
     }
   };
 
@@ -1368,7 +1373,7 @@ export function BottomTabBar() {
 
 // ── 사이드 드로어 (스와이프 열기/닫기 지원) ───────────────────────
 export function SideDrawer() {
-  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, setNotificationSettingsModal, onLogout, companyId, assignments, extraCalFilter, setExtraCalFilterModal } = useC();
+  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, setNotificationSettingsModal, onLogout, assignments, extraCalFilter, setExtraCalFilterModal } = useC();
   const [pwModal, setPwModal] = useState(false);
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -1378,14 +1383,13 @@ export function SideDrawer() {
 
   const handleChangePw = async () => {
     if (!oldPw || !newPw || !newPw2) { setPwError("모든 항목을 입력하세요."); return; }
-    if (oldPw !== currentUser.pw) { setPwError("현재 비밀번호가 틀렸습니다."); return; }
     if (newPw !== newPw2) { setPwError("새 비밀번호가 일치하지 않습니다."); return; }
     if (newPw.length < 4) { setPwError("비밀번호는 4자 이상이어야 합니다."); return; }
     setPwLoading(true);
     try {
-      await updateDoc(doc(db, "staffs", currentUser.uid), { pw: newPw });
-      if (companyId) await updateDoc(doc(db, "companies", companyId, "users", currentUser.uid), { pw: newPw });
-      try { localStorage.setItem("loginUser", JSON.stringify({...currentUser, pw: newPw})); } catch {}
+      await httpsCallable(functions,"appAccount")({action:"changePassword",oldPassword:oldPw,newPassword:newPw});
+      await endSession();
+      window.location.reload();
       setPwModal(false); setOldPw(""); setNewPw(""); setNewPw2(""); setPwError("");
       alert("비밀번호가 변경됐습니다.");
     } catch(e) { setPwError("변경 실패: " + e.message); }
@@ -1792,7 +1796,7 @@ export function ExtraCalFilterModal() {
 }
 
 // ── 일정 추가 모달 ────────────────────────────────────────────────
-const blank=date=>({title:"",description:"",contact:"",team:"",start:date||fmt(new Date()),end:date||fmt(new Date()),allDay:false,startTime:"09:00",endTime:"10:00",place:"",url:"",calId:"",
+const blank=date=>({title:"",description:"",contact:"",team:"",start:date||seoulToday(),end:date||seoulToday(),allDay:false,startTime:"09:00",endTime:"10:00",place:"",url:"",calId:"",
   repeat:"none",repeatInterval:1,repeatWeekdays:[],
   repeatMonthlyType:"day",repeatMonthlyDay:null,repeatMonthlyOrdinal:1,repeatMonthlyWeekday:null,
   repeatYearlyType:"date",repeatYearlyMonth:null,repeatYearlyDay:null,repeatYearlyOrdinal:1,repeatYearlyWeekday:null,
@@ -2280,16 +2284,16 @@ export function EventModal() {
       const finalForm = { ...form, photos: uploadedPhotos };
       if (editId) {
         if (scope && scope !== "all" && instanceEv) {
-          updateEventScoped(instanceEv, scope, { ...finalForm, id: editId });
+          await updateEventScoped(instanceEv, scope, { ...finalForm, id: editId });
         } else {
-          updateEvent({ ...finalForm, id: editId });
+          await updateEvent({ ...finalForm, id: editId });
         }
       } else {
-        addEvent({ ...finalForm, _id: evId });
+        await addEvent({ ...finalForm, _id: evId });
       }
       closeModal();
     } catch(e) {
-      alert("사진 업로드 중 오류: " + e.message);
+      alert("일정 저장 중 오류: " + e.message);
     } finally {
       setUploading(false);
     }
@@ -2509,7 +2513,7 @@ export function EventModal() {
               </button>
             )}
             {editId && (
-              <button onClick={()=>{ if(window.confirm("이 일정을 삭제하시겠습니까?")){ deleteEvent(editId); closeModal(); } }}
+              <button onClick={async ()=>{ if(window.confirm("이 일정을 삭제하시겠습니까?")){ try{await deleteEvent(editId);closeModal();}catch(e){alert(e.message||"삭제 실패");} } }}
                 className="text-red-500 font-bold text-base">
                 삭제
               </button>
@@ -2831,32 +2835,19 @@ export function TopHeader() {
   const DAYS=["일","월","화","수","목","금","토"];
   const d=pd(selDate), dow=d?.getDay()??0;
 
-  // 로그인 시 다중 소속 여부 미리 확인
+  // Membership choices are authenticated server results, never raw credentials.
   useEffect(()=>{
-    if(isSuperAdmin(currentUser)) { setIsMulti(false); return; }
-    const phone = currentUser.phone;
-    if(!phone) { setIsMulti(false); return; }
-    getDocs(query(collection(db,"staffs"), where("phone","==",phone))).then(snap=>{
-      const active = snap.docs.filter(d=>d.data().status !== "deleted");
-      setIsMulti(active.length >= 2);
-    }).catch(()=>setIsMulti(false));
+    if(isSuperAdmin(currentUser)){setIsMulti(false);return;}
+    let active=true;
+    httpsCallable(functions,"appAuth")({action:"companies"}).then(({data})=>{if(active)setIsMulti((data.companies||[]).length>=2);}).catch(()=>setIsMulti(false));
+    return ()=>{active=false;};
   },[currentUser.uid]);
-
-  // 다중 소속 회사 목록 불러오기
-  const checkMulti = async () => {
-    if(isSuperAdmin(currentUser)) return;
-    const phone = currentUser.phone;
-    if(!phone) return;
-    let snap = await getDocs(query(collection(db,"staffs"), where("phone","==",phone)));
-    if(snap.empty) snap = await getDocs(query(collection(db,"staffs"), where("phone","==",fmtPhone(phone))));
-    const active = snap.docs.filter(d=>d.data().status !== "deleted");
-    if(active.length < 2) return;
-    const companies = await Promise.all(active.map(async d=>{
-      const compDoc = await getDoc(doc(db,"companies",d.data().companyId));
-      return { staffDoc:d, companyName:compDoc.exists()?compDoc.data().name:"알 수 없는 회사" };
-    }));
-    setMultiList(companies);
-    setCompanyPicker(true);
+  const checkMulti=async()=>{
+    try {
+      const {data}=await httpsCallable(functions,"appAuth")({action:"companies"});
+      setMultiList((data.companies||[]).map(c=>({companyName:c.companyName,staffDoc:{id:c.companyId,data:()=>c}})));
+      setCompanyPicker(true);
+    } catch { alert("회사 목록을 확인하지 못했습니다. 다시 로그인해주세요."); }
   };
 
   return (
@@ -2891,12 +2882,9 @@ export function TopHeader() {
               <div className="flex flex-col gap-3">
                 {multiList.map(({ staffDoc, companyName }) => (
                   <button key={staffDoc.id}
-                    onClick={() => {
-                      const data = staffDoc.data();
-                      const user = { ...data, uid: staffDoc.id, companyName };
-                      try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch {}
-                      setCompanyPicker(false);
-                      window.location.reload();
+                    onClick={async () => {
+                      try {await authenticate({action:"switch",companyId:staffDoc.data().companyId});setCompanyPicker(false);window.location.reload();}
+                      catch {alert("회사 전환을 확인하지 못했습니다. 다시 로그인해주세요.");}
                     }}
                     className={`w-full py-4 rounded-2xl font-bold text-sm transition-all ${staffDoc.data().companyId === currentUser.companyId ? "border-2 border-blue-500 text-blue-600 bg-blue-50" : "text-white"}`}
                     style={staffDoc.data().companyId !== currentUser.companyId ? {background:"linear-gradient(135deg,#1a56db,#2563eb)"} : {}}>
@@ -2943,7 +2931,7 @@ export function TopHeader() {
                   ${i===m?"bg-blue-500 text-white":"text-gray-600 hover:bg-gray-100"}`}>{i+1}월</button>
             ))}
           </div>
-          <button onClick={()=>{setCurrent(new Date());setSelDate(fmt(new Date()));setPicker(false);}}
+          <button onClick={()=>{setCurrent(pd(seoulToday()));setSelDate(seoulToday());setPicker(false);}}
             className="w-full mt-3 py-2 rounded-xl text-sm font-semibold text-blue-500 bg-blue-50">오늘로 이동</button>
         </div>
       )}
@@ -2972,7 +2960,7 @@ export function FloatingButtons() {
     <div className="fixed bottom-20 flex flex-col items-end gap-3 pointer-events-none z-40"
       style={{right: "max(1rem, calc((100vw - 430px) / 2 + 1rem))"}}>
       {/* 오늘 버튼 */}
-      <button onClick={()=>{setCurrent(new Date());setSelDate(fmt(new Date()));}}
+      <button onClick={()=>{setCurrent(pd(seoulToday()));setSelDate(seoulToday());}}
         className="pointer-events-auto flex items-center gap-1 bg-white rounded-full px-4 py-2 shadow-lg border border-gray-200 text-sm font-medium text-gray-700">
         ‹ 오늘
       </button>

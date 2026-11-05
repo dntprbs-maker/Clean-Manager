@@ -1,3 +1,5 @@
+import { functions } from "../../firebase";
+import { httpsCallable } from "firebase/functions";
 import { useState, useEffect, useRef } from "react";
 import { X, Edit3, Trash2, Link2, MoreVertical, IdCard, User, Phone, Users } from "lucide-react";
 import { collection, doc, setDoc, serverTimestamp } from "firebase/firestore";
@@ -293,9 +295,10 @@ export function EmployeeFormModal() {
       };
       if (empModal.editId) {
         // 기존 유저 수정 (비밀번호도 함께 저장)
-        const updateData = { ...baseData, pw: form.pw };
+        const updateData = { ...baseData };
         await setDoc(doc(db, "companies", companyId, "users", empModal.editId), updateData, { merge: true });
         await setDoc(doc(db, "staffs", empModal.editId), { ...updateData, companyId }, { merge: true });
+        if(form.pw) await httpsCallable(functions,"appAccount")({action:"setEmployeePassword",employeeId:empModal.editId,newPassword:form.pw});
       } else {
         // 새 유저 생성 (Firestore 직접 저장 - 이메일 인증 사용안함)
         const newDocRef = doc(collection(db, "staffs"));
@@ -340,8 +343,7 @@ export function EmployeeFormModal() {
     if (!confirm("비밀번호를 초기화하시겠습니까?\n직원이 다음 로그인 시 새 비밀번호를 설정하게 됩니다.")) return;
     setLoading(true);
     try {
-      await setDoc(doc(db, "companies", companyId, "users", empModal.editId), { pw: "" }, { merge: true });
-      await setDoc(doc(db, "staffs", empModal.editId), { pw: "" }, { merge: true });
+      await httpsCallable(functions,"appAccount")({action:"setEmployeePassword",employeeId:empModal.editId,newPassword:""});
       setForm(f => ({...f, pw: ""}));
       alert("비밀번호가 초기화됐습니다.\n직원이 다음 로그인 시 새 비밀번호를 설정합니다.");
     } catch(e) {

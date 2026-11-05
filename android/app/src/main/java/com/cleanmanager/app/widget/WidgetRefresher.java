@@ -4,7 +4,6 @@ import android.appwidget.AppWidgetManager;
 import android.content.ComponentName;
 import android.content.Context;
 
-import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Locale;
@@ -27,6 +26,8 @@ public final class WidgetRefresher {
     static boolean ensureRange(Context context, String from, String to, boolean force) {
         Context appContext = context.getApplicationContext();
         synchronized (LOCK) {
+            String sessionScope = WidgetSessionStore.scope(appContext);
+            if (!WidgetSessionStore.isSignedIn(appContext)) { WidgetCache.clear(appContext); return false; }
             // 락을 잡은 뒤 다시 확인한다 — 다른 위젯이 그새 채워 놨을 수 있다.
             WidgetCache.Snapshot cached = WidgetCache.load(appContext);
             long now = System.currentTimeMillis();
@@ -35,7 +36,7 @@ public final class WidgetRefresher {
             boolean fresh = cached.eventsFetchedAt > 0 && now - cached.eventsFetchedAt <= REUSE_WINDOW_MS;
             if (!force && covers && fresh) return false;
 
-            List<WidgetEvent> events = FirestoreEventFetcher.fetchRange(from, to);
+            List<WidgetEvent> events = FirestoreEventFetcher.fetchRange(appContext, from, to);
             if (events == null) return false; // 실패하면 기존 캐시를 그대로 둔다
 
             boolean needCals = force
@@ -45,14 +46,15 @@ public final class WidgetRefresher {
             Map<String, Integer> cals = cached.calendars;
             long calsAt = cached.calendarsFetchedAt;
             if (needCals) {
-                Map<String, Integer> fetched = FirestoreEventFetcher.fetchCalendars();
+                Map<String, Integer> fetched = FirestoreEventFetcher.fetchCalendars(appContext);
                 if (fetched != null) {
                     cals = fetched;
                     calsAt = now;
                 }
             }
 
-            WidgetCache.save(appContext, events, cals, from, to, now, calsAt);
+            if (!sessionScope.equals(WidgetSessionStore.scope(appContext))) return false;
+            WidgetCache.saveScoped(appContext, sessionScope, events, cals, from, to, now, calsAt);
             return true;
         }
     }
@@ -154,59 +156,22 @@ public final class WidgetRefresher {
                 + idsOf(mgr, context, CleanManagerTwoWeekGridWidgetProvider.class).length > 0;
     }
 
+    public static void redrawAll(Context context) {
+        CleanManagerWeeklyWidgetProvider.redrawAll(context);
+        CleanManagerMonthlyWidgetProvider.redrawAll(context);
+        CleanManagerTwoWeekWidgetProvider.redrawAll(context);
+        CleanManagerTwoWeekGridWidgetProvider.redrawAll(context);
+    }
+
     /**
      * 푸시로 알려온 일정 id 만 골라 캐시를 부분 갱신한다(전체 재조회 없음).
      * 하나라도 조회에 실패하면 반복을 멈추고 전체 재조회로 대체한다.
      */
     static void applyChangedIds(Context context, List<String> ids, boolean calsChanged) {
-        Context appContext = context.getApplicationContext();
-        boolean needFullReload = false;
-
-        synchronized (LOCK) {
-            WidgetCache.Snapshot cached = WidgetCache.load(appContext);
-            List<WidgetEvent> events = new ArrayList<>(cached.events);
-            Map<String, Integer> cals = cached.calendars;
-            long calsAt = cached.calendarsFetchedAt;
-            long now = System.currentTimeMillis();
-
-            // 업데이트 전 캐시(id 없음)는 항목을 찾아 교체할 수 없어 중복이 생긴다 → 한 번 전체 재조회.
-            for (WidgetEvent e : events) {
-                if (e.id == null || e.id.isEmpty()) { needFullReload = true; break; }
-            }
-
-            for (String id : needFullReload ? new ArrayList<String>() : ids) {
-                if (id == null || id.isEmpty()) continue;
-                FirestoreEventFetcher.FetchOne one = FirestoreEventFetcher.fetchById(id);
-                if (one == null) { needFullReload = true; break; } // 오류 → 전체 재조회로 대체
-
-                int index = -1;
-                for (int i = 0; i < events.size(); i++) {
-                    if (id.equals(events.get(i).id)) { index = i; break; }
-                }
-                if (one.deleted) {
-                    if (index >= 0) events.remove(index);
-                } else if (one.event != null) {
-                    if (index >= 0) events.set(index, one.event); // 기존 항목 교체
-                    else events.add(one.event);                   // 없던 항목 추가
-                }
-            }
-
-            if (!needFullReload) {
-                if (calsChanged) {
-                    Map<String, Integer> fetched = FirestoreEventFetcher.fetchCalendars();
-                    if (fetched != null) { cals = fetched; calsAt = now; } // 실패하면 기존 색상 유지
-                }
-                // 부분 갱신이므로 조회 범위·일정 시각은 유지하고 캘린더 색상 시각만 조건부 갱신.
-                WidgetCache.save(appContext, events, cals,
-                        cached.rangeFrom, cached.rangeTo, cached.eventsFetchedAt, calsAt);
-            }
-        }
-
-        if (needFullReload) {
-            // LOCK 밖에서 대체 조회 — ensureRange 가 내부에서 LOCK 을 다시 잡기 때문(의도를 분명히).
-            String[] range = refreshRange(appContext);
-            ensureRange(appContext, range[0], range[1], true);
-        }
+        // A series or permissions change can alter many displayed occurrences. Reconcile the
+        // complete visible projection instead of inserting a raw series as a single occurrence.
+        String[] range = refreshRange(context);
+        ensureRange(context, range[0], range[1], true);
     }
 
     private static int[] idsOf(AppWidgetManager mgr, Context context, Class<?> provider) {

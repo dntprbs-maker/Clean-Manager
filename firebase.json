@@ -26,14 +26,62 @@
         "**/node_modules/**"
       ],
       "rewrites": [
-        { "source": "/mcp", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-        { "source": "/mcp/**", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-        { "source": "/authorize", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-        { "source": "/token", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-        { "source": "/register", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-        { "source": "/revoke", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-        { "source": "/oauth/**", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
-        { "source": "/.well-known/**", "function": { "functionId": "mcp", "region": "asia-northeast3" } },
+        {
+          "source": "/mcp",
+          "function": {
+            "functionId": "mcp",
+            "region": "asia-northeast3"
+          }
+        },
+        {
+          "source": "/mcp/**",
+          "function": {
+            "functionId": "mcp",
+            "region": "asia-northeast3"
+          }
+        },
+        {
+          "source": "/authorize",
+          "function": {
+            "functionId": "mcp",
+            "region": "asia-northeast3"
+          }
+        },
+        {
+          "source": "/token",
+          "function": {
+            "functionId": "mcp",
+            "region": "asia-northeast3"
+          }
+        },
+        {
+          "source": "/register",
+          "function": {
+            "functionId": "mcp",
+            "region": "asia-northeast3"
+          }
+        },
+        {
+          "source": "/revoke",
+          "function": {
+            "functionId": "mcp",
+            "region": "asia-northeast3"
+          }
+        },
+        {
+          "source": "/oauth/**",
+          "function": {
+            "functionId": "mcp",
+            "region": "asia-northeast3"
+          }
+        },
+        {
+          "source": "/.well-known/**",
+          "function": {
+            "functionId": "mcp",
+            "region": "asia-northeast3"
+          }
+        },
         {
           "source": "**",
           "destination": "/index.html"
@@ -43,19 +91,28 @@
         {
           "source": "/index.html",
           "headers": [
-            { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
           ]
         },
         {
           "source": "/",
           "headers": [
-            { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
           ]
         },
         {
           "source": "**/!(*.*)",
           "headers": [
-            { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
           ]
         }
       ]
@@ -69,22 +126,40 @@
         "**/node_modules/**"
       ],
       "rewrites": [
-        { "source": "**", "destination": "/index.html" }
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
       ],
       "headers": [
         {
           "source": "/index.html",
           "headers": [
-            { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
           ]
         }
       ]
     }
   ],
   "emulators": {
-    "functions": { "port": 5001 },
-    "firestore": { "port": 8080 },
-    "hosting": { "port": 5000 },
-    "ui": { "enabled": true, "port": 4000 }
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "hosting": {
+      "port": 5000
+    },
+    "ui": {
+      "enabled": true,
+      "port": 4000
+    },
+    "auth": {
+      "port": 9099
+    }
   }
 }

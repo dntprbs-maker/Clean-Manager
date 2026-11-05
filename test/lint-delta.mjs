@@ -1,0 +1,5 @@
+import { ESLint } from 'eslint';import {execFileSync} from 'node:child_process';
+const files=['src/context/AppContext.jsx','src/features/calendar/CalendarCore.jsx','src/features/misc/MiscScreens.jsx','src/features/regular-cleaning/RegularCleaningScreens.jsx','src/features/support/SupportScreens.jsx','src/features/finance/FinanceScreens.jsx'];
+const lint=new ESLint();const out=[];
+for(const f of files){const base=execFileSync('git',['-c','safe.directory=C:/Users/user/projects/Clean-Manager','-c','safe.directory=C:/Users/user/projects/Clean-Manager/.pagination-work','show','HEAD:'+f],{encoding:'utf8'});const [before]=await lint.lintText(base,{filePath:f});const [after]=await lint.lintFiles([f]);const keys=new Set(before.messages.map(m=>m.ruleId+'|'+m.message));out.push({file:f,baselineErrors:before.errorCount,currentErrors:after.errorCount,newErrors:after.messages.filter(m=>m.severity===2&&!keys.has(m.ruleId+'|'+m.message)).map(m=>({line:m.line,rule:m.ruleId,text:m.message.slice(0,110)}))});}
+console.log(JSON.stringify(out));

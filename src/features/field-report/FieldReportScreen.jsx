@@ -1,3 +1,4 @@
+import { seoulToday } from "../../lib/dateTime";
 import { useState, useEffect, useRef } from "react";
 import { X, Check } from "lucide-react";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -10,7 +11,7 @@ import { openLightbox } from "../../components/shared/PhotoLightbox";
 
 // ── 현장 완료 보고 화면 (2단계: 시작 → 완료) ─────────────────────
 export function FieldReportScreen({ ev, onClose }) {
-  const { currentUser, addReport, updateReport, processPendingUploads, reports, companyId, isDemo } = useC();
+  const { currentUser, addReport, updateReport, processPendingUploads, reports, companyId, isDemo, dataReady } = useC();
   // 이전에 "청소 시작"까지만 하고 나갔던 진행중 보고가 있으면 이어서 재개
   const existingReport = ev ? reports.find(r => r.eventId === ev.id && r.status === "진행중") : null;
   const [step, setStep] = useState(existingReport ? "working" : "start");
@@ -62,6 +63,7 @@ export function FieldReportScreen({ ev, onClose }) {
   }));
 
   const handleStart = async () => {
+    if(dataReady===false){alert("진행중 보고 확인이 끝난 뒤 다시 눌러주세요.");return;}
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
     setStartTime(timeStr);
@@ -72,7 +74,7 @@ export function FieldReportScreen({ ev, onClose }) {
         const id = await addReport({
           eventId:   ev?.id || null,
           title:     ev?.title || "",
-          date:      ev?.start || fmt(new Date()),
+          date:      ev?.start || seoulToday(),
           startTime: ev?.startTime || "",
           calId:     ev?.calId || "",
           teamName:  cal?.label || cal?.name || "",
@@ -168,7 +170,7 @@ export function FieldReportScreen({ ev, onClose }) {
           await addReport({
             eventId:   ev?.id || null,
             title:     ev?.title || "",
-            date:      ev?.start || fmt(new Date()),
+            date:      ev?.start || seoulToday(),
             startTime: ev?.startTime || "",
             calId:     ev?.calId || "",
             teamName:  cal?.label || cal?.name || "",

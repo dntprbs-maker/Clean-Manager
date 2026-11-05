@@ -43,12 +43,16 @@ final class WidgetCache {
     private WidgetCache() {}
 
     static Snapshot load(Context context) {
+        if (!WidgetSessionStore.isSignedIn(context)) return new Snapshot(new ArrayList<>(), new HashMap<>());
         SharedPreferences prefs = context.getSharedPreferences(WidgetConfig.PREFS_NAME, Context.MODE_PRIVATE);
         String blob = prefs.getString(WidgetConfig.PREF_KEY_CACHE_BLOB, null);
         if (blob == null) return new Snapshot(new ArrayList<>(), new HashMap<>());
 
         try {
             JSONObject root = new JSONObject(blob);
+            if (!WidgetSessionStore.scope(context).equals(root.optString("sessionScope", ""))) {
+                return new Snapshot(new ArrayList<>(), new HashMap<>());
+            }
 
             List<WidgetEvent> events = new ArrayList<>();
             JSONArray evArr = root.optJSONArray("events");
@@ -98,6 +102,12 @@ final class WidgetCache {
                 current.eventsFetchedAt, current.calendarsFetchedAt);
     }
 
+    static void saveScoped(Context context, String expectedScope, List<WidgetEvent> events, Map<String, Integer> calendars,
+                           String from, String to, long eventsAt, long calendarsAt) {
+        WidgetSessionStore.runIfCurrent(context, expectedScope,
+                () -> save(context, events, calendars, from, to, eventsAt, calendarsAt));
+    }
+
     static void save(Context context, List<WidgetEvent> events, Map<String, Integer> calendars,
                      String rangeFrom, String rangeTo, long eventsFetchedAt, long calendarsFetchedAt) {
         try {
@@ -122,6 +132,7 @@ final class WidgetCache {
             }
 
             JSONObject root = new JSONObject();
+            root.put("sessionScope", WidgetSessionStore.scope(context));
             root.put("events", evArr);
             root.put("calendars", calObj);
             root.put("fetchedAt", System.currentTimeMillis());
@@ -135,6 +146,11 @@ final class WidgetCache {
         } catch (Exception e) {
             Log.w(TAG, "캐시 저장 실패", e);
         }
+    }
+
+    static void clear(Context context) {
+        context.getSharedPreferences(WidgetConfig.PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().remove(WidgetConfig.PREF_KEY_CACHE_BLOB).commit();
     }
 
     static int getWeekOffset(Context context, int appWidgetId) {

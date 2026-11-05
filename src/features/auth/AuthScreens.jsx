@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import { collection, doc, setDoc, getDoc, getDocs, updateDoc, query, where } from "firebase/firestore";
 import { db } from "../../firebase";
+import { authenticate } from "../../lib/appAuth";
 import { enablePush } from "../../fcm";
 import { fmt } from "../../lib/dateTime";
 import { onlyDigits, fmtPhone } from "../../lib/phone";
@@ -26,105 +27,37 @@ export function LoginScreen({ onLogin }) {
   const isPhone = id => id.replace(/-/g,"").startsWith("0");
   const phoneComplete = id => isPhone(id) && id.replace(/-/g,"").length >= 10;
 
-  // 전화번호 완성 시 Firestore에서 비밀번호 여부 확인
+  // Account credentials are verified on the server, never downloaded.
   useEffect(() => {
     if (!phoneComplete(id)) { setHasPw(null); return; }
     let cancelled = false;
-    getDocs(query(collection(db,"staffs"), where("phone","==",onlyDigits(id))))
-      .then(snap => {
-        if (cancelled) return;
-        if (snap.empty) { setHasPw(true); return; } // 없으면 관리자일 수 있으니 표시
-        setHasPw(!!snap.docs[0].data().pw);
-      })
-      .catch(() => setHasPw(true));
+    authenticate({ action: "check", identifier: id }).then(data => {
+      if (!cancelled) setHasPw(!data.needsSetup);
+    }).catch(() => { if (!cancelled) setHasPw(true); });
     return () => { cancelled = true; };
   }, [id]);
 
-  // 로그인 - 아이디/전화번호 자동 구분
-  const handleLogin = async () => {
-    if(!id.trim()){ setError("아이디 또는 전화번호를 입력하세요."); return; }
+  const handleLogin = async (companyId) => {
+    if (!id.trim()) { setError("아이디 또는 전화번호를 입력하세요."); return; }
     setLoading(true); setError("");
     try {
-      const isPhone = /^0\d{9,10}$/.test(id.trim().replace(/-/g,""));
-
-      if(isPhone) {
-        // 직원 (전화번호로 조회) — 숫자만으로 우선 조회, 못 찾으면 하이픈 포맷으로도 조회(구버전 데이터 호환)
-        const phone = onlyDigits(id);
-        let staffSnap = await getDocs(query(collection(db,"staffs"), where("phone","==",phone)));
-        if(staffSnap.empty){
-          staffSnap = await getDocs(query(collection(db,"staffs"), where("phone","==",fmtPhone(phone))));
-        }
-        // status:"deleted" 제외
-        const activeDocs = staffSnap.docs.filter(d => d.data().status !== "deleted");
-        if(activeDocs.length === 0){ setError("등록되지 않은 전화번호입니다."); setLoading(false); return; }
-
-        // 비밀번호 확인 (첫 번째 문서 기준)
-        const firstData = activeDocs[0].data();
-        if(!firstData.pw) {
-          const compDoc = await getDoc(doc(db,"companies",firstData.companyId));
-          setPendingUser({...firstData, uid:activeDocs[0].id, companyName:compDoc.exists()?compDoc.data().name:"클린메니져", companyLogoUrl:compDoc.data()?.logoUrl});
-          setMode("setPw"); setLoading(false); return;
-        }
-        if(!pw.trim()){ setError("비밀번호를 입력하세요."); setLoading(false); return; }
-        if(firstData.pw !== pw){ setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
-
-        // 다중 소속 회사 처리
-        if(activeDocs.length > 1) {
-          const companies = await Promise.all(activeDocs.map(async d => {
-            const compDoc = await getDoc(doc(db,"companies",d.data().companyId));
-            return { staffDoc: d, companyName: compDoc.exists()?compDoc.data().name:"알 수 없는 회사" };
-          }));
-          setMultiCompanies({ companies, pw });
-          setLoading(false); return;
-        }
-
-        // 단일 소속
-        const compDoc = await getDoc(doc(db,"companies",firstData.companyId));
-        const user = {...firstData, uid:activeDocs[0].id, companyName:compDoc.exists()?compDoc.data().name:"클린메니져", companyLogoUrl:compDoc.data()?.logoUrl};
-        try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
-        onLogin(user); return;
-      } else {
-        // 관리자 (아이디로 조회)
-        if(!pw.trim()){ setError("비밀번호를 입력하세요."); setLoading(false); return; }
-        const adminQ = query(collection(db,"admins"), where("id","==",id.trim()));
-        const adminSnap = await getDocs(adminQ);
-        if(adminSnap.empty){ setError("등록되지 않은 아이디입니다."); setLoading(false); return; }
-        const activeAdmin = adminSnap.docs.find(d => d.data().status !== "deleted");
-        if(!activeAdmin){ setError("탈퇴 또는 삭제된 계정입니다."); setLoading(false); return; }
-        const adminData = activeAdmin.data();
-        if(adminData.pw !== pw){ setError("비밀번호가 올바르지 않습니다."); setLoading(false); return; }
-        const compDoc = await getDoc(doc(db,"companies",adminData.companyId));
-        if(compDoc.exists() && compDoc.data().status === "deleted"){ setError("탈퇴 또는 삭제된 업체입니다."); setLoading(false); return; }
-        const user = {...adminData, uid:activeAdmin.id, companyName:compDoc.exists()?compDoc.data().name:"클린메니져", companyLogoUrl:compDoc.data()?.logoUrl, role:"최고관리자"};
-        try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
-        onLogin(user); return;
-      }
-    } catch(e) {
-      console.error(e);
-      setError("로그인 중 오류가 발생했습니다.");
-    } finally { setLoading(false); }
+      const data = await authenticate({ action: "login", identifier: id, password: pw, ...(typeof companyId === "string" ? { companyId } : {}) });
+      if (data.needsSetup) { setPendingUser({ name: data.name }); setMode("setPw"); return; }
+      if (data.companies) { setMultiCompanies({ companies: data.companies }); return; }
+      setMultiCompanies(null);
+      onLogin(data.user);
+    } catch (e) { setError(e.message || "로그인 중 오류가 발생했습니다."); }
+    finally { setLoading(false); }
   };
 
-  // 첫 로그인 비밀번호 설정
   const handleSetPw = async () => {
-    if(!pw||!pw2){ setError("비밀번호를 입력하세요."); return; }
-    if(pw!==pw2){ setError("비밀번호가 일치하지 않습니다."); return; }
-    if(pw.length<4){ setError("비밀번호는 4자 이상이어야 합니다."); return; }
+    if (!pw || pw !== pw2 || pw.length < 4) { setError("비밀번호를 4자 이상 동일하게 입력해주세요."); return; }
     setLoading(true); setError("");
     try {
-      await updateDoc(doc(db,"staffs",pendingUser.uid), { pw });
-      // companies/{companyId}/users에도 동기화
-      if (pendingUser.companyId) {
-        await updateDoc(doc(db,"companies",pendingUser.companyId,"users",pendingUser.uid), { pw });
-      }
-      const user = {...pendingUser, pw};
-      try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
-      setPendingUser(user);
-      setMode("notifyConsent"); // 비번 설정 후 알림 동의 단계로
-    } catch(e) {
-      console.error(e);
-      setError("비밀번호 설정 중 오류가 발생했습니다.");
-    } finally { setLoading(false); }
+      const data = await authenticate({ action: "setup", identifier: id, password: pw });
+      setPendingUser(data.user); setMode("notifyConsent");
+    } catch (e) { setError(e.message || "비밀번호 설정 중 오류가 발생했습니다."); }
+    finally { setLoading(false); }
   };
 
   // 알림 동의 → 권한 요청 + 토큰 등록 후 앱 진입
@@ -143,29 +76,14 @@ export function LoginScreen({ onLogin }) {
     if(pw.length<4){ setError("비밀번호는 4자 이상이어야 합니다."); return; }
     setLoading(true); setError("");
     try {
-      const adminQ = query(collection(db,"admins"), where("id","==",id.trim()));
-      const adminSnap = await getDocs(adminQ);
-      const activeExists = adminSnap.docs.some(d => d.data().status !== "deleted");
-      if(activeExists){ setError("이미 사용 중인 아이디입니다."); setLoading(false); return; }
-      const companyId = "c_" + Math.random().toString(36).slice(2,9);
-      const adminId   = "a_" + Math.random().toString(36).slice(2,9);
-      // 회사명은 기본값으로 설정 (나중에 회사 설정에서 변경)
-      // AI 추출 등 부가 기능은 전부 기본 OFF — 요금제에 따라 슈퍼어드민에서 개별로 켜줌
-      await setDoc(doc(db,"companies",companyId), {
-        name:"내 회사", companyId, createdAt:new Date().toISOString(),
-        aiTextExtraction: false, aiImageExtraction: false,
+      const data = await authenticate({ action: "register", identifier: id.trim(), password: pw });
+      const user = data.user;
+      // Existing defaults are seeded only after Firebase Auth succeeded.
+      await Promise.all(DEFAULT_CALS.map(c => setDoc(doc(db,"companies",user.companyId,"cals",c.id), c)));
+      await setDoc(doc(db,"companies",user.companyId,"meta","config"), {
+        teams: INIT_TEAMS, linkCategories: ["업무", "지도", "연락처", "기타"],
       });
-      await setDoc(doc(db,"admins",adminId), { id:id.trim(), pw, name:id.trim(), companyId, role:"최고관리자", team:"사장", createdAt:new Date().toISOString() });
-      // 기본 캘린더(담당팀 색상) 시드 — 이게 없으면 일정이 달력에 안 보임
-      await Promise.all(DEFAULT_CALS.map(c => setDoc(doc(db,"companies",companyId,"cals",c.id), c)));
-      // 기본 팀 목록 + 링크 카테고리 시드 (사장 팀 포함, 목록에서는 숨겨짐)
-      await setDoc(doc(db,"companies",companyId,"meta","config"), {
-        teams: INIT_TEAMS,
-        linkCategories: ["업무", "지도", "연락처", "기타"],
-      });
-      const user = {uid:adminId, id:id.trim(), name:id.trim(), companyId, companyName:"", role:"최고관리자", team:"사장", needsSetup:true};
-      try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch{}
-      onLogin(user);
+      onLogin({ ...user, companyName: "", needsSetup: true });
     } catch(e) {
       console.error(e);
       setError("가입 중 오류가 발생했습니다.");
@@ -393,15 +311,10 @@ export function LoginScreen({ onLogin }) {
             <h2 className="text-lg font-extrabold text-gray-900 text-center mb-1">소속 회사 선택</h2>
             <p className="text-sm text-gray-400 text-center mb-5">여러 업체에 등록되어 있습니다.<br/>어느 업체로 로그인할까요?</p>
             <div className="flex flex-col gap-3">
-              {multiCompanies.companies.map(({ staffDoc, companyName }) => (
-                <button key={staffDoc.id}
-                  onClick={async () => {
-                    const data = staffDoc.data();
-                    const user = { ...data, uid: staffDoc.id, companyName };
-                    try { localStorage.setItem("loginUser", JSON.stringify(user)); } catch {}
-                    setMultiCompanies(null);
-                    onLogin(user);
-                  }}
+              {multiCompanies.companies.map(({ companyId, companyName }) => (
+                <button key={companyId}
+                  disabled={loading}
+                  onClick={() => handleLogin(companyId)}
                   className="w-full py-4 rounded-2xl font-bold text-sm text-white"
                   style={{background:"linear-gradient(135deg,#1a56db,#2563eb)"}}>
                   {companyName}
