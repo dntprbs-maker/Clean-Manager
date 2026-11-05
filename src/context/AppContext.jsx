@@ -8,9 +8,10 @@ import { httpsCallable } from "firebase/functions";
 import { db, storage, functions } from "../firebase";
 import {
   collection, doc, setDoc, updateDoc, onSnapshot,
-  query, where, getDocs, getDocsFromServer, deleteDoc, arrayUnion,
+  query, where, getDocs, getDocsFromServer, getDocFromServer, deleteDoc, arrayUnion,
 } from "firebase/firestore";
-import { calendarRange, subscribeGroup } from "../lib/scopedData";
+import { invalidateWidgetData } from "../lib/appAuth";
+import { calendarRange, calendarWindows, expandEventsInWindows, subscribeGroup } from "../lib/scopedData";
 import { DataSyncBanner } from "../components/shared/DataSyncBanner";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getPendingPhotosByReport, getAllPendingPhotos, deletePendingPhoto } from "../pendingUploads";
@@ -29,6 +30,7 @@ export const useC = () => useContext(Ctx);
 export function Provider({ children, loginUser, onLogout }) {
   const companyRef = doc(db, "companies", loginUser.companyId);
   const [currentUser, setCurrentUser] = useState(loginUser);
+  const [retryGeneration, setRetryGeneration] = useState(0);
   useEffect(() => { setCurrentUser(loginUser); }, [loginUser]);
 
 
@@ -111,12 +113,16 @@ export function Provider({ children, loginUser, onLogout }) {
       const expectedVersion=kind==='events'?(value?.__readVersion||events.find(e=>e.id===id)?.__readVersion):undefined;
       const {data}=await httpsCallable(functions,'appWriteData')({kind,id,...(clean?{value:clean}:{}),merge:mode==='update',remove:mode==='delete',...(expectedVersion?{expectedVersion}:{})});
       setRetryGeneration(n=>n+1);
+      if(kind==='events') await invalidateWidgetData();
       return data;
     }
     const target=doc(companyRef,kind,id);
-    if(mode==='delete')return deleteDoc(target);
-    if(mode==='update')return updateDoc(target,clean);
-    return setDoc(target,clean);
+    let result;
+    if(mode==='delete')result=await deleteDoc(target);
+    else if(mode==='update')result=await updateDoc(target,clean);
+    else result=await setDoc(target,clean);
+    if(kind==='events') await invalidateWidgetData();
+    return result;
   }
 
   // ── 공지 CRUD (Firestore 영속) ──
@@ -255,6 +261,7 @@ export function Provider({ children, loginUser, onLogout }) {
       await deleteDoc(d.ref);
     }));
     await deleteDoc(doc(companyRef, "sites", id));
+    await invalidateWidgetData();
     if (target) addLog("삭제", `'${target.name}' 현장을 삭제했습니다.`);
   }, [companyRef, sites, addLog]);
 
@@ -307,6 +314,7 @@ export function Provider({ children, loginUser, onLogout }) {
       source: "regular", siteId: assignment.siteId, assignmentId: assignment.id,
     });
     await setDoc(doc(companyRef, "assignments", assignment.id), { eventId: newRef.id, start: todayStr }, { merge: true });
+    await invalidateWidgetData();
   }, [companyRef, cals]);
 
   // ── 정기청소 배정 CRUD (Firestore 영속) ──
@@ -318,6 +326,7 @@ export function Provider({ children, loginUser, onLogout }) {
     const site = sites.find(s => s.id === a.siteId);
     addLog("등록", `${emp?.name || "직원"} - ${site?.name || "현장"} 배정을 등록했습니다.`);
     await syncAssignmentCalendar(newAssignment, null, sites);
+    await invalidateWidgetData();
   }, [companyRef, sites, users, addLog, syncAssignmentCalendar]);
 
   const updateAssignment = useCallback(async a => {
@@ -327,6 +336,7 @@ export function Provider({ children, loginUser, onLogout }) {
     const site = sites.find(s => s.id === a.siteId);
     addLog("수정", `${emp?.name || "직원"} - ${site?.name || "현장"} 배정을 수정했습니다.`);
     await syncAssignmentCalendar(a, prev, sites);
+    await invalidateWidgetData();
   }, [companyRef, assignments, sites, users, addLog, syncAssignmentCalendar]);
 
   const deleteAssignment = useCallback(async id => {
@@ -340,6 +350,7 @@ export function Provider({ children, loginUser, onLogout }) {
         await writeEntity("events",target.eventId,{repeatUntil:add(seoulToday(),-1)},"update");
       }
     }
+    await invalidateWidgetData();
   }, [companyRef, assignments, sites, users, addLog]);
 
   // ── 정기청소 출근확인 (Firestore 영속) ──
@@ -456,7 +467,7 @@ export function Provider({ children, loginUser, onLogout }) {
     if(target) {
       const nextCals = cals.map(c=>c.id===id?{...c,checked:!c.checked}:c);
       setCals(nextCals);
-      updateDoc(doc(companyRef,"cals",target.id),{checked:!target.checked}).catch(()=>{setCals(cals);});
+      updateDoc(doc(companyRef,"cals",target.id),{checked:!target.checked}).then(invalidateWidgetData).catch(()=>{setCals(cals);});
     }
   }, [cals, companyRef]);
 
@@ -468,12 +479,12 @@ export function Provider({ children, loginUser, onLogout }) {
         ? prev.map(c => c.id === updated.id ? {...c, ...updated} : c)
         : [...prev, updated];
     });
-    setDoc(doc(companyRef, "cals", updated.id), updated, {merge:true});
+    return setDoc(doc(companyRef, "cals", updated.id), updated, {merge:true}).then(invalidateWidgetData);
   }, [companyRef]);
 
   const deleteCal = useCallback(calId => {
     setCals(prev => prev.filter(c => c.id !== calId));
-    deleteDoc(doc(companyRef, "cals", calId));
+    return deleteDoc(doc(companyRef, "cals", calId)).then(invalidateWidgetData);
   }, [companyRef]);
 
   // UI 상태
@@ -511,7 +522,6 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
   const [extraCalFilterModal, setExtraCalFilterModal] = useState(false);
   const [financeModal, setFinanceModal] = useState({ open: false, editId: null });
 
-  const [retryGeneration, setRetryGeneration] = useState(0);
   const [calendarDay, setCalendarDay] = useState(null);
   const [financeMonth,setFinanceMonth]=useState(seoulToday().slice(0,7));
   const [financeMonths,setFinanceMonths]=useState([]);
@@ -529,12 +539,13 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
   const [reportHasMore, setReportHasMore] = useState(false);
   const [logHasMore, setLogHasMore] = useState(false);
   const range = calendarRange(current, selDate, calendarDay);
-  const fullEvents = searchOpen || currentScreen === "dashboard" || modal.open;
+  const windows = useMemo(()=>calendarWindows(current,selDate,calendarDay),[current,selDate,calendarDay]);
+  const fullEvents = searchOpen || currentScreen === "dashboard";
   const serverRead = !isSuperAdmin(loginUser);
   const principalKey = JSON.stringify([currentUser.uid,currentUser.role,currentUser.team,currentUser.memberships]);
   const [serverReportRows,setServerReportRows]=useState([]);
   const [serverConfirmedAt,setServerConfirmedAt]=useState(null);
-  const pinnedIds = [...new Set([detEv?.id, fieldReportEv?.id].filter(Boolean))].sort().join('|');
+  const pinnedIds = [...new Set([detEv?.id, fieldReportEv?.id, modal.editId, modal.instanceEv?.id, modal.copyFrom?.id].filter(Boolean))].sort().join('|');
   const group = (name, specs, receive) => subscribeGroup(loginUser.companyId,
     specs.map(s => ({ db, ...s })), receive,
     state => setDataStates(prev => ({ ...prev, [name]: state })));
@@ -544,37 +555,61 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
     const specs = fullEvents ? [{collection:"events"}] : [
       // Union preserves missing end (=start), long events that started before
       // the range, and moved recurring exceptions without a data migration.
-      {collection:"events",where:[["start",">=",range.start],["start","<=",range.end]]},
-      {collection:"events",where:[["end",">=",range.start],["start","<=",range.end]]},
+      ...windows.flatMap(window=>[
+        {collection:"events",where:[["start",">=",window.from],["start","<=",window.to]]},
+        {collection:"events",where:[["end",">=",window.from],["start","<=",window.to]]},
+      ]),
       {collection:"events",where:[["repeat","in",["daily","weekly","monthly","yearly"]]]},
     ];
     pinnedIds.split('|').filter(Boolean).forEach(id => specs.push({collection:"events",id}));
     return group('events', specs, rows => setEvents(rows.filter(e => e.status !== "deleted")));
-  }, [loginUser.companyId, fullEvents, range.start, range.end, pinnedIds, retryGeneration,serverRead,principalKey]);
+  }, [loginUser.companyId, fullEvents, windows, pinnedIds, retryGeneration,serverRead,principalKey]);
 
   useEffect(()=>{
     if(!serverRead)return;
-    let active=true,inFlight=false,queued=false;
-    const load=async()=>{
+    let active=true,inFlight=false,queued=false,queuedForce=false,hasSnapshot=false;
+    let knownRevision=null,scopeKey=null;
+    const revisionRef=doc(companyRef,'meta','readRevision');
+    const handleError=err=>{if(active){setDataStates(prev=>({...prev,events:{ready:false,cached:false,error:err.code||'unavailable'},reportRelated:{ready:false,cached:false,error:err.code||'unavailable'}}));if(['functions/permission-denied','functions/unauthenticated','permission-denied','unauthenticated'].includes(err.code)){setEvents([]);setReports([]);setReportRows([]);setReportRelated([]);setDetEv(null);setFieldReportEv(null);onLogout();}}};
+    const load=async(force=false)=>{
       if(!active)return;
-      if(inFlight){queued=true;return;}
+      if(inFlight){queued=true;queuedForce=queuedForce||force;return;}
       inFlight=true;
-      setDataStates(prev=>({...prev,events:{ready:false,cached:true,error:null},reportRelated:{ready:false,cached:true,error:null}}));
+      setDataStates(prev=>({...prev,events:{ready:hasSnapshot,cached:!hasSnapshot,error:null},reportRelated:{ready:hasSnapshot,cached:!hasSnapshot,error:null}}));
       try {
-        const {data}=await httpsCallable(functions,"appReadData")({full:fullEvents||currentScreen==='report_history',from:range.start,to:range.end,eventIds:pinnedIds.split('|').filter(Boolean)});
+        const conditional=!force&&hasSnapshot&&scopeKey&&knownRevision!==null?{knownRevision,scopeKey}:{};
+        const {data}=await httpsCallable(functions,"appReadData")({full:fullEvents||currentScreen==='report_history',from:range.start,to:range.end,ranges:windows,eventIds:pinnedIds.split('|').filter(Boolean),...conditional});
         if(!active)return;
-        setEvents([...(data.events||[]),...(data.instances||[])]);setCals(data.cals||[]);setCalsLoaded(true);setReportRelated(data.reports||[]);setServerReportRows(data.reports||[]);setServerConfirmedAt(data.serverAt);
+        if(data.notModified) {
+          if(!hasSnapshot||data.scopeKey!==scopeKey||data.revision!==knownRevision) throw Object.assign(new Error('Invalid scoped confirmation'),{code:'scope-mismatch'});
+        } else {
+          setEvents([...(data.events||[]),...(data.instances||[])]);setCals(data.cals||[]);setCalsLoaded(true);setReportRelated(data.reports||[]);setServerReportRows(data.reports||[]);
+          knownRevision=Number.isSafeInteger(data.revision)?data.revision:null;
+          scopeKey=data.scopeKey||null;hasSnapshot=true;
+        }
+        setServerConfirmedAt(data.serverAt);
         setDataStates(prev=>({...prev,events:{ready:true,cached:false,error:null},reportRelated:{ready:true,cached:false,error:null}}));
-      } catch(err) {if(active){setDataStates(prev=>({...prev,events:{ready:false,cached:false,error:err.code},reportRelated:{ready:false,cached:false,error:err.code}}));if(['functions/permission-denied','functions/unauthenticated'].includes(err.code)){setEvents([]);setReports([]);setReportRows([]);setReportRelated([]);setDetEv(null);setFieldReportEv(null);onLogout();}}}
-      finally {inFlight=false;if(queued){queued=false;load();}}
+      } catch(err) {handleError(err);}
+      finally {inFlight=false;if(active&&queued){const forceAgain=queuedForce;queued=false;queuedForce=false;load(forceAgain);}}
+    };
+    const observeRevision=snapshot=>{
+      if(!active||snapshot.metadata.fromCache)return;
+      const value=snapshot.data()?.revision;
+      if(!hasSnapshot||!Number.isSafeInteger(value)||value!==knownRevision)load();
+      else {
+        setServerConfirmedAt(new Date().toISOString());
+        setDataStates(prev=>({...prev,events:{ready:true,cached:false,error:null},reportRelated:{ready:true,cached:false,error:null}}));
+      }
     };
     load();
-    const unsub=onSnapshot(doc(companyRef,'meta','readRevision'),()=>load(),()=>{});
-    const timer=setInterval(()=>{if(document.visibilityState==='visible')load();},60000);
+    const unsub=onSnapshot(revisionRef,{includeMetadataChanges:true},observeRevision,handleError);
+    // Missed-notification fallback reads one revision document, never the
+    // event/report collections when that revision is unchanged.
+    const timer=setInterval(()=>{if(document.visibilityState==='visible')getDocFromServer(revisionRef).then(observeRevision).catch(handleError);},60000);
     const resume=()=>{if(document.visibilityState==='visible')load();};
     document.addEventListener('visibilitychange',resume);window.addEventListener('online',resume);
     return ()=>{active=false;clearInterval(timer);unsub();document.removeEventListener('visibilitychange',resume);window.removeEventListener('online',resume);};
-  },[serverRead,principalKey,loginUser.companyId,fullEvents,currentScreen,range.start,range.end,pinnedIds,retryGeneration]);
+  },[serverRead,principalKey,loginUser.companyId,fullEvents,currentScreen,range.start,range.end,windows,pinnedIds,retryGeneration]);
   useEffect(()=>{
     if(!serverRead)return;
     const rows=[...serverReportRows].sort((a,b)=>(b.date||'').localeCompare(a.date||'')||b.id.localeCompare(a.id));
@@ -583,7 +618,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
     setReportRows(currentScreen==='report_history'?(reportFilterActive?rows:rows.slice(0,reportPageSize)):[]);
   },[serverRead,serverReportRows,currentScreen,reportPageSize,reportFilterActive]);
 
-  const relatedIds = [...new Set(expandRecurring(events, fullEvents ? {} : range).map(e => e.id))].sort().join('|');
+  const relatedIds = [...new Set((fullEvents?expandRecurring(events):expandEventsInWindows(events,windows)).map(e => e.id))].sort().join('|');
   useEffect(() => {
     if(serverRead) return;
     const ids = relatedIds.split('|').filter(Boolean), specs = [];
@@ -810,8 +845,8 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
         );
       }
     }
-    return expandRecurring(evs, fullEvents ? {} : range);
-  }, [events, checkedIds, cals, currentUser, isMine, assignments, myUserId, extraCalFilter, fullEvents, range.start, range.end]);
+    return fullEvents ? expandRecurring(evs) : expandEventsInWindows(evs, windows);
+  }, [events, checkedIds, cals, currentUser, isMine, assignments, myUserId, extraCalFilter, fullEvents, windows]);
 
   return (
     <Ctx.Provider value={{

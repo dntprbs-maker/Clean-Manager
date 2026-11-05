@@ -24,11 +24,22 @@ public class WidgetSessionPlugin extends Plugin {
         getActivity().runOnUiThread(() -> {
             try {
                 if (!trustedOrigin()) { call.reject("Untrusted session origin"); return; }
-                WidgetSessionStore.set(getContext(), call.getString("idToken", ""), call.getString("refreshToken", ""),
+                boolean changed = WidgetSessionStore.set(getContext(), call.getString("idToken", ""), call.getString("refreshToken", ""),
                         call.getString("companyId", ""), call.getString("userId", ""));
-                WidgetRefresher.refreshAllAsync(getContext(), true);
+                WidgetRefresher.refreshAllAsync(getContext(), changed);
                 call.resolve();
             } catch (Exception e) { call.reject("Widget session rejected"); }
+        });
+    }
+    @PluginMethod
+    public void invalidateData(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            try {
+                if (!trustedOrigin()) { call.reject("Untrusted session origin"); return; }
+                WidgetSessionStore.invalidateData(getContext());
+                WidgetRefresher.refreshAllAsync(getContext(), false);
+                call.resolve();
+            } catch (Exception e) { call.reject("Widget refresh failed"); }
         });
     }
     @PluginMethod

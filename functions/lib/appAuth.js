@@ -7,6 +7,7 @@ import { getApps, initializeApp } from 'firebase-admin/app';
 import { createAppAuthService, AppAuthError, verifyAppPrincipal, publicProfile, canViewWidgetEvent, projectCalendar } from './appAuthCore.js';
 import { expandRecurring } from './appRecurrence.js';
 import { getMemberships, isAdminStaff, isLeaderOf } from './membership.js';
+import { prepareScopedRead, normalizeReadScope, loadScopedEventSnapshots, loadScopedReportSnapshots, ScopedReadError, widgetErrorStatus } from './appScopedReads.js';
 
 if (!getApps().length) initializeApp();
 const service = createAppAuthService({ db: getFirestore(), issueToken: (uid, claims) => getAuth().createCustomToken(uid, claims) });
@@ -57,15 +58,17 @@ export const appReadUserChanged = invalidateRead('users');
 
 export const appReadData = onCall({ region: 'asia-northeast3', maxInstances: 5 }, async request => {
   const principal = await verifyLiveAppSession(request);
-  const input = request.data || {};
-  if (Array.isArray(input.eventIds) && input.eventIds.length > 2000) throw new HttpsError('resource-exhausted', '열린 일정 범위가 너무 큽니다. 범위를 좁혀주세요.');
-  if (!input.full && (!/^\d{4}-\d{2}-\d{2}$/.test(input.from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(input.to || '') || input.from > input.to)) throw new HttpsError('invalid-argument', '조회 기간을 확인해주세요.');
-  const ids = new Set(Array.isArray(input.eventIds) ? input.eventIds.filter(id => typeof id === 'string').slice(0, 2000) : []);
   const db = getFirestore();
+  let prepared;
+  try { prepared = await prepareScopedRead(db, principal.user.companyId, request.data || {}, principal); }
+  catch (e) { if (e instanceof ScopedReadError) throw new HttpsError(e.code, e.message); throw e; }
+  const { scope: input, scopeKey, revision } = prepared;
+  if (prepared.notModified) return { notModified: true, revision, scopeKey, serverAt: new Date().toISOString() };
+  const ids = new Set(input.eventIds);
   const root = `companies/${principal.user.companyId}`;
-  const [cals, assignments, source, reports, revision] = await Promise.all([
+  const [cals, assignments, source] = await Promise.all([
     db.collection(`${root}/cals`).get(), db.collection(`${root}/assignments`).get(),
-    db.collection(`${root}/events`).get(), db.collection(`${root}/reports`).get(), db.doc(`${root}/meta/readRevision`).get(),
+    loadScopedEventSnapshots(db, principal.user.companyId, input),
   ]);
   const calRows = cals.docs.map(d => ({ ...d.data(), id: d.id }));
   const assignmentRows = assignments.docs.map(d => ({ ...d.data(), id: d.id }));
@@ -77,7 +80,7 @@ export const appReadData = onCall({ region: 'asia-northeast3', maxInstances: 5 }
     if (event.status === 'deleted') continue;
     if (mayRead(event)) {
       const exceptions = Object.fromEntries(Object.entries(event.exceptions || {}).map(([date, exception]) => [date,
-        !exception || exception._deleted || mayRead({ ...event, ...exception }) ? exception : { _deleted: true }]));
+        !exception ? exception : exception._deleted ? { _deleted: true } : mayRead({ ...event, ...exception }) ? exception : { _deleted: true }]));
       allowed.push({ ...event, ...(event.exceptions ? { exceptions } : {}) });
     } else if (event.repeat && event.repeat !== 'none') {
       for (const [date, exception] of Object.entries(event.exceptions || {})) {
@@ -85,23 +88,27 @@ export const appReadData = onCall({ region: 'asia-northeast3', maxInstances: 5 }
         const start = exception.start || date;
         const end = exception.end || start;
         const occurrence = expandRecurring([event], { start, end }).find(e => e._origDate === date);
-        if (occurrence && (input.full || ids.has(event.id) || (occurrence.start <= input.to && (occurrence.end || occurrence.start) >= input.from))) {
-          instances.push({ ...occurrence, repeat: 'none', __seriesRepeat: event.repeat, __occurrenceOnly: true });
+        if (occurrence && (input.full || ids.has(event.id) || input.ranges.some(range => occurrence.start <= range.to && (occurrence.end || occurrence.start) >= range.from))) {
+          // An allowed isolated occurrence must not carry the source's other,
+          // potentially private exception payloads to the client.
+          const { exceptions: _hiddenExceptions, ...visibleOccurrence } = occurrence;
+          instances.push({ ...visibleOccurrence, repeat: 'none', __seriesRepeat: event.repeat, __occurrenceOnly: true });
         }
       }
     }
   }
   let selected = allowed;
   if (!input.full) {
-    for (const e of expandRecurring(allowed, { start: input.from, end: input.to })) ids.add(e.id);
+    for (const range of input.ranges) for (const e of expandRecurring(allowed, { start: range.from, end: range.to })) ids.add(e.id);
     selected = allowed.filter(e => ids.has(e.id));
   }
   const selectedIds = new Set([...selected, ...instances].map(e => e.id));
+  const reports = await loadScopedReportSnapshots(db, principal.user.companyId, [...selectedIds], { full: input.full });
   const reportRows = reports.docs.filter(d => {
     const report = d.data();
     const original = raw.find(e => e.id === report.eventId);
     if (!selectedIds.has(report.eventId) || !original || original.status === 'deleted') return false;
-    const exception = Object.entries(original.exceptions || {}).find(([date, value]) => (value.start || date) === report.date)?.[1];
+    const exception = Object.entries(original.exceptions || {}).find(([date, value]) => (value?.start || date) === report.date)?.[1];
     return mayRead({ ...original, ...exception });
   }).map(d => ({ ...d.data(), id: d.id, __readVersion: d.updateTime.toDate().toISOString() }));
   const financialView = principal.kind === 'admin' || principal.master || isAdminStaff(principal.user);
@@ -117,7 +124,7 @@ export const appReadData = onCall({ region: 'asia-northeast3', maxInstances: 5 }
   };
   return { events: selected.map(serialize), instances: instances.map(serialize), reports: reportRows,
     cals: calRows.map(cal => projectCalendar(cal, principal)).filter(Boolean),
-    serverAt: new Date().toISOString(), revision: revision.data()?.revision || 0 };
+    serverAt: new Date().toISOString(), revision, scopeKey };
 });
 
 export const appWriteData = onCall({ region: 'asia-northeast3', maxInstances: 5 }, async request => {
@@ -255,14 +262,15 @@ export const appWidgetData = onRequest({ region: 'asia-northeast3', maxInstances
       if (event && allowed(event) && event.repeat && event.repeat !== 'none') { res.json({ refreshRequired: true }); return; }
       res.json(event && allowed(event) ? { event: widgetEvent(event) } : { deleted: true }); return;
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '') || from > to || (Date.parse(to) - Date.parse(from)) / 864e5 > 370) throw new AppAuthError('invalid-argument', '조회 기간을 확인해주세요.');
-    const source = await db.collection(`companies/${company}/events`).get();
+    const scope = normalizeReadScope({ from, to });
+    const source = await loadScopedEventSnapshots(db, company, scope);
     const raw = source.docs.map(d => ({ ...d.data(), id: d.id })).filter(e => e.status !== 'deleted');
     const events = expandRecurring(raw, { start: from, end: to }).filter(e => allowed(e) && e.start <= to && (e.end || e.start) >= from).map(widgetEvent);
     const visibleCalIds = new Set(events.map(e => e.calId));
     res.json({ events, calendars: [...calById.values()].filter(c => visibleCalIds.has(c.id)).map(c => ({ id: c.id, color: c.color || '#1a56db' })) });
   } catch (e) {
     const code = e.code || '';
-    res.status(code === 'invalid-argument' ? 400 : code === 'permission-denied' ? 403 : 401).json({ error: code || 'unauthenticated' });
+    const status = widgetErrorStatus(code);
+    res.status(status).json({ error: status === 503 ? 'unavailable' : code });
   }
 });

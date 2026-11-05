@@ -67,4 +67,31 @@ public class WidgetSessionInstrumentedTest {
         WidgetSessionStore.runIfCurrent(context, oldScope, () -> ran.set(true));
         assertFalse(ran.get());
     }
+    @Test public void sameScopeTokenRefreshPreservesCacheAndRevision() throws Exception {
+        assertTrue(WidgetSessionStore.set(context, token("companyA", "userA", "v1"), "testRefresh", "companyA", "userA"));
+        String scope = WidgetSessionStore.scope(context);
+        WidgetSessionStore.invalidateData(context);
+        long revision = WidgetSessionStore.dataRevision(context);
+        WidgetCache.saveScoped(context, scope, new ArrayList<>(), new HashMap<>(), "2026-11-01", "2026-11-30", 1L, 1L, revision);
+        assertFalse(WidgetSessionStore.set(context, token("companyA", "userA", "v1"), "rotatedRefresh", "companyA", "userA"));
+        assertEquals(scope, WidgetSessionStore.scope(context));
+        assertEquals(revision, WidgetCache.load(context).dataRevision);
+        assertEquals(revision, WidgetSessionStore.dataRevision(context));
+    }
+    @Test public void mutationDuringFetchRemainsDirtyUntilNextSuccessfulFetch() throws Exception {
+        WidgetSessionStore.set(context, token("companyA", "userA", "v1"), "testRefresh", "companyA", "userA");
+        String scope = WidgetSessionStore.scope(context);
+        long queryRevision = WidgetSessionStore.dataRevision(context);
+        WidgetSessionStore.invalidateData(context);
+        long now = System.currentTimeMillis();
+        WidgetCache.saveScoped(context, scope, new ArrayList<>(), new HashMap<>(), "2026-11-01", "2026-11-30", now, now, queryRevision);
+        WidgetCache.Snapshot oldResponse = WidgetCache.load(context);
+        assertTrue(WidgetRefreshPolicy.needsFetch(false, true, oldResponse.eventsFetchedAt, now,
+                oldResponse.dataRevision, WidgetSessionStore.dataRevision(context)));
+        WidgetCache.saveScoped(context, scope, new ArrayList<>(), new HashMap<>(), "2026-11-01", "2026-11-30", now, now,
+                WidgetSessionStore.dataRevision(context));
+        WidgetCache.Snapshot reconciled = WidgetCache.load(context);
+        assertFalse(WidgetRefreshPolicy.needsFetch(false, true, reconciled.eventsFetchedAt, now,
+                reconciled.dataRevision, WidgetSessionStore.dataRevision(context)));
+    }
 }

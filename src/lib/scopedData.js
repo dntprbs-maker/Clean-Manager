@@ -1,4 +1,5 @@
 import { collection, doc, query, where, orderBy, limit, documentId, onSnapshot } from 'firebase/firestore';
+import { expandRecurring } from './repeat.js';
 
 export function calendarRange(current, selected, extraDay) {
   const date = (y, m, d) => { const v = new Date(y, m, d); return `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,'0')}-${String(v.getDate()).padStart(2,'0')}`; };
@@ -7,6 +8,24 @@ export function calendarRange(current, selected, extraDay) {
   const from = date(y,m,1-first.getDay());
   const to = date(y,m+1,6-last.getDay());
   return { start: [from,selected,extraDay].filter(Boolean).sort()[0], end: [to,selected,extraDay].filter(Boolean).sort().at(-1) };
+}
+
+// A distant selected day must not turn a month view into a multi-year scan.
+export function calendarWindows(current, selected, extraDay) {
+  const month = calendarRange(current, null, null);
+  const windows = [{ from: month.start, to: month.end }];
+  for (const day of [...new Set([selected, extraDay].filter(Boolean))]) {
+    if (!windows.some(w => day >= w.from && day <= w.to)) windows.push({ from: day, to: day });
+  }
+  return windows.sort((a,b)=>a.from.localeCompare(b.from));
+}
+
+export function expandEventsInWindows(events, windows) {
+  const rows = new Map();
+  for (const window of windows) for (const event of expandRecurring(events, { start: window.from, end: window.to })) {
+    rows.set(`${event.id}:${event._origDate || event.start}`, event);
+  }
+  return [...rows.values()];
 }
 
 // Each snapshot replaces membership of its own query. A 'removed' document can

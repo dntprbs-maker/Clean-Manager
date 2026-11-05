@@ -1,14 +1,15 @@
+import { browserOrigin } from './emulatorConfig.mjs';
 import puppeteer from 'puppeteer';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 const require=createRequire(new URL('../functions/package.json',import.meta.url));
-process.env.FIRESTORE_EMULATOR_HOST='127.0.0.1:8080';const {initializeApp}=require('firebase-admin/app');const {getFirestore}=require('firebase-admin/firestore');initializeApp({projectId:'demo-clean-manager'});const db=getFirestore();
+const {initializeApp}=require('firebase-admin/app');const {getFirestore}=require('firebase-admin/firestore');initializeApp({projectId:'demo-clean-manager'});const db=getFirestore();
 const browser=await puppeteer.launch({headless:true,args:['--no-sandbox']});
 const page=await browser.newPage();await page.setViewport({width:430,height:932,isMobile:true});const errors=[];page.on('pageerror',e=>errors.push(e.message));let dialogs=[];page.on('dialog',async d=>{dialogs.push(d.message());await d.accept();});
 async function click(text){await page.waitForFunction(t=>[...document.querySelectorAll('button')].some(b=>b.textContent.trim()===t&&!b.disabled),{timeout:30000},text);await page.evaluate(t=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===t);if(!b)throw Error('button missing '+t);b.click();},text);}
 async function wait(text){await page.waitForFunction(t=>document.body.innerText.includes(t),{timeout:30000},text);}
 async function screen(name){await page.evaluate(name=>{for(const el of document.querySelectorAll('*')){const k=Object.keys(el).find(k=>k.startsWith('__reactFiber$'));let f=k&&el[k];while(f){const v=f.memoizedProps?.value;if(v?.setCurrentScreen){v.setCurrentScreen(name);return;}f=f.return;}}throw Error('context absent');},name);}
-async function login(id){await page.goto('http://127.0.0.1:5177/',{waitUntil:'domcontentloaded'});await page.waitForSelector('input[placeholder="아이디 또는 전화번호"]');await page.type('input[placeholder="아이디 또는 전화번호"]',id);await page.waitForSelector('input[placeholder="비밀번호"]');await page.type('input[placeholder="비밀번호"]','qa-local-only');await click('로그인');await wait('QA 페이지네이션');}
+async function login(id){await page.goto(`${browserOrigin}/`,{waitUntil:'domcontentloaded'});await page.waitForSelector('input[placeholder="아이디 또는 전화번호"]');await page.type('input[placeholder="아이디 또는 전화번호"]',id);await page.waitForSelector('input[placeholder="비밀번호"]');await page.type('input[placeholder="비밀번호"]','qa-local-only');await click('로그인');await wait('QA 페이지네이션');}
 try{
 await login('qaowner');await wait('검증일정44');await wait('오래된 매일 반복');console.log('PASS calendar includes >20 and old daily occurrence');
 await screen('activity_log');await wait('현재 20건 표시');await click('20건 더 보기');await wait('현재 40건 표시');await click('20건 더 보기');await wait('현재 45건 표시');console.log('PASS log 20/40/45 prefix');

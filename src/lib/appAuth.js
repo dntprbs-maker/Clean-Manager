@@ -50,3 +50,11 @@ export async function endSession() {
   }
   await signOut(auth);
 }
+
+// Only successful business writes invalidate the native cache; opening/closing
+// the app and refreshing the same authentication token must not force DB reads.
+export async function invalidateWidgetData() {
+  if (!Capacitor.isNativePlatform() || !auth.currentUser) return;
+  try { await WidgetSession.invalidateData(); }
+  catch { /* Legacy APKs continue to rely on push/manual refresh. */ }
+}

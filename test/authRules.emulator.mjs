@@ -1,16 +1,17 @@
+import { authHost, firestoreHost, functionsOrigin } from './emulatorConfig.mjs';
 // Explicit local emulator-only regression. Never accepts a production project.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const project = 'demo-clean-manager';
-const firestore = `http://127.0.0.1:8080/v1/projects/${project}/databases/(default)/documents`;
+const firestore = `http://${firestoreHost}/v1/projects/${project}/databases/(default)/documents`;
 async function login(identifier) {
-  const authCall = await fetch(`http://127.0.0.1:5001/${project}/asia-northeast3/appAuth`, {
+  const authCall = await fetch(`${functionsOrigin}/${project}/asia-northeast3/appAuth`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ data: { identifier, password: 'qa-local-only' } }),
   });
   const body = await authCall.json();
   assert.equal(authCall.status, 200, 'local auth function must succeed');
-  const exchange = await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=local-emulator-only', {
+  const exchange = await fetch(`http://${authHost}/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=local-emulator-only`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: body.result.token, returnSecureToken: true }),
   });
   const session = await exchange.json();
@@ -49,8 +50,8 @@ assert.equal(await operation(staff, `${company}/attendance/2026-11-05_qa_staff_q
 assert.equal(await operation(staff, `${company}/attendance/2026-11-05_qa_staff_qa_rule_site`, { method: 'PATCH', mask: 'confirmed', fields: { confirmed: { stringValue: 'true' } } }), 403, 'attendance confirmed must remain boolean');
 assert.equal(await operation(owner, `${company}/monthlySettlements/qa_staff_2026-11`, { method: 'PATCH', fields: { employeeId: { stringValue: 'qa_staff' }, yearMonth: { stringValue: '2026-11' }, finalAmount: { integerValue: '1' } } }), 403, 'even master cannot bypass server settlement confirmation');
 // Additional fictional accounts live only in this fixed demo emulator project.
-process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
-process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
+
+
 const require = createRequire(new URL('../functions/package.json', import.meta.url));
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
@@ -76,7 +77,7 @@ assert.equal(await operation(management, `${company}/users/${managedId}`), 200, 
 assert.equal(await operation(management, `staffs/${managedId}`), 200, 'management can read own-company private employee account');
 assert.equal(await operation(management, `${company}/users/${managedId}`, { method: 'PATCH', mask: 'order', fields: fields({ order: 4 }) }), 200, 'management can update employee order');
 assert.equal(await operation(management, `staffs/${managedId}`, { method: 'PATCH', mask: 'memberships', fields: fields({ memberships: [{ team: '입주청소팀', role: '팀장' }, { team: '정기청소', role: '팀원' }] }) }), 200, 'management can update multiple team memberships');
-const reset = await fetch(`http://127.0.0.1:5001/${project}/asia-northeast3/appAccount`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${management}` }, body: JSON.stringify({ data: { action: 'setEmployeePassword', employeeId: managedId, newPassword: 'qa-reset-only' } }) });
+const reset = await fetch(`${functionsOrigin}/${project}/asia-northeast3/appAccount`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${management}` }, body: JSON.stringify({ data: { action: 'setEmployeePassword', employeeId: managedId, newPassword: 'qa-reset-only' } }) });
 await reset.text();
 assert.equal(reset.status, 200, 'management can set employee password through server');
 assert.equal(await operation(management, 'staffs/qa_foreign'), 403, 'management cannot read another company employee');
@@ -95,7 +96,7 @@ assert.equal(await operation(management, `${company}/cals/private`), 403, 'manag
 await db.doc(`${company}/cals/team1`).set({ feedToken: 'qa-team-feed', icsSubscriptionUrl: 'qa-team-external', arbitrarySecret: 'qa-omit' }, { merge: true });
 await db.doc(`${company}/cals/private`).set({ feedToken: 'qa-other-private-feed', icsSubscriptionUrl: 'qa-other-external' }, { merge: true });
 await db.doc(`${company}/cals/regular_cleaning`).set({ feedToken: 'qa-regular-feed' }, { merge: true });
-const projection = await fetch(`http://127.0.0.1:5001/${project}/asia-northeast3/appReadData`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${staff}` }, body: JSON.stringify({ data: { from: '2026-11-05', to: '2026-11-05' } }) });
+const projection = await fetch(`${functionsOrigin}/${project}/asia-northeast3/appReadData`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${staff}` }, body: JSON.stringify({ data: { from: '2026-11-05', to: '2026-11-05' } }) });
 const projected = await projection.json();
 assert.equal(projection.status, 200, 'authenticated calendar projection succeeds');
 assert.equal(projected.result.cals.some(c => c.id === 'private'), false, 'other personal calendar omitted from projection');
