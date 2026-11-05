@@ -42,6 +42,18 @@ jobs:
       - name: Sync Capacitor android assets
         run: npx cap sync android
 
+      - name: Restore Android Firebase client configuration
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.CM_ANDROID_GOOGLE_SERVICES_JSON }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib
+          value = json.loads(os.environ['GOOGLE_SERVICES_JSON'])
+          assert value['project_info']['project_id'] == 'clean-manager-60bc9'
+          assert any(c['client_info'].get('android_client_info', {}).get('package_name') == 'com.cleanmanager.app' for c in value['client'])
+          pathlib.Path('android/app/google-services.json').write_text(json.dumps(value))
+          PY
+
       - name: Grant execute permission for gradlew
         run: chmod +x android/gradlew
 
