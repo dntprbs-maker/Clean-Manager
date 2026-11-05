@@ -23,7 +23,6 @@ import { toLunarLabel } from "../../lib/lunar";
 import { CALS, calById, REGULAR_CAL_ID } from "../../lib/calendars";
 import { REPEAT_OPTS } from "../../lib/repeat";
 import { getReportStatus } from "../../lib/reports";
-import { fmtPhone } from "../../lib/phone";
 import { parseEventText } from "../../lib/eventTextParser";
 import { isSuperAdmin, isAdminStaff, isLeaderOf, isMemberOf, myTeamNames, hasLeadershipSomewhere, teamsLabel } from "../../lib/membership";
 import { useC } from "../../context/AppContext";
@@ -1374,7 +1373,7 @@ export function BottomTabBar() {
 
 // ── 사이드 드로어 (스와이프 열기/닫기 지원) ───────────────────────
 export function SideDrawer() {
-  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, setNotificationSettingsModal, onLogout, companyId, assignments, extraCalFilter, setExtraCalFilterModal } = useC();
+  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, setNotificationSettingsModal, onLogout, assignments, extraCalFilter, setExtraCalFilterModal } = useC();
   const [pwModal, setPwModal] = useState(false);
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
