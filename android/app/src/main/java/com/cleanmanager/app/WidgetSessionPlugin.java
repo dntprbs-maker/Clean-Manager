@@ -20,19 +20,26 @@ public class WidgetSessionPlugin extends Plugin {
     }
     @PluginMethod
     public void setSession(PluginCall call) {
-        if (!trustedOrigin()) { call.reject("Untrusted session origin"); return; }
-        try {
-            WidgetSessionStore.set(getContext(), call.getString("idToken", ""), call.getString("refreshToken", ""),
-                    call.getString("companyId", ""), call.getString("userId", ""));
-            WidgetRefresher.refreshAllAsync(getContext(), true);
-            call.resolve();
-        } catch (Exception e) { call.reject("Widget session rejected"); }
+        // Capacitor invokes plugins off the UI thread; WebView.getUrl requires it.
+        getActivity().runOnUiThread(() -> {
+            try {
+                if (!trustedOrigin()) { call.reject("Untrusted session origin"); return; }
+                WidgetSessionStore.set(getContext(), call.getString("idToken", ""), call.getString("refreshToken", ""),
+                        call.getString("companyId", ""), call.getString("userId", ""));
+                WidgetRefresher.refreshAllAsync(getContext(), true);
+                call.resolve();
+            } catch (Exception e) { call.reject("Widget session rejected"); }
+        });
     }
     @PluginMethod
     public void clearSession(PluginCall call) {
-        if (!trustedOrigin()) { call.reject("Untrusted session origin"); return; }
-        WidgetSessionStore.clear(getContext());
-        WidgetRefresher.redrawAll(getContext());
-        call.resolve();
+        getActivity().runOnUiThread(() -> {
+            try {
+                if (!trustedOrigin()) { call.reject("Untrusted session origin"); return; }
+                WidgetSessionStore.clear(getContext());
+                WidgetRefresher.redrawAll(getContext());
+                call.resolve();
+            } catch (Exception e) { call.reject("Widget session clear failed"); }
+        });
     }
 }
