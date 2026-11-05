@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeReadScope, readScopeKey, prepareScopedRead, loadScopedEventSnapshots, loadScopedReportSnapshots, widgetErrorStatus } from '../lib/appScopedReads.js';
+import { normalizeReadScope, readScopeKey, prepareScopedRead, loadScopedEventSnapshots, loadScopedReportSnapshots, widgetErrorStatus, candidateReadRanges, projectWidgetRange, mayReadFullReportLedger } from '../lib/appScopedReads.js';
 
 test('widget storage failure is retryable and never expires a valid session', () => {
   for (const code of [9, 14, 'unavailable', 'failed-precondition', undefined]) assert.equal(widgetErrorStatus(code),503);
@@ -155,4 +155,51 @@ test('distant displayed month and selected day use separate bounded windows with
   assert.equal(readScopeKey(scope, principal), readScopeKey(normalizeReadScope({ ranges: [...ranges].reverse() }), principal));
   assert.throws(() => normalizeReadScope({ ranges: Array(4).fill(ranges[0]) }), { code: 'invalid-argument' });
   assert.throws(() => normalizeReadScope({ ranges: [{ from: '2000-01-01', to: '2026-01-01' }] }), { code: 'invalid-argument' });
+});
+
+
+test('widget period is strictly validated and bound into conditional-read identity', () => {
+  const base = normalizeReadScope(request);
+  const shared = normalizeReadScope({ ...request, widgetRange: { from: '2026-11-01', to: '2026-11-10' } });
+  assert.notEqual(readScopeKey(base, principal), readScopeKey(shared, principal));
+  assert.notEqual(readScopeKey(shared, principal), readScopeKey(normalizeReadScope({ ...request, widgetRange: request }), principal));
+  for (const widgetRange of [null, {}, { from: '2026-02-30', to: '2026-03-01' }, { from: '2026-11-05', to: '2026-11-04' }, { from: '2020-01-01', to: '2026-11-05' }]) {
+    assert.throws(() => normalizeReadScope({ ...request, widgetRange }), /위젯/);
+    assert.throws(() => normalizeReadScope({ full: true, widgetRange }), /위젯/);
+  }
+});
+
+test('overlapping app and widget candidate windows are queried once while application scope stays unchanged', async () => {
+  const scope = normalizeReadScope({ ...request, widgetRange: { from: '2026-11-01', to: '2026-11-10' } });
+  assert.deepEqual(candidateReadRanges(scope), [{ from: '2026-11-01', to: '2026-11-10' }]);
+  assert.deepEqual(scope.ranges, [request]);
+  const db = querySpy({ [`${root}/events/widgetOnly`]: { start: '2026-11-02' } });
+  assert.equal((await loadScopedEventSnapshots(db, 'co1', scope)).size, 1);
+  assert.equal(db.calls.length, 3, 'one merged start/end pair and one recurrence query, no extra widget reads');
+  assert.equal(db.calls.reduce((n,c) => n+c.count, 0), 1);
+});
+
+test('shared widget projection checks occurrence permissions and returns minimal payload including empty periods', () => {
+  const cals = [{ id: 'team', label: 'A', color: '#fff' }, { id: 'private', personal: true, ownerId: 'someoneElse', color: '#000' }];
+  const raw = [{ id: 'moved', title: 'private base', start: '2040-01-01', end: '2040-01-01', calId: 'private', repeat: 'daily', repeatUntil: '2040-01-01',
+    exceptions: { '2040-01-01': { start: '2026-11-05', end: '2026-11-05', calId: 'team', title: 'allowed move', contact: 'secret' } } },
+    { id: 'hidden', start: '2026-11-05', calId: 'private', title: 'private secret' },
+    { id: 'deleted', start: '2026-11-05', calId: 'team', status: 'deleted' }];
+  const result = projectWidgetRange(raw, principal, cals, [], request);
+  assert.equal(result.events.length, 1);
+  assert.equal(result.events[0].title, 'allowed move');
+  assert.deepEqual(result.calendars, [{ id: 'team', color: '#fff' }]);
+  assert.ok(result.events.every(e => Object.keys(e).every(k => ['id','title','start','end','startTime','endTime','allDay','place','calId'].includes(k))));
+  assert.equal(JSON.stringify(result).includes('secret'), false);
+  assert.deepEqual(projectWidgetRange(raw, principal, cals, [], { from: '1990-01-01', to: '1990-01-02' }), { events: [], calendars: [] });
+});
+
+test('only explicit full owner/master reads preserve orphan and deleted-source report ledger', () => {
+  for (const who of [{ kind: 'admin' }, { kind: 'staff', master: true }]) {
+    assert.equal(mayReadFullReportLedger({ full: true }, who), true);
+    assert.equal(mayReadFullReportLedger({ full: false }, who), false);
+  }
+  for (const role of ['팀원', '관리팀', '최고관리자']) {
+    assert.equal(mayReadFullReportLedger({ full: true }, { ...principal, user: { ...principal.user, role } }), false);
+  }
 });

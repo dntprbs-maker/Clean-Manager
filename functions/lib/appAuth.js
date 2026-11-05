@@ -7,7 +7,7 @@ import { getApps, initializeApp } from 'firebase-admin/app';
 import { createAppAuthService, AppAuthError, verifyAppPrincipal, publicProfile, canViewWidgetEvent, projectCalendar } from './appAuthCore.js';
 import { expandRecurring } from './appRecurrence.js';
 import { getMemberships, isAdminStaff, isLeaderOf } from './membership.js';
-import { prepareScopedRead, normalizeReadScope, loadScopedEventSnapshots, loadScopedReportSnapshots, ScopedReadError, widgetErrorStatus } from './appScopedReads.js';
+import { prepareScopedRead, normalizeReadScope, loadScopedEventSnapshots, loadScopedReportSnapshots, ScopedReadError, widgetErrorStatus, widgetEvent, projectWidgetRange, mayReadFullReportLedger } from './appScopedReads.js';
 
 if (!getApps().length) initializeApp();
 const service = createAppAuthService({ db: getFirestore(), issueToken: (uid, claims) => getAuth().createCustomToken(uid, claims) });
@@ -105,6 +105,7 @@ export const appReadData = onCall({ region: 'asia-northeast3', maxInstances: 5 }
   const selectedIds = new Set([...selected, ...instances].map(e => e.id));
   const reports = await loadScopedReportSnapshots(db, principal.user.companyId, [...selectedIds], { full: input.full });
   const reportRows = reports.docs.filter(d => {
+    if (mayReadFullReportLedger(input, principal)) return true;
     const report = d.data();
     const original = raw.find(e => e.id === report.eventId);
     if (!selectedIds.has(report.eventId) || !original || original.status === 'deleted') return false;
@@ -122,9 +123,15 @@ export const appReadData = onCall({ region: 'asia-northeast3', maxInstances: 5 }
     }));
     return safe;
   };
-  return { events: selected.map(serialize), instances: instances.map(serialize), reports: reportRows,
+  const serverAt = new Date().toISOString();
+  const sharedWidget = input.widgetRange ? {
+    ...projectWidgetRange(raw, principal, calRows, assignmentRows, input.widgetRange),
+    ...input.widgetRange, companyId: principal.user.companyId,
+    userId: request.auth.uid, revision, scopeKey, serverAt,
+  } : undefined;
+  return { ...(sharedWidget ? { sharedWidget } : {}), events: selected.map(serialize), instances: instances.map(serialize), reports: reportRows,
     cals: calRows.map(cal => projectCalendar(cal, principal)).filter(Boolean),
-    serverAt: new Date().toISOString(), revision, scopeKey };
+    serverAt, revision, scopeKey };
 });
 
 export const appWriteData = onCall({ region: 'asia-northeast3', maxInstances: 5 }, async request => {
@@ -240,7 +247,6 @@ export const appAccount = onCall({ region: 'asia-northeast3', maxInstances: 5 },
   return { ok: true, requiresLogin: action === 'changePassword' };
 });
 
-const widgetEvent = e => Object.fromEntries(['id', 'title', 'start', 'end', 'startTime', 'endTime', 'allDay', 'place', 'calId'].filter(k => e[k] !== undefined).map(k => [k, e[k]]));
 export const appWidgetData = onRequest({ region: 'asia-northeast3', maxInstances: 5 }, async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (req.method !== 'POST') { res.status(405).json({ error: 'method-not-allowed' }); return; }
@@ -265,9 +271,7 @@ export const appWidgetData = onRequest({ region: 'asia-northeast3', maxInstances
     const scope = normalizeReadScope({ from, to });
     const source = await loadScopedEventSnapshots(db, company, scope);
     const raw = source.docs.map(d => ({ ...d.data(), id: d.id })).filter(e => e.status !== 'deleted');
-    const events = expandRecurring(raw, { start: from, end: to }).filter(e => allowed(e) && e.start <= to && (e.end || e.start) >= from).map(widgetEvent);
-    const visibleCalIds = new Set(events.map(e => e.calId));
-    res.json({ events, calendars: [...calById.values()].filter(c => visibleCalIds.has(c.id)).map(c => ({ id: c.id, color: c.color || '#1a56db' })) });
+    res.json(projectWidgetRange(raw, principal, [...calById.values()], assignments.docs.map(d => ({ ...d.data(), id: d.id })), { from, to }));
   } catch (e) {
     const code = e.code || '';
     const status = widgetErrorStatus(code);
