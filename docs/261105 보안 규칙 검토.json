@@ -1,6 +1,6 @@
 {
   "score": 1,
-  "summary": "새 Clean-Manager 인증 경계의 로컬 권한 검사 39개는 통과했다. 그러나 전체 규칙에는 별개 attendance 앱의 기존 공개 fallback이 남아 있어 전체 보안 완료로 평가할 수 없다. 운영 규칙 전환은 미완료다.",
+  "summary": "새 Clean-Manager 인증 경계의 로컬 권한 검사39개와 배포 후 실제 익명·타회사·직원 원본/자격증명 접근 및 정산 직접쓰기 차단 검사를 통과했다. 운영 규칙 전환 완료. 그러나 전체 규칙에는 별개 attendance 앱의 기존 공개 fallback이 남아 있어 전체 보안 완료로 평가할 수 없다.",
   "findings": [
     {"check":"Authority Source","severity":"critical","issue":"별개 앱 호환을 위해 보호 namespace 외 최상위 컬렉션의 기존 익명 read/write fallback을 유지한다.","recommendation":"별개 attendance 앱을 별도 승인 범위에서 인증 전환하고 컬렉션 허용목록과 역할 검사를 적용한다."},
     {"check":"Business Logic vs. Rules","severity":"moderate","issue":"기존 전체 배정·프로필 공유 구조에 일당 등 급여 관련 필드가 포함된다.","recommendation":"급여 필드를 별도 제한 문서로 분리하고 기존 배정·직원 화면을 함께 회귀 검증한다."},
