@@ -1,3 +1,5 @@
+import { EventFinanceAccordion } from '../../components/shared/EventFinanceAccordion';
+import { prepareEventFinance } from '../../lib/eventFinance';
 import { seoulToday } from "../../lib/dateTime";
 import { authenticate, endSession } from "../../lib/appAuth";
 import {
@@ -1156,7 +1158,7 @@ export function DetailSheet() {
                       <span className="text-green-800 font-extrabold text-[15px]">현장 손익(최종)</span>
                       <span className="text-green-800 font-black">{won(profit)}</span>
                     </div>
-                    <button onClick={()=>alert("금액 입력 화면은 아직 준비 중입니다.")}
+                    <button onClick={handleEdit} disabled={!canEditEvent || isRegular}
                       className="mt-0.5 w-full py-2.5 rounded-xl bg-gray-900 text-white text-[13px] font-bold">금액 정보 수정</button>
                   </div>
                 )}
@@ -2167,7 +2169,7 @@ function useKeyboardInset() {
 }
 
 export function EventModal() {
-  const { modal, closeModal, openCopyModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, teams, titleRule, typeKeywords, companyId, reports, companyDoc, currentUser, setFieldReportEv, eventModalGuardRef } = useC();
+  const { modal, closeModal, openCopyModal, addEvent, updateEvent, updateEventScoped, deleteEvent, events, cals: allCals, visibleCals: cals, teams, titleRule, typeKeywords, companyId, reports, companyDoc, currentUser, users, setFieldReportEv, eventModalGuardRef } = useC();
   const keyboardInset = useKeyboardInset();
   const { open, date, editId, scope, instanceEv, copyFrom } = modal;
   const isCopy = !editId && !!copyFrom;
@@ -2188,11 +2190,12 @@ export function EventModal() {
   const [step,setStep]=useState("paste");
   const [exitConfirm,setExitConfirm]=useState(false);
   const [financeOpen,setFinanceOpen]=useState(false);
+  const [financeDirty,setFinanceDirty]=useState(false);
   const origForm=useRef(null);
   const tRef=useRef(null);
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
   const isDirty=()=>origForm.current && JSON.stringify(form)!==JSON.stringify(origForm.current);
-  const tryClose=()=>{ if(editId&&isDirty()) setExitConfirm(true); else closeModal(); };
+  const tryClose=()=>{ if((editId||financeDirty)&&isDirty()) setExitConfirm(true); else closeModal(); };
 
   // 안드로이드 뒤로가기도 X버튼과 동일하게 tryClose(저장 확인)를 거치도록 등록.
   // tryClose가 최신 form을 클로저로 물고 있어 매 렌더마다 갱신하고, 닫히면 비운다.
@@ -2215,9 +2218,9 @@ export function EventModal() {
   useEffect(()=>{
     if(open){
       // 복사본은 원본 값으로 채우되 editId가 없어 저장 시 새 일정으로 등록된다
-      const initForm = editEv ? {...editEv} : isCopy ? copyOf(copyFrom) : blank(date);
+      const initForm = editEv ? {...blank(editEv.start || date),...editEv} : isCopy ? copyOf(copyFrom) : blank(date);
       setForm(initForm);
-      origForm.current = editEv ? {...editEv} : null;
+      origForm.current = {...initForm};
       setExitConfirm(false);
       setErrs({});
       setPasteText("");
@@ -2226,6 +2229,7 @@ export function EventModal() {
       setImgPreview(null);
       setCalDropOpen(false);
       setFinanceOpen(false);
+      setFinanceDirty(false);
       // 복사/수정은 이미 채워진 폼을 바로 손보는 흐름이라 입력방법 선택(paste) 단계를 건너뛴다.
       // 순수 신규 등록일 때만, 마지막으로 쓴 입력방법이 "직접"이었으면 매번 탭을 다시
       // 고르지 않도록 곧장 입력폼으로 진입한다(처음 쓰는 기기는 저장된 값이 없어
@@ -2239,7 +2243,11 @@ export function EventModal() {
         else { setInputMode("memo"); setStep("paste"); }
       }
       setTimeout(()=>setAnim(true),10);
-      setTimeout(()=>tRef.current?.focus(),150);
+      setTimeout(()=>{
+        // Do not steal focus after the user has already entered the form.
+        const root=tRef.current?.closest('.z-50');
+        if(root&&!root.contains(document.activeElement))tRef.current?.focus();
+      },150);
     }
     else setAnim(false);
   },[open,editId,copyFrom?.id]);
@@ -2253,6 +2261,7 @@ export function EventModal() {
     // 시작~종료가 여러 날에 걸치면(예: 자정을 넘는 일정) 시각만 비교하는 건 의미가 없다
     // (다음날 00:30이 전날 23:30보다 "숫자로는" 앞서 보임) — 같은 날일 때만 검사한다.
     if(!form.allDay && form.start===form.end && form.startTime>=form.endTime) e.time="종료 시간은 시작 시간 이후여야 합니다.";
+    if(financeDirty){try{prepareEventFinance(form.finance);}catch(error){e.finance=error.message;setFinanceOpen(true);}}
     setErrs(e); return !Object.keys(e).length;
   };
   const [uploading, setUploading] = useState(false);
@@ -2281,7 +2290,7 @@ export function EventModal() {
         const url = await getDownloadURL(sRef);
         return { name: p.name, url, path };
       }));
-      const finalForm = { ...form, photos: uploadedPhotos };
+      const finalForm = { ...form, photos: uploadedPhotos, ...(financeDirty?{finance:prepareEventFinance(form.finance)}:{}) };
       if (editId) {
         if (scope && scope !== "all" && instanceEv) {
           await updateEventScoped(instanceEv, scope, { ...finalForm, id: editId });
@@ -2638,63 +2647,11 @@ export function EventModal() {
           )}
         </div>
 
-        {/* 정산 정보 — 사장/관리팀이 수정 화면으로 바로 들어오므로(상세보기를 거치지 않음)
-            여기가 금액을 보는 실제 화면이다. 상세보기(DetailSheet)에도 같은 섹션을 넣어뒀다.
-            새 일정을 만드는 중(editId 없음)이거나 이 일정에 아직 금액 정보가 없으면 숨김 —
-            입력 화면이 아직 없어 여기선 읽기 전용으로만 보여준다(2026-10-30). */}
-        {editId && form.finance && (isSuperAdmin(currentUser) || isAdminStaff(currentUser)) && (() => {
-          const fin = form.finance;
-          const costsSum = (fin.extraCosts||[]).reduce((s,c)=>s+Number(c.amount||0),0);
-          const payOut = fin.payMethod === "member_direct"
-            ? (fin.memberPays||[]).reduce((s,p)=>s+Number(p.amount||0),0)
-            : Number(fin.leaderPay?.amount||0);
-          const profit = Number(fin.revenue||0) - payOut - costsSum;
-          const won = n => `${Number(n||0).toLocaleString()}원`;
-          return (
-            <div className="mx-4 my-4 rounded-2xl border-[1.5px] border-blue-500 overflow-hidden">
-              <button onClick={()=>setFinanceOpen(o=>!o)}
-                className="w-full flex items-center gap-1.5 bg-blue-50 px-3.5 py-2.5 text-left">
-                <span className="text-[13px] font-extrabold text-blue-900">정산 정보</span>
-                <span className="ml-auto text-[11px] font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">🔒 사장·관리팀만</span>
-                <ChevronDown size={16} className={`text-blue-600 transition-transform ${financeOpen?"rotate-180":""}`}/>
-              </button>
-              {!financeOpen && (
-                <div className="flex items-center justify-between px-3.5 py-3.5">
-                  <span className="text-[13px] font-bold text-gray-500">오늘 현장 손익</span>
-                  <span className="text-[17px] font-black text-green-700">{won(profit)}</span>
-                </div>
-              )}
-              {financeOpen && (
-                <div className="px-3.5 py-3.5 flex flex-col gap-2.5">
-                  <div className="flex justify-between text-sm"><span className="text-gray-500">청소비(매출)</span><span className="font-bold">{won(fin.revenue)}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-gray-500">지급 방식</span><span className="font-bold bg-gray-100 px-2 py-0.5 rounded-full text-xs">{fin.payMethod==="member_direct"?"팀원 직접 지급":"팀장 일괄 지급"}</span></div>
-                  {fin.payMethod==="member_direct" ? (
-                    (fin.memberPays||[]).map((p,i)=>(
-                      <div key={i} className="flex justify-between text-sm"><span className="text-gray-500">{p.employeeName||"팀원"}</span><span className="font-bold">{won(p.amount)}</span></div>
-                    ))
-                  ) : (
-                    <div className="flex justify-between text-sm"><span className="text-gray-500">팀장 지급액</span><span className="font-bold">{won(fin.leaderPay?.amount)}{fin.leaderPay?.status==="paid" && <span className="text-[11px] text-green-600 font-bold"> · 지급완료</span>}</span></div>
-                  )}
-                  {costsSum > 0 && (
-                    <div className="flex justify-between text-sm"><span className="text-gray-500">기타 비용</span><span className="font-bold">{won(costsSum)}</span></div>
-                  )}
-                  {(fin.workers||[]).length > 0 && (
-                    <div className="flex justify-between text-sm border-t border-dashed border-gray-200 pt-2.5">
-                      <span className="text-gray-500">참여 작업자</span>
-                      <span className="font-bold">{fin.workers.map(w=>w.name+(w.role==="leader"?"(팀장)":"")).join(", ")}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between items-center bg-green-50 rounded-xl px-3 py-2.5">
-                    <span className="text-green-800 font-extrabold text-[15px]">현장 손익(최종)</span>
-                    <span className="text-green-800 font-black">{won(profit)}</span>
-                  </div>
-                  <button onClick={()=>alert("금액 입력 화면은 아직 준비 중입니다.")}
-                    className="mt-0.5 w-full py-2.5 rounded-xl bg-gray-900 text-white text-[13px] font-bold">금액 정보 수정</button>
-                </div>
-              )}
-            </div>
-          );
-        })()}
+        {(isSuperAdmin(currentUser) || isAdminStaff(currentUser)) && <EventFinanceAccordion
+          value={form.finance} open={financeOpen} users={users} error={errs.finance}
+          onToggle={()=>setFinanceOpen(value=>!value)}
+          onChange={finance=>{set('finance',finance);setFinanceDirty(true);setErrs(previous=>({...previous,finance:null}));}}
+        />}
 
         {/* 내용 */}
         <div className="flex gap-3 px-4 py-4 border-b border-gray-100">

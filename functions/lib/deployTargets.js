@@ -1,10 +1,10 @@
-export const APP_FUNCTIONS = ['appAuth','appAccount','appReadData','appWriteData','appWidgetData','appProfileChanged','appAdminCredentialChanged','appStaffCredentialChanged','appReadEventChanged','appReadReportChanged','appReadCalendarChanged','appReadAssignmentChanged','appReadUserChanged','confirmMonthlySettlement','calendarFeed'];
+export const APP_FUNCTIONS = ['appAuth','appAccount','appReadData','appWriteData','appWidgetData','appProfileChanged','appAdminCredentialChanged','appStaffCredentialChanged','appReadEventChanged','appReadReportChanged','appReadCalendarChanged','appReadAssignmentChanged','appReadUserChanged','confirmMonthlySettlement','calendarFeed','widgetEventChanged','widgetCalChanged'];
 
 // Fail back to the existing whole-functions deployment for unknown runtime
 // changes. This migration must not redeploy unrelated MCP/Google/ICS code.
 export function deploymentTargets(files, indexDiff = '', configUnchanged = true) {
   const runtime = files.filter(f=>f.startsWith('functions/') && !f.startsWith('functions/test/') && !['functions/lib/deployTargets.js','functions/scripts/deploy-targets.mjs'].includes(f));
-  const allowed = new Set(['functions/index.js','functions/lib/appAuth.js','functions/lib/appAuthCore.js','functions/lib/appRecurrence.js','functions/lib/appScopedReads.js','functions/lib/settlement.js','functions/lib/settlementApi.js']);
+  const allowed = new Set(['functions/index.js','functions/lib/appAuth.js','functions/lib/appAuthCore.js','functions/lib/appRecurrence.js','functions/lib/appScopedReads.js','functions/lib/appReadChanges.js','functions/lib/widgetPush.js','functions/lib/settlement.js','functions/lib/settlementApi.js']);
   const oldFeed='    const visible = expanded.filter(ev => ev.start >= cutoff && ev.start <= horizon);';
   const newFeed='    const visible = expanded.filter(ev => ev.calId === cal && ev.start >= cutoff && ev.start <= horizon);';
   if(indexDiff.includes('-'+oldFeed)&&indexDiff.includes('+'+newFeed))indexDiff=indexDiff.replace('-'+oldFeed,'').replace('+'+newFeed,'');

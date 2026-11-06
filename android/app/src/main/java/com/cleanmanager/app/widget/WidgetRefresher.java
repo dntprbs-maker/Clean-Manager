@@ -38,31 +38,15 @@ public final class WidgetRefresher {
                     && cached.rangeFrom.compareTo(from) <= 0 && cached.rangeTo.compareTo(to) >= 0;
             if (!WidgetRefreshPolicy.needsFetch(force, covers, cached.eventsFetchedAt, now, cached.dataRevision, dataRevision)) return false;
 
-            List<WidgetEvent> events = FirestoreEventFetcher.fetchRange(appContext, from, to);
-            if (events == null) return false; // 실패하면 기존 캐시를 그대로 둔다
-
-            boolean needCals = force
-                    || cached.dataRevision != dataRevision
-                    || cached.calendars.isEmpty()
-                    || cached.calendarsFetchedAt <= 0
-                    || now - cached.calendarsFetchedAt > CALENDAR_TTL_MS;
-            Map<String, Integer> cals = cached.calendars;
-            long calsAt = cached.calendarsFetchedAt;
-            if (needCals) {
-                Map<String, Integer> fetched = FirestoreEventFetcher.fetchCalendars(appContext);
-                if (fetched != null) {
-                    cals = fetched;
-                    calsAt = now;
-                }
-            }
-
-            final Map<String, Integer> finalCals = cals;
-            final long finalCalsAt = calsAt;
+            // Keep the already covered window so its server cursor remains valid.
+            String requestFrom=covers?cached.rangeFrom:from, requestTo=covers?cached.rangeTo:to;
+            FirestoreEventFetcher.RangeResult result=FirestoreEventFetcher.fetchCachedRange(appContext,requestFrom,requestTo,cached);
+            if(result==null)return false; // Network failure retains the visible disk cache.
             java.util.concurrent.atomic.AtomicBoolean saved = new java.util.concurrent.atomic.AtomicBoolean(false);
             WidgetSessionStore.runIfCurrentRevision(appContext, sessionScope, dataRevision, () -> {
                 if (WidgetSharedRead.nativeMayPublish(fence)) {
-                    WidgetCache.saveScoped(appContext, sessionScope, events, finalCals, from, to, now, finalCalsAt, dataRevision);
-                    saved.set(true);
+                    saved.set(WidgetCache.saveVersioned(appContext,result.events,result.calendars,requestFrom,requestTo,
+                            now,dataRevision,result.revision,result.scopeKey));
                 }
             });
             return saved.get();

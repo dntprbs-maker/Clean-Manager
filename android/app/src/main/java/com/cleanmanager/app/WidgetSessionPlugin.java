@@ -48,7 +48,7 @@ public class WidgetSessionPlugin extends Plugin {
     public void capabilities(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             if (!trustedOrigin()) { call.reject("Untrusted session origin"); return; }
-            call.resolve(new JSObject().put("supported", true));
+            call.resolve(new JSObject().put("supported", true).put("deltaVersion",1));
         });
     }
     @PluginMethod
