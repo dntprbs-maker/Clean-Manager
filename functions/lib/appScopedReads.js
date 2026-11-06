@@ -62,6 +62,10 @@ export function readScopeKey(scope, principal) {
 
 /** Call only AFTER live principal verification. An absent/invalid head is not 0. */
 export async function prepareScopedRead(db, companyId, input, principal) {
+  for (const field of ['refreshEventIds','refreshReportIds']) {
+    if (input[field] !== undefined && (!Array.isArray(input[field]) || input[field].length > 20
+      || input[field].some(id => typeof id !== 'string' || !id || id.includes('/') || id === '.' || id === '..' || Buffer.byteLength(id,'utf8') > 1500))) invalid('저장한 자료를 확인해주세요.');
+  }
   const scope = normalizeReadScope(input);
   const scopeKey = readScopeKey(scope, principal);
   const head = await db.doc(`companies/${companyId}/meta/readRevision`).get();
@@ -70,7 +74,8 @@ export async function prepareScopedRead(db, companyId, input, principal) {
   return {
     scope, scopeKey, revision,
     notModified: revision !== null && Number.isSafeInteger(input.knownRevision)
-      && input.knownRevision === revision && input.scopeKey === scopeKey,
+      && input.knownRevision === revision && input.scopeKey === scopeKey
+      && !input.refreshEventIds?.length && !input.refreshReportIds?.length,
   };
 }
 
