@@ -12,7 +12,7 @@ const root='companies/qa_pagination';
 await db.doc(root+'/meta/readRevision').set({revision:2000});
 const browser=await puppeteer.launch({headless:true,args:['--window-position=-32000,-32000']});
 const page=await browser.newPage();await page.setViewport({width:430,height:1000,deviceScaleFactor:2});
-const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',async d=>{throw Error('Unexpected dialog: '+d.message());});
+const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',message=>{if(message.type()==='error'&&message.text().includes('controlled input'))errors.push(message.text());});page.on('dialog',async d=>{throw Error('Unexpected dialog: '+d.message());});
 async function context(source){return page.evaluate(source=>{for(const el of document.querySelectorAll('*')){const k=Object.keys(el).find(k=>k.startsWith('__reactFiber$'));let f=k&&el[k];while(f){const ctx=f.memoizedProps?.value;if(ctx?.openModal)return new Function('ctx',source)(ctx);f=f.return;}}throw Error('Provider missing');},source);}
 const wait=text=>page.waitForFunction(text=>document.body.innerText.includes(text),{timeout:30000},text);
 async function click(text){await page.evaluate(text=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);if(!b)throw Error('Button missing '+text);b.click();},text);}

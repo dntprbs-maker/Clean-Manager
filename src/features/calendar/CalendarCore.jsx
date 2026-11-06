@@ -2218,7 +2218,7 @@ export function EventModal() {
   useEffect(()=>{
     if(open){
       // 복사본은 원본 값으로 채우되 editId가 없어 저장 시 새 일정으로 등록된다
-      const initForm = editEv ? {...editEv} : isCopy ? copyOf(copyFrom) : blank(date);
+      const initForm = editEv ? {...blank(editEv.start || date),...editEv} : isCopy ? copyOf(copyFrom) : blank(date);
       setForm(initForm);
       origForm.current = {...initForm};
       setExitConfirm(false);
@@ -2243,7 +2243,11 @@ export function EventModal() {
         else { setInputMode("memo"); setStep("paste"); }
       }
       setTimeout(()=>setAnim(true),10);
-      setTimeout(()=>tRef.current?.focus(),150);
+      setTimeout(()=>{
+        // Do not steal focus after the user has already entered the form.
+        const root=tRef.current?.closest('.z-50');
+        if(root&&!root.contains(document.activeElement))tRef.current?.focus();
+      },150);
     }
     else setAnim(false);
   },[open,editId,copyFrom?.id]);
