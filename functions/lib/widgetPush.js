@@ -1,3 +1,4 @@
+import { recordAppReadChange } from './appReadChanges.js';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
@@ -100,6 +101,7 @@ export const widgetEventChanged = onDocumentWritten(
     // MCP 시험 일정(양쪽 다 mcpTest)은 위젯 알림에서도 제외한다.
     if (before?.mcpTest && after?.mcpTest) return;
 
+    await recordAppReadChange(getFirestore(), {...event,params:{...event.params,id:event.params.eventId}}, 'events');
     await queueWidgetChange(getFirestore(), getMessaging(), {
       companyId: event.params.companyId,
       eventId: event.params.eventId,
@@ -111,6 +113,7 @@ export const widgetEventChanged = onDocumentWritten(
 export const widgetCalChanged = onDocumentWritten(
   { document: 'companies/{companyId}/cals/{calId}', region: 'asia-northeast3', timeoutSeconds: 180 },
   async (event) => {
+    await recordAppReadChange(getFirestore(), {...event,params:{...event.params,id:event.params.calId}}, 'cals');
     await queueWidgetChange(getFirestore(), getMessaging(), {
       companyId: event.params.companyId,
       calsChanged: true,

@@ -112,4 +112,20 @@ public class WidgetSharedReadInstrumentedTest {
         assertEquals(-1L, WidgetCache.load(context).serverRevision);
         assertFalse(WidgetSharedRead.beginForRange(context, "companyA", "userA", "2026-11-01", "2026-11-30", wall, elapsed + 2, 1L).getString("ticket").isEmpty());
     }
+    @Test public void sharedCursorAndCoincidentOccurrencesSurviveDiskReload() throws Exception {
+        String key="v1:"+new String(new char[64]).replace('\0','b');
+        JSONObject first=new JSONObject().put("id","series").put("title","original")
+                .put("start","2026-11-06").put("end","2026-11-06");
+        JSONObject moved=new JSONObject(first.toString()).put("title","moved");
+        JSONObject value=snapshot().put("revision",47L).put("widgetScopeKey",key)
+                .put("events",new JSONArray().put(first).put(moved));
+        assertTrue(WidgetSharedRead.commitAt(context,begin(),value,wall,elapsed+1));
+        WidgetCache.Snapshot disk=WidgetCache.load(context);
+        assertEquals(47L,disk.serverRevision);assertEquals(key,disk.serverScopeKey);
+        assertEquals(2,disk.events.size());
+        assertEquals("original",disk.events.get(0).title);assertEquals("moved",disk.events.get(1).title);
+        setSession("companyB","userB","v1");
+        assertEquals(0,WidgetCache.load(context).events.size());
+        assertEquals("",WidgetCache.load(context).serverScopeKey);
+    }
 }

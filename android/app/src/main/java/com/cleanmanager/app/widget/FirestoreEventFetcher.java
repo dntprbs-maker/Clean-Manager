@@ -47,9 +47,13 @@ final class FirestoreEventFetcher {
                 JSONObject root = request(context, new JSONObject().put("from", from).put("to", to));
                 if (root == null || !scope.equals(WidgetSessionStore.scope(context))) return null;
                 JSONArray array = root.getJSONArray("events");
+                Map<String,Integer> repeated=new HashMap<>();
                 for (int i = 0; i < array.length(); i++) {
                     WidgetEvent event = event(array.getJSONObject(i));
-                    unique.put(event.id + ":" + event.start + ":" + event.end, event);
+                    String signature=new JSONArray().put(event.id).put(event.title).put(event.start).put(event.end)
+                            .put(event.startTime).put(event.endTime).put(event.allDay).put(event.place).put(event.calId).toString();
+                    int ordinal=repeated.getOrDefault(signature,0);repeated.put(signature,ordinal+1);
+                    unique.put(signature+":"+ordinal,event);
                 }
                 calendars.putAll(calendars(root.getJSONArray("calendars")));
                 cursor.setTime(format.parse(to));
@@ -62,6 +66,55 @@ final class FirestoreEventFetcher {
             }
             return events;
         } catch (Exception e) { Log.w(TAG, "일정 조회 실패"); return null; }
+    }
+
+    static final class RangeResult {
+        final List<WidgetEvent> events;
+        final Map<String, Integer> calendars;
+        final long revision;
+        final String scopeKey;
+        RangeResult(List<WidgetEvent> events, Map<String,Integer> calendars, long revision, String scopeKey) {
+            this.events=events; this.calendars=calendars; this.revision=revision; this.scopeKey=scopeKey;
+        }
+    }
+
+    static RangeResult fetchCachedRange(Context context, String from, String to, WidgetCache.Snapshot cached) {
+        String scope=WidgetSessionStore.scope(context);
+        try {
+            java.text.SimpleDateFormat dates=new java.text.SimpleDateFormat("yyyy-MM-dd",java.util.Locale.US);
+            dates.setTimeZone(java.util.TimeZone.getTimeZone("Asia/Seoul"));dates.setLenient(false);
+            if((dates.parse(to).getTime()-dates.parse(from).getTime())/86400000L>369) {
+                List<WidgetEvent> wide=fetchRange(context,from,to);
+                if(wide==null)return null;
+                Map<String,Integer> colors=fetchCalendars(context);
+                return colors==null?null:new RangeResult(wide,colors,-1,"");
+            }
+            JSONObject body=new JSONObject().put("from",from).put("to",to).put("deltaVersion",1);
+            boolean conditional=from.equals(cached.rangeFrom) && to.equals(cached.rangeTo)
+                    && cached.serverRevision>=0 && cached.serverScopeKey.matches("v1:[0-9a-fA-F]{64}");
+            if(conditional) body.put("knownRevision",cached.serverRevision).put("scopeKey",cached.serverScopeKey);
+            JSONObject root=request(context,body);
+            if(root==null || !scope.equals(WidgetSessionStore.scope(context)))return null;
+            long revision=root.optLong("revision",-1);
+            String key=root.optString("scopeKey","");
+            if(root.optBoolean("notModified",false)) {
+                if(!conditional || revision!=cached.serverRevision || !key.equals(cached.serverScopeKey))return null;
+                return new RangeResult(cached.events,cached.calendars,revision,key);
+            }
+            List<WidgetEvent> result=new ArrayList<>();
+            JSONArray removed=root.optJSONArray("replaceEventIds");
+            if(removed!=null) {
+                if(!conditional || revision<cached.serverRevision || !key.equals(cached.serverScopeKey))return null;
+                java.util.Set<String> ids=new java.util.HashSet<>();
+                for(int i=0;i<removed.length();i++)ids.add(removed.getString(i));
+                for(WidgetEvent e:cached.events)if(!ids.contains(e.id))result.add(e);
+            }
+            JSONArray array=root.getJSONArray("events");
+            for(int i=0;i<array.length();i++){WidgetEvent e=event(array.getJSONObject(i));result.add(e);}
+            Map<String,Integer> colors=removed==null?new HashMap<>():new HashMap<>(cached.calendars);
+            colors.putAll(calendars(root.getJSONArray("calendars")));
+            return new RangeResult(result,colors,revision,key);
+        } catch(Exception e){Log.w(TAG,"일정 변경 확인 실패");return null;}
     }
 
     static final class FetchOne {

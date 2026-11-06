@@ -5,9 +5,10 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { createAppAuthService, AppAuthError, verifyAppPrincipal, publicProfile, canViewWidgetEvent, projectCalendar } from './appAuthCore.js';
+import { recordAppReadChange, readAppChanges, getSourceIds } from './appReadChanges.js';
 import { expandRecurring } from './appRecurrence.js';
 import { getMemberships, isAdminStaff, isLeaderOf } from './membership.js';
-import { prepareScopedRead, normalizeReadScope, loadScopedEventSnapshots, loadScopedReportSnapshots, ScopedReadError, widgetErrorStatus, widgetEvent, projectWidgetRange, mayReadFullReportLedger } from './appScopedReads.js';
+import { prepareScopedRead, readScopeKey, normalizeReadScope, loadScopedEventSnapshots, loadScopedReportSnapshots, ScopedReadError, widgetErrorStatus, widgetEvent, projectWidgetRange, mayReadFullReportLedger } from './appScopedReads.js';
 
 if (!getApps().length) initializeApp();
 const service = createAppAuthService({ db: getFirestore(), issueToken: (uid, claims) => getAuth().createCustomToken(uid, claims) });
@@ -48,8 +49,7 @@ const rotateVersion = collection => onDocumentWritten({ region: 'asia-northeast3
 export const appAdminCredentialChanged = rotateVersion('admins');
 export const appStaffCredentialChanged = rotateVersion('staffs');
 
-const invalidateRead = collection => onDocumentWritten({ region: 'asia-northeast3', document: `companies/{companyId}/${collection}/{id}`, retry: true }, event =>
-  getFirestore().doc(`companies/${event.params.companyId}/meta/readRevision`).set({ revision: FieldValue.increment(1) }, { merge: true }));
+const invalidateRead = collection => onDocumentWritten({ region: 'asia-northeast3', document: `companies/{companyId}/${collection}/{id}`, retry: true }, event => recordAppReadChange(getFirestore(), event, collection));
 export const appReadEventChanged = invalidateRead('events');
 export const appReadReportChanged = invalidateRead('reports');
 export const appReadCalendarChanged = invalidateRead('cals');
@@ -64,11 +64,12 @@ export const appReadData = onCall({ region: 'asia-northeast3', maxInstances: 5 }
   catch (e) { if (e instanceof ScopedReadError) throw new HttpsError(e.code, e.message); throw e; }
   const { scope: input, scopeKey, revision } = prepared;
   if (prepared.notModified) return { notModified: true, revision, scopeKey, serverAt: new Date().toISOString() };
+  const delta = await readAppChanges(db, principal.user.companyId, request.data || {}, prepared);
   const ids = new Set(input.eventIds);
   const root = `companies/${principal.user.companyId}`;
   const [cals, assignments, source] = await Promise.all([
     db.collection(`${root}/cals`).get(), db.collection(`${root}/assignments`).get(),
-    loadScopedEventSnapshots(db, principal.user.companyId, input),
+    delta ? getSourceIds(db, principal.user.companyId, 'events', delta.sourceIds) : loadScopedEventSnapshots(db, principal.user.companyId, input),
   ]);
   const calRows = cals.docs.map(d => ({ ...d.data(), id: d.id }));
   const assignmentRows = assignments.docs.map(d => ({ ...d.data(), id: d.id }));
@@ -103,7 +104,11 @@ export const appReadData = onCall({ region: 'asia-northeast3', maxInstances: 5 }
     selected = allowed.filter(e => ids.has(e.id));
   }
   const selectedIds = new Set([...selected, ...instances].map(e => e.id));
-  const reports = await loadScopedReportSnapshots(db, principal.user.companyId, [...selectedIds], { full: input.full });
+  const reports = delta ? { docs: [...new Map((await Promise.all([
+    loadScopedReportSnapshots(db, principal.user.companyId, delta.eventIds.filter(id => mayReadFullReportLedger(input,principal) || selectedIds.has(id))),
+    getSourceIds(db, principal.user.companyId, 'reports', delta.reportIds),
+  ])).flatMap(s => s.docs).map(d => [d.id, d])).values()] }
+    : await loadScopedReportSnapshots(db, principal.user.companyId, [...selectedIds], { full: input.full });
   const reportRows = reports.docs.filter(d => {
     if (mayReadFullReportLedger(input, principal)) return true;
     const report = d.data();
@@ -125,11 +130,13 @@ export const appReadData = onCall({ region: 'asia-northeast3', maxInstances: 5 }
   };
   const serverAt = new Date().toISOString();
   const sharedWidget = input.widgetRange ? {
-    ...projectWidgetRange(raw, principal, calRows, assignmentRows, input.widgetRange),
+    ...projectWidgetRange(delta ? raw.filter(e=>delta.eventIds.includes(e.id)) : raw, principal, calRows, assignmentRows, input.widgetRange),
+    ...(delta ? { replaceEventIds: delta.eventIds } : {}),
+    ...(request.data?.deltaVersion === 1 ? {widgetScopeKey:readScopeKey(normalizeReadScope(input.widgetRange),principal)}:{}),
     ...input.widgetRange, companyId: principal.user.companyId,
     userId: request.auth.uid, revision, scopeKey, serverAt,
   } : undefined;
-  return { ...(sharedWidget ? { sharedWidget } : {}), events: selected.map(serialize), instances: instances.map(serialize), reports: reportRows,
+  return { ...(delta ? { delta: { replaceEventIds: delta.sourceIds, replaceReportEventIds: delta.eventIds, replaceReportIds: delta.reportIds } } : {}), ...(sharedWidget ? { sharedWidget } : {}), events: selected.map(serialize), instances: instances.map(serialize), reports: reportRows,
     cals: calRows.map(cal => projectCalendar(cal, principal)).filter(Boolean),
     serverAt, revision, scopeKey };
 });
@@ -257,6 +264,10 @@ export const appWidgetData = onRequest({ region: 'asia-northeast3', maxInstances
     const db = getFirestore();
     const principal = await verifyAppPrincipal(db, claims);
     const company = principal.user.companyId;
+    const body=req.body||{};
+    const prepared=body.eventId===undefined?await prepareScopedRead(db,company,body,principal):null;
+    if(prepared?.notModified){res.json({notModified:true,revision:prepared.revision,scopeKey:prepared.scopeKey});return;}
+    const delta=prepared?await readAppChanges(db,company,body,prepared):null;
     const [cals, assignments] = await Promise.all([db.collection(`companies/${company}/cals`).get(), db.collection(`companies/${company}/assignments`).get()]);
     const calById = new Map(cals.docs.map(d => [d.id, { ...d.data(), id: d.id }]));
     const allowed = e => canViewWidgetEvent(e, principal, [...calById.values()], assignments.docs.map(d => ({ ...d.data(), id: d.id })));
@@ -269,9 +280,9 @@ export const appWidgetData = onRequest({ region: 'asia-northeast3', maxInstances
       res.json(event && allowed(event) ? { event: widgetEvent(event) } : { deleted: true }); return;
     }
     const scope = normalizeReadScope({ from, to });
-    const source = await loadScopedEventSnapshots(db, company, scope);
+    const source = delta ? await getSourceIds(db,company,'events',delta.eventIds) : await loadScopedEventSnapshots(db, company, scope);
     const raw = source.docs.map(d => ({ ...d.data(), id: d.id })).filter(e => e.status !== 'deleted');
-    res.json(projectWidgetRange(raw, principal, [...calById.values()], assignments.docs.map(d => ({ ...d.data(), id: d.id })), { from, to }));
+    res.json({...projectWidgetRange(raw, principal, [...calById.values()], assignments.docs.map(d => ({ ...d.data(), id: d.id })), { from, to }),revision:prepared.revision,scopeKey:prepared.scopeKey,...(delta?{replaceEventIds:delta.eventIds}:{})});
   } catch (e) {
     const code = e.code || '';
     const status = widgetErrorStatus(code);

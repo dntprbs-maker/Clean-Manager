@@ -88,11 +88,12 @@ public final class WidgetSharedRead {
         final Map<String, Integer> calendars = new HashMap<>();
         final AtomicReference<Long> responseRevision = new AtomicReference<>(-1L);
         try {
-            exactKeys(snapshot, "events", "calendars", "from", "to", "companyId", "userId", "revision", "scopeKey", "serverAt");
+            allowedKeys(snapshot, "events", "calendars", "from", "to", "companyId", "userId", "revision", "scopeKey", "serverAt", "widgetScopeKey");
             if (!lease.from.equals(text(snapshot, "from")) || !lease.to.equals(text(snapshot, "to"))
                     || !WidgetSessionStore.company(context).equals(text(snapshot, "companyId"))
                     || !WidgetSessionStore.user(context).equals(text(snapshot, "userId"))) return false;
             String scopeKey = text(snapshot, "scopeKey");
+            if(snapshot.has("widgetScopeKey") && !text(snapshot,"widgetScopeKey").matches("v1:[0-9a-fA-F]{64}"))return false;
             if (!scopeKey.matches("v1:[0-9a-fA-F]{64}")) return false;
             Object serverRevision = snapshot.get("revision");
             Long validatedRevision = safeRevision(serverRevision);
@@ -124,7 +125,7 @@ public final class WidgetSharedRead {
         AtomicBoolean accepted = new AtomicBoolean(false);
         WidgetSessionStore.runIfCurrentRevision(context, scope, revision, () -> {
             if (LEASE.current(ticket, scope, revision, elapsed + SystemClock.elapsedRealtime() - parseStarted) == null) return;
-            if (WidgetCache.saveShared(context, scope, events, calendars, lease.from, lease.to, wall, revision, responseRevision.get())) {
+            if (WidgetCache.saveVersioned(context, events, calendars, lease.from, lease.to, wall, revision, responseRevision.get(), snapshot.optString("widgetScopeKey", ""))) {
                 LEASE.finish(ticket);
                 accepted.set(true);
             }

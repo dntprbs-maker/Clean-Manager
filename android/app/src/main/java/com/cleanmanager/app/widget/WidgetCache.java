@@ -25,6 +25,7 @@ final class WidgetCache {
         final long eventsFetchedAt;    // 일정 조회 시각(ms), 없으면 0
         final long calendarsFetchedAt; // 캘린더 조회 시각(ms), 없으면 0
         final long dataRevision;       // 조회 시작 시점의 웹 변경 revision
+        String serverScopeKey = "";
         final long serverRevision;     // 공유된 서버 변경번호, 독립 조회/구버전은 -1
 
         Snapshot(List<WidgetEvent> events, Map<String, Integer> calendars) {
@@ -102,8 +103,10 @@ final class WidgetCache {
             String rangeTo = root.isNull("rangeTo") ? null : root.optString("rangeTo", null);
             long eventsFetchedAt = root.optLong("eventsFetchedAt", 0L);
             long calendarsFetchedAt = root.optLong("calendarsFetchedAt", 0L);
-            return new Snapshot(events, cals, rangeFrom, rangeTo, eventsFetchedAt, calendarsFetchedAt,
+            Snapshot result = new Snapshot(events, cals, rangeFrom, rangeTo, eventsFetchedAt, calendarsFetchedAt,
                     root.optLong("dataRevision", -1L), root.optLong("serverRevision", -1L));
+            result.serverScopeKey = root.optString("serverScopeKey", "");
+            return result;
         } catch (Exception e) {
             Log.w(TAG, "캐시 읽기 실패", e);
             return new Snapshot(new ArrayList<>(), new HashMap<>());
@@ -144,8 +147,17 @@ final class WidgetCache {
         return save(context, events, calendars, rangeFrom, rangeTo, eventsFetchedAt, calendarsFetchedAt, dataRevision, -1L);
     }
 
+    static boolean saveVersioned(Context context, List<WidgetEvent> events, Map<String, Integer> calendars,
+                     String from, String to, long now, long localRevision, long serverRevision, String serverScopeKey) {
+        return save(context, events, calendars, from, to, now, now, localRevision, serverRevision, serverScopeKey);
+    }
+
     private static boolean save(Context context, List<WidgetEvent> events, Map<String, Integer> calendars,
                      String rangeFrom, String rangeTo, long eventsFetchedAt, long calendarsFetchedAt, long dataRevision, long serverRevision) {
+        return save(context, events, calendars, rangeFrom, rangeTo, eventsFetchedAt, calendarsFetchedAt, dataRevision, serverRevision, "");
+    }
+    private static boolean save(Context context, List<WidgetEvent> events, Map<String, Integer> calendars,
+                     String rangeFrom, String rangeTo, long eventsFetchedAt, long calendarsFetchedAt, long dataRevision, long serverRevision, String serverScopeKey) {
         try {
             JSONArray evArr = new JSONArray();
             for (WidgetEvent e : events) {
@@ -178,6 +190,7 @@ final class WidgetCache {
             root.put("calendarsFetchedAt", calendarsFetchedAt);
             root.put("dataRevision", dataRevision);
             root.put("serverRevision", serverRevision);
+            root.put("serverScopeKey", serverScopeKey);
 
             SharedPreferences prefs = context.getSharedPreferences(WidgetConfig.PREFS_NAME, Context.MODE_PRIVATE);
             return prefs.edit().putString(WidgetConfig.PREF_KEY_CACHE_BLOB, root.toString()).commit();

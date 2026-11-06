@@ -1,3 +1,4 @@
+import { readScheduleCache, writeScheduleCache, mergeScheduleSnapshot, clearScheduleCache } from '../lib/scheduleCache';
 import { seoulToday } from "../lib/dateTime";
 import {
   useState, useContext, createContext, useCallback,
@@ -5,7 +6,7 @@ import {
 } from "react";
 
 import { httpsCallable } from "firebase/functions";
-import { db, storage, functions } from "../firebase";
+import { db, storage, functions, auth } from "../firebase";
 import {
   collection, doc, setDoc, updateDoc, onSnapshot,
   query, where, getDocs, getDocsFromServer, getDocFromServer, deleteDoc, arrayUnion,
@@ -125,7 +126,7 @@ export function Provider({ children, loginUser, onLogout }) {
     else if(mode==='update')result=await updateDoc(target,clean);
     else result=await setDoc(target,clean);
     if(kind==='events') await invalidateWidgetData();
-    if(nativeSharing && ['events','reports'].includes(kind)) setRetryGeneration(n=>n+1);
+    if(['events','reports'].includes(kind)) setRetryGeneration(n=>n+1);
     return result;
   }
 
@@ -546,8 +547,8 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
   const windows = useMemo(()=>calendarWindows(current,selDate,calendarDay),[current,selDate,calendarDay]);
   const fullEvents = searchOpen || currentScreen === "dashboard";
   // The native app and widget consume one server-authorized event snapshot.
-  // Browser and older APKs retain their existing access paths.
-  const serverRead = !isSuperAdmin(loginUser) || nativeSharing === true;
+  // Browser and Android both persist the authorized response locally.
+  const serverRead = true;
   const principalKey = JSON.stringify([currentUser.uid,currentUser.role,currentUser.team,currentUser.memberships]);
   const [serverReportRows,setServerReportRows]=useState([]);
   const [serverConfirmedAt,setServerConfirmedAt]=useState(null);
@@ -573,16 +574,23 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
 
   useEffect(()=>{
     if(!serverRead || nativeSharing===null)return;
-    let active=true,inFlight=false,queued=false,queuedForce=false,hasSnapshot=false;
-    let knownRevision=null,scopeKey=null;
+    let active=true,inFlight=false,queued=false,queuedForce=false,hasSnapshot=false,verified=false;
+    let knownRevision=null,scopeKey=null,snapshotData=null;
+    const cacheKey=JSON.stringify([auth.currentUser?.uid,loginUser.companyId,principalKey,fullEvents||currentScreen==='report_history',windows,pinnedIds]);
+    const apply=data=>{setEvents([...(data.events||[]),...(data.instances||[])]);setCals(data.cals||[]);setCalsLoaded(true);setReportRelated(data.reports||[]);setServerReportRows(data.reports||[]);};
+    setServerConfirmedAt(null);
+    setDataStates(prev=>({...prev,events:{ready:false,cached:true,error:null},reportRelated:{ready:false,cached:true,error:null}}));
+    const hydrated=readScheduleCache(cacheKey).then(cached=>{if(active&&cached?.data){snapshotData=cached.data;knownRevision=snapshotData.revision;scopeKey=snapshotData.scopeKey;hasSnapshot=true;apply(snapshotData);}});
     const revisionRef=doc(companyRef,'meta','readRevision');
-    const handleError=err=>{if(active){setDataStates(prev=>({...prev,events:{ready:false,cached:false,error:err.code||'unavailable'},reportRelated:{ready:false,cached:false,error:err.code||'unavailable'}}));if(['functions/permission-denied','functions/unauthenticated','permission-denied','unauthenticated'].includes(err.code)){setEvents([]);setReports([]);setReportRows([]);setReportRelated([]);setDetEv(null);setFieldReportEv(null);onLogout();}}};
+    const handleError=err=>{if(active){setDataStates(prev=>({...prev,events:{ready:false,cached:false,error:err.code||'unavailable'},reportRelated:{ready:false,cached:false,error:err.code||'unavailable'}}));if(['functions/permission-denied','functions/unauthenticated','permission-denied','unauthenticated'].includes(err.code)){setEvents([]);setReports([]);setReportRows([]);setReportRelated([]);setDetEv(null);setFieldReportEv(null);clearScheduleCache();onLogout();}}};
     const load=async(force=false)=>{
       if(!active)return;
       if(inFlight){queued=true;queuedForce=queuedForce||force;return;}
       inFlight=true;
+      await hydrated;
+      if(!active){inFlight=false;return;}
       let widgetLease=null;
-      setDataStates(prev=>({...prev,events:{ready:hasSnapshot,cached:!hasSnapshot,error:null},reportRelated:{ready:hasSnapshot,cached:!hasSnapshot,error:null}}));
+      setDataStates(prev=>({...prev,events:{ready:false,cached:hasSnapshot,error:null},reportRelated:{ready:false,cached:hasSnapshot,error:null}}));
       try {
         if(nativeSharing) {
           // A small authoritative head check also detects changes whose push
@@ -591,26 +599,33 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
           widgetLease=await beginWidgetRead(loginUser.companyId,head?.data()?.revision);
         }
         if(!active)return;
-        const conditional=!widgetLease&&!force&&hasSnapshot&&scopeKey&&knownRevision!==null?{knownRevision,scopeKey}:{};
-        const {data}=await httpsCallable(functions,"appReadData")({full:fullEvents||currentScreen==='report_history',from:range.start,to:range.end,ranges:windows,eventIds:pinnedIds.split('|').filter(Boolean),...(widgetLease?{widgetRange:{from:widgetLease.from,to:widgetLease.to}}:{}),...conditional});
+        const widgetRange=widgetLease?{from:widgetLease.from,to:widgetLease.to}:snapshotData?.sharedWidget?{from:snapshotData.sharedWidget.from,to:snapshotData.sharedWidget.to}:null;
+        const sameWidget=JSON.stringify(widgetRange)===JSON.stringify(snapshotData?.sharedWidget?{from:snapshotData.sharedWidget.from,to:snapshotData.sharedWidget.to}:null);
+        const conditional=hasSnapshot&&sameWidget&&scopeKey&&knownRevision!==null?{knownRevision,scopeKey,deltaVersion:1}:{};
+        const {data}=await httpsCallable(functions,"appReadData")({full:fullEvents||currentScreen==='report_history',from:range.start,to:range.end,ranges:windows,eventIds:pinnedIds.split('|').filter(Boolean),...(widgetRange?{widgetRange}:{}),deltaVersion:1,...conditional});
         if(!active)return;
         if(data.notModified) {
           if(!hasSnapshot||data.scopeKey!==scopeKey||data.revision!==knownRevision) throw Object.assign(new Error('Invalid scoped confirmation'),{code:'scope-mismatch'});
         } else {
-          setEvents([...(data.events||[]),...(data.instances||[])]);setCals(data.cals||[]);setCalsLoaded(true);setReportRelated(data.reports||[]);setServerReportRows(data.reports||[]);
+          snapshotData=mergeScheduleSnapshot(snapshotData,data);
+          apply(snapshotData);
           knownRevision=Number.isSafeInteger(data.revision)?data.revision:null;
           scopeKey=data.scopeKey||null;hasSnapshot=true;
         }
+        snapshotData=mergeScheduleSnapshot(snapshotData,{notModified:true,serverAt:data.serverAt});
+        await writeScheduleCache(cacheKey,snapshotData);
+        if(!active)return;
+        verified=true;
         setServerConfirmedAt(data.serverAt);
         setDataStates(prev=>({...prev,events:{ready:true,cached:false,error:null},reportRelated:{ready:true,cached:false,error:null}}));
-        if(widgetLease && data.sharedWidget) await commitWidgetRead(widgetLease,data.sharedWidget);
+        if(widgetLease && snapshotData?.sharedWidget) await commitWidgetRead(widgetLease,{...snapshotData.sharedWidget,revision:knownRevision,serverAt:data.serverAt});
       } catch(err) {handleError(err);}
       finally {await cancelWidgetRead(widgetLease);inFlight=false;if(active&&queued){const forceAgain=queuedForce;queued=false;queuedForce=false;load(forceAgain);}}
     };
     const observeRevision=snapshot=>{
       if(!active||snapshot.metadata.fromCache)return;
       const value=snapshot.data()?.revision;
-      if(!hasSnapshot||!Number.isSafeInteger(value)||value!==knownRevision)load();
+      if(!verified||!hasSnapshot||!Number.isSafeInteger(value)||value!==knownRevision)load();
       else {
         setServerConfirmedAt(new Date().toISOString());
         setDataStates(prev=>({...prev,events:{ready:true,cached:false,error:null},reportRelated:{ready:true,cached:false,error:null}}));
