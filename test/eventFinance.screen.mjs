@@ -34,7 +34,7 @@ try{
  await click('저장');await saved();
  const docs=await db.collection(root+'/events').where('title','==',title).get();assert.equal(docs.size,1);const ref=docs.docs[0].ref,id=ref.id;
  const first=docs.docs[0].data();assert.equal(first.finance.revenue,350000);assert.equal(first.finance.leaderPay.amount,200000);assert.equal(first.finance.extraCosts[0].amount,10000);
- await announce(id,null);console.log('PASS collapsed/expanded real form; leader amount, extra cost and 140000 profit persist');
+ console.log('PASS collapsed/expanded real form; leader amount, extra cost and 140000 profit persist');
  await opened(`ctx.openModal('2026-11-07',${JSON.stringify(id)});`);assert.equal(await page.$('input[aria-label="청소비"]'),null);
  await click('청소비·정산 입력선택');assert.equal(await page.$eval('input[aria-label="청소비"]',e=>e.value),'350,000');
  await click('팀원 직접 지급');await fill('팀원 1 이름','시험 팀원 A');await fill('팀원 1 지급액','100000');await click('+ 팀원 추가');await fill('팀원 2 이름','시험 팀원 B');await fill('팀원 2 지급액','80000');await wait('160,000원');

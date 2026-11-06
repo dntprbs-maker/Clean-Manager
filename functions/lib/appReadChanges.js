@@ -27,11 +27,17 @@ export async function readAppChanges(db, companyId, input, prepared) {
   const since = input.knownRevision;
   if (input.deltaVersion !== 1 || input.scopeKey !== prepared.scopeKey
       || !Number.isSafeInteger(since) || since < 0 || !Number.isSafeInteger(prepared.revision)
-      || since >= prepared.revision || prepared.revision - since > 200) return null;
+      || since > prepared.revision || prepared.revision - since > 200) return null;
+  const events = new Set(input.refreshEventIds || []), reports = new Set(input.refreshReportIds || []), sources = new Set(events);
+  if (reports.size) {
+    const current = await getSourceIds(db,companyId,'reports',[...reports]);
+    for (const d of current.docs) if (typeof d.data().eventId === 'string') sources.add(d.data().eventId);
+  }
+  if (since === prepared.revision) return events.size || reports.size
+    ? {eventIds:[...events],reportIds:[...reports],sourceIds:[...sources]} : null;
   const snap = await db.doc(`appAuthReadStreams/${companyId}`).collection('changes')
     .where('revision', '>', since).where('revision', '<=', prepared.revision).orderBy('revision').limit(201).get();
   let expected = since;
-  const events = new Set(), reports = new Set(), sources = new Set();
   for (const d of snap.docs) {
     const row = d.data();
     if (row.revision !== ++expected || !['events', 'reports'].includes(row.collection)) return null;

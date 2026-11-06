@@ -27,3 +27,9 @@ test('legacy, changed scope and out-of-range cursors never query the change jour
   }
   assert.equal(spy.calls(),0);
 });
+test('a confirmed local write rereads only its source before the change trigger advances',async()=>{
+  const spy=journal([]);
+  assert.deepEqual(await readAppChanges(spy.db,'co',{...input,knownRevision:12,refreshEventIds:['saved']},head),
+    {eventIds:['saved'],reportIds:[],sourceIds:['saved']});
+  assert.equal(spy.calls(),0);
+});

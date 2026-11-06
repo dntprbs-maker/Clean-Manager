@@ -46,6 +46,10 @@ try{
     assert.deepEqual(canonical(snapshot.sharedWidget.events),canonical(fresh.sharedWidget.events));
   };
   const unchanged=await next();assert.equal(unchanged.notModified,true);assert.equal(unchanged.events,undefined);
+  const ownWrite=await call('appReadData',{...scope,knownRevision:snapshot.revision,scopeKey:snapshot.scopeKey,refreshEventIds:['a']},token);
+  assert.ok(ownWrite.delta);assert.deepEqual(ownWrite.events.map(e=>e.id),['a']);assert.equal(ownWrite.revision,snapshot.revision);
+  const ownReport=await call('appReadData',{...scope,knownRevision:snapshot.revision,scopeKey:snapshot.scopeKey,refreshReportIds:['r1']},token);
+  assert.deepEqual(ownReport.reports.map(r=>r.id),['r1']);assert.ok(ownReport.delta);
   await change('reports','r1',{eventId:'a',date:'2026-11-05',memo:'changed'});
   let response=await next();assert.ok(response.delta);assert.deepEqual(response.reports.map(r=>r.id),['r1']);
   snapshot=mergeScheduleSnapshot(snapshot,response);await compare();

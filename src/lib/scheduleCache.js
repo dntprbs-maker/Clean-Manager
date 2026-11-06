@@ -2,6 +2,24 @@
 // This cache is display-only: server confirmation remains required for money.
 const DB = 'clean-manager-schedule-v1';
 const STORE = 'snapshots';
+export function applySavedEntity(rows,id,patch,remove=false,version) {
+  if (remove) return rows.filter(row=>row.id!==id);
+  const update=row=>{
+    const next={...row,id,...(version?{__readVersion:version}:{})};
+    for(const [key,value] of Object.entries(patch||{})) {
+      const parts=key.split('.');
+      if(parts[0]==='exceptions'&&row.__occurrenceOnly) {
+        if(parts[1]===(row._origDate||row.start))Object.assign(next,value);
+        continue;
+      }
+      let target=next;
+      for(const part of parts.slice(0,-1)){target[part]={...target[part]};target=target[part];}
+      target[parts.at(-1)]=value;
+    }
+    return next;
+  };
+  return rows.some(row=>row.id===id)?rows.map(row=>row.id===id?update(row):row):[...rows,update({})];
+}
 let opened;
 function database() {
   if (!opened) opened = new Promise((resolve, reject) => {

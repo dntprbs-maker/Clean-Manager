@@ -1,4 +1,4 @@
-import { readScheduleCache, writeScheduleCache, mergeScheduleSnapshot, clearScheduleCache } from '../lib/scheduleCache';
+import { readScheduleCache, writeScheduleCache, mergeScheduleSnapshot, clearScheduleCache, applySavedEntity } from '../lib/scheduleCache';
 import { seoulToday } from "../lib/dateTime";
 import {
   useState, useContext, createContext, useCallback,
@@ -33,6 +33,7 @@ export function Provider({ children, loginUser, onLogout }) {
   const companyRef = doc(db, "companies", loginUser.companyId);
   const [currentUser, setCurrentUser] = useState(loginUser);
   const [retryGeneration, setRetryGeneration] = useState(0);
+  const pendingWrites=useRef({events:new Map(),reports:new Map(),sequence:0});
   const [nativeSharing, setNativeSharing] = useState(()=>Capacitor.isNativePlatform()?null:false);
   useEffect(()=>{let active=true;supportsWidgetSharing().then(value=>{if(active)setNativeSharing(value);});return()=>{active=false;};},[]);
   useEffect(() => { setCurrentUser(loginUser); }, [loginUser]);
@@ -111,13 +112,22 @@ export function Provider({ children, loginUser, onLogout }) {
     };
   }, [loginUser.companyId]);
 
+  function publishSavedEntity(kind,id,patch,remove,version) {
+    if(!['events','reports'].includes(kind))return;
+    pendingWrites.current[kind].set(id,++pendingWrites.current.sequence);
+    const update=rows=>applySavedEntity(rows,id,patch,remove,version);
+    if(kind==='events')setEvents(update);
+    else {setServerReportRows(update);setReportRelated(update);}
+    setRetryGeneration(n=>n+1);
+  }
+
   async function writeEntity(kind,id,value,mode='set') {
     const clean=value?Object.fromEntries(Object.entries(value).filter(([k])=>!k.startsWith('_'))):undefined;
     if(!isSuperAdmin(loginUser) && ['events','reports'].includes(kind)) {
       const expectedVersion=kind==='events'?(value?.__readVersion||events.find(e=>e.id===id)?.__readVersion):undefined;
       const {data}=await httpsCallable(functions,'appWriteData')({kind,id,...(clean?{value:clean}:{}),merge:mode==='update',remove:mode==='delete',...(expectedVersion?{expectedVersion}:{})});
       if(kind==='events') await invalidateWidgetData();
-      setRetryGeneration(n=>n+1);
+      publishSavedEntity(kind,id,clean,mode==='delete',data.version);
       return data;
     }
     const target=doc(companyRef,kind,id);
@@ -126,7 +136,7 @@ export function Provider({ children, loginUser, onLogout }) {
     else if(mode==='update')result=await updateDoc(target,clean);
     else result=await setDoc(target,clean);
     if(kind==='events') await invalidateWidgetData();
-    if(['events','reports'].includes(kind)) setRetryGeneration(n=>n+1);
+    publishSavedEntity(kind,id,clean,mode==='delete');
     return result;
   }
 
@@ -580,7 +590,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
     const apply=data=>{setEvents([...(data.events||[]),...(data.instances||[])]);setCals(data.cals||[]);setCalsLoaded(true);setReportRelated(data.reports||[]);setServerReportRows(data.reports||[]);};
     setServerConfirmedAt(null);
     setDataStates(prev=>({...prev,events:{ready:false,cached:true,error:null},reportRelated:{ready:false,cached:true,error:null}}));
-    const hydrated=readScheduleCache(cacheKey).then(cached=>{if(active&&cached?.data){snapshotData=cached.data;knownRevision=snapshotData.revision;scopeKey=snapshotData.scopeKey;hasSnapshot=true;apply(snapshotData);}});
+    const hydrated=readScheduleCache(cacheKey).then(cached=>{if(active&&cached?.data){snapshotData=cached.data;knownRevision=snapshotData.revision;scopeKey=snapshotData.scopeKey;hasSnapshot=true;if(!pendingWrites.current.events.size&&!pendingWrites.current.reports.size)apply(snapshotData);}});
     const revisionRef=doc(companyRef,'meta','readRevision');
     const handleError=err=>{if(active){setDataStates(prev=>({...prev,events:{ready:false,cached:false,error:err.code||'unavailable'},reportRelated:{ready:false,cached:false,error:err.code||'unavailable'}}));if(['functions/permission-denied','functions/unauthenticated','permission-denied','unauthenticated'].includes(err.code)){setEvents([]);setReports([]);setReportRows([]);setReportRelated([]);setDetEv(null);setFieldReportEv(null);clearScheduleCache();onLogout();}}};
     const load=async(force=false)=>{
@@ -602,7 +612,13 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
         const widgetRange=widgetLease?{from:widgetLease.from,to:widgetLease.to}:snapshotData?.sharedWidget?{from:snapshotData.sharedWidget.from,to:snapshotData.sharedWidget.to}:null;
         const sameWidget=JSON.stringify(widgetRange)===JSON.stringify(snapshotData?.sharedWidget?{from:snapshotData.sharedWidget.from,to:snapshotData.sharedWidget.to}:null);
         const conditional=hasSnapshot&&sameWidget&&scopeKey&&knownRevision!==null?{knownRevision,scopeKey,deltaVersion:1}:{};
-        const {data}=await httpsCallable(functions,"appReadData")({full:fullEvents||currentScreen==='report_history',from:range.start,to:range.end,ranges:windows,eventIds:pinnedIds.split('|').filter(Boolean),...(widgetRange?{widgetRange}:{}),deltaVersion:1,...conditional});
+        const refreshed={events:[...pendingWrites.current.events].slice(0,20),reports:[...pendingWrites.current.reports].slice(0,20)};
+        const readRequest={full:fullEvents||currentScreen==='report_history',from:range.start,to:range.end,ranges:windows,eventIds:pinnedIds.split('|').filter(Boolean),...(widgetRange?{widgetRange}:{}),deltaVersion:1,...conditional,...(refreshed.events.length?{refreshEventIds:refreshed.events.map(([id])=>id)}:{}),...(refreshed.reports.length?{refreshReportIds:refreshed.reports.map(([id])=>id)}:{})};
+        let {data}=await httpsCallable(functions,"appReadData")(readRequest);
+        if(data.notModified&&(refreshed.events.length||refreshed.reports.length)){
+          const fallback={...readRequest};delete fallback.knownRevision;delete fallback.scopeKey;
+          ({data}=await httpsCallable(functions,"appReadData")(fallback));
+        }
         if(!active)return;
         if(data.notModified) {
           if(!hasSnapshot||data.scopeKey!==scopeKey||data.revision!==knownRevision) throw Object.assign(new Error('Invalid scoped confirmation'),{code:'scope-mismatch'});
@@ -612,6 +628,8 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
           knownRevision=Number.isSafeInteger(data.revision)?data.revision:null;
           scopeKey=data.scopeKey||null;hasSnapshot=true;
         }
+        for(const kind of ['events','reports'])for(const [id,sequence] of refreshed[kind])if(pendingWrites.current[kind].get(id)===sequence)pendingWrites.current[kind].delete(id);
+        if(pendingWrites.current.events.size||pendingWrites.current.reports.size)queued=true;
         snapshotData=mergeScheduleSnapshot(snapshotData,{notModified:true,serverAt:data.serverAt});
         await writeScheduleCache(cacheKey,snapshotData);
         if(!active)return;
