@@ -9,11 +9,29 @@ import { db, functions, fcmVapidKey, getMessagingIfSupported } from "./firebase"
 // 실패했음(try/catch로 삼켜져 앱엔 "켜짐"으로만 보임 — 2026-07-24 확인). 서버(Admin SDK,
 // 규칙 우회)를 거치는 syncAdminPushToken 콜러블 함수로만 등록/해제한다.
 const callSyncAdminPushToken = httpsCallable(functions, "syncAdminPushToken");
+const syncReminderPushToken = httpsCallable(functions, "syncReminderPushToken");
+const reminderTokenKey = "cleanManagerReminderPushToken";
+let pendingReminderBinding = Promise.resolve();
+
+export async function unbindReminderPushToken() {
+  await pendingReminderBinding;
+  const token = localStorage.getItem(reminderTokenKey);
+  if (!token) return;
+  await syncReminderPushToken({ token, action: "remove" });
+  localStorage.removeItem(reminderTokenKey);
+}
 
 // 이 기기 토큰을 "현재 로그인한 사람" 소유로 이전
 // (다른 직원 문서에서 이 토큰 제거 → 현재 사용자에게만 등록)
 // 한 기기 = 마지막 로그인한 사람만 알림 받음
 export async function claimToken(user, token) {
+  pendingReminderBinding = pendingReminderBinding.then(async () => {
+    const previous = localStorage.getItem(reminderTokenKey);
+    if (previous && previous !== token) await syncReminderPushToken({ token: previous, action: "remove" });
+    await syncReminderPushToken({ token, action: "add" });
+    localStorage.setItem(reminderTokenKey, token);
+  }).catch(error => console.warn("[FCM] 일정 알림 등록 실패:", error.code));
+  await pendingReminderBinding;
   if (user.role === "최고관리자") {
     await callSyncAdminPushToken({ uid: user.uid, token, action: "add" }).catch(() => {});
     return;
@@ -101,17 +119,19 @@ export async function disablePush(user) {
 
 // 포그라운드(앱이 화면에 떠 있을 때) 메시지 수신 → 알림 표시
 // 모바일 브라우저는 new Notification()을 지원하지 않으므로 서비스워커의 showNotification 사용
+let foregroundListener;
 export async function listenForeground() {
   const messaging = await getMessagingIfSupported();
-  if (!messaging) return;
-  onMessage(messaging, async payload => {
+  if (!messaging || foregroundListener) return;
+  foregroundListener = onMessage(messaging, async payload => {
     if (Notification.permission !== "granted") return;
     const d = payload.data || {};
     const title = d.title || payload.notification?.title || "클린메니져";
     const options = {
       body: d.body || payload.notification?.body || "",
       icon: `${import.meta.env.BASE_URL}icon-192.png`,
-      tag: d.eventId || undefined,
+      tag: d.reminderId || d.eventId || undefined,
+      renotify: false,
       data: d,
     };
     try {

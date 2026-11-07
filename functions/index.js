@@ -1,5 +1,5 @@
 // Clean-Manager Cloud Functions — 일정 등록/수정/삭제 시 담당 팀원에게 푸시 알림
-import { onDocumentCreated, onDocumentUpdated, onDocumentDeleted } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentUpdated, onDocumentDeleted, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onCall, HttpsError, onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
@@ -7,6 +7,10 @@ import { getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { getMemberships } from "./lib/membership.js";
+import { createHash } from "node:crypto";
+import { AppAuthError, canViewWidgetEvent, verifyAppPrincipal } from "./lib/appAuthCore.js";
+import { isDailyDigestSlot, REMINDER_LABELS, seoulDate } from "./lib/eventReminderTimes.js";
+import { claimReminder, hasReminderSettings, reminderOccurrence, reminderRef, REMINDER_GRACE, syncReminders } from "./lib/eventReminders.js";
 import { UNASSIGNED_TEAM_KEY } from "./lib/reservedTeamNames.js";
 import { fmtDate, addDays, expandRecurringForFeed } from "./lib/recurring.js";
 import { loadFeedEvents } from "./lib/calendarFeedQuery.js";
@@ -56,7 +60,7 @@ function allowsTeam(recipient, teamName) {
 
 // 공통: 토큰 목록으로 FCM 발송 + 무효 토큰 정리. targets는 [{ token, userRef }].
 // data는 sendEachForMulticast의 data 필드로 그대로 전달된다(title/body 포함해서 넘길 것).
-async function dispatchPush(targets, data, logLabel) {
+async function dispatchPush(targets, data, logLabel, options = {}) {
   if (targets.length === 0) {
     console.log(`[${logLabel}] 대상 토큰 없음`);
     return;
@@ -66,6 +70,7 @@ async function dispatchPush(targets, data, logLabel) {
     tokens,
     data,
     webpush: { fcmOptions: { link: "/" } },
+    ...options,
   });
   console.log(`[${logLabel}] 발송 ${resp.successCount}/${tokens.length}`);
 
@@ -73,7 +78,8 @@ async function dispatchPush(targets, data, logLabel) {
   resp.responses.forEach((r, i) => {
     if (!r.success) {
       const code = r.error?.code || "";
-      if (code.includes("registration-token-not-registered") || code.includes("invalid-argument")) {
+      if (code.includes("registration-token-not-registered")
+        || (data.type !== "event_reminder" && code.includes("invalid-argument"))) {
         invalid.push(tokens[i]);
       }
     }
@@ -84,6 +90,126 @@ async function dispatchPush(targets, data, logLabel) {
     await Promise.all([...cleanups.values()].map((ref) =>
       ref.update({ fcmTokens: FieldValue.arrayRemove(...invalid) }).catch(() => {})
     ));
+  }
+}
+
+const reminderTokenRef = token => db.collection("appAuthReminderTokens").doc(
+  createHash("sha256").update(token).digest("hex")
+);
+const reminderCompanyEnabled = companyId => !process.env.REMINDER_QA_COMPANY
+  || process.env.REMINDER_QA_COMPANY === companyId;
+
+export const syncReminderPushToken = onCall({ region: REGION }, async request => {
+  const principal = await verifyAppPrincipal(db, request.auth?.token).catch(error => {
+    if (error instanceof AppAuthError) throw new HttpsError(error.code, error.message);
+    throw error;
+  });
+  const { token, action } = request.data || {};
+  if (typeof token !== "string" || !token || token.length > 4096 || !["add", "remove"].includes(action)) {
+    throw new HttpsError("invalid-argument", "잘못된 알림 등록 요청입니다.");
+  }
+  const ref = reminderTokenRef(token);
+  const { uid, companyId } = principal.user;
+  if (!reminderCompanyEnabled(companyId)) throw new HttpsError("failed-precondition", "일정 알림이 아직 활성화되지 않았습니다.");
+  await db.runTransaction(async tx => {
+    if (action === "add") {
+      tx.set(ref, { uid, companyId, kind: principal.kind, authVersion: principal.claims.cmv });
+      return;
+    }
+    const current = (await tx.get(ref)).data();
+    if (current?.uid === uid && current.companyId === companyId && current.kind === principal.kind) tx.delete(ref);
+  });
+  return { ok: true };
+});
+
+async function reminderTargets(companyId, event) {
+  const company = db.doc(`companies/${companyId}`);
+  const calRef = event.calId && event.calId !== "unassigned" ? company.collection("cals").doc(event.calId) : null;
+  const [companySnap, calSnap] = await Promise.all([company.get(), calRef?.get()]);
+  if (!companySnap.exists || companySnap.data().status === "deleted"
+    || (calRef && (!calSnap?.exists || calSnap.data().status === "deleted"))) return [];
+  const cal = calSnap ? { ...calSnap.data(), id: calSnap.id } : null;
+  const assignment = event.source === "regular" && event.assignmentId
+    ? await company.collection("assignments").doc(event.assignmentId).get() : null;
+  const assignments = assignment?.exists && assignment.data().status !== "deleted"
+    ? [{ ...assignment.data(), id: assignment.id }] : [];
+  const [staff, admins] = await Promise.all([
+    company.collection("users").get(),
+    db.collection("admins").where("companyId", "==", companyId).get(),
+  ]);
+  const targets = await Promise.all([...staff.docs, ...admins.docs].map(async profile => {
+    const kind = profile.ref.parent.id === "admins" ? "admin" : "staff";
+    const user = { ...profile.data(), uid: profile.id };
+    if (user.status === "deleted" || !Array.isArray(user.fcmTokens) || !user.fcmTokens.length
+      || (cal?.personal && cal.ownerId !== profile.id)
+      || !allowsTeam(user, cal?.personal ? "" : (cal?.label || cal?.name || event.team))
+      || !canViewWidgetEvent(event, { kind, user }, cal ? [cal] : [], assignments)) return [];
+    if (kind === "staff" && !cal?.personal && !isMemberOfTeam(user, "관리팀")
+      && !(cal && (isMemberOfTeam(user, "영업팀") || isMemberOfTeam(user, cal.label)
+        || assignments.some(row => row.employeeId === profile.id)))) return [];
+    const account = kind === "admin" ? user : (await db.doc(`staffs/${profile.id}`).get()).data();
+    if (!account?.pw || account.status === "deleted" || account.companyId !== companyId) return [];
+    const tokens = user.fcmTokens.filter(token => typeof token === "string" && token.length && token.length <= 4096);
+    if (!tokens.length) return [];
+    const bindings = await db.getAll(...tokens.map(reminderTokenRef));
+    return tokens.flatMap((token, i) => {
+      const binding = bindings[i].data();
+      return binding?.uid === profile.id && binding.companyId === companyId && binding.kind === kind
+        && binding.authVersion === account.authVersion ? [{ token, userRef: profile.ref }] : [];
+    });
+  }));
+  return targets.flat();
+}
+
+export const syncEventReminders = onDocumentWritten({ region: REGION, document: DOC, retry: true }, async event => {
+  if (!reminderCompanyEnabled(event.params.companyId)) return;
+  if (!hasReminderSettings(event.data?.before?.data()) && !hasReminderSettings(event.data?.after?.data())) return;
+  const source = event.data?.after?.ref || event.data?.before?.ref;
+  if (source) await syncReminders(db, source, reminderRef(db, source));
+});
+
+async function dispatchEventReminders() {
+  const stop = Date.now() + 40_000;
+  const failed = new Set();
+  while (Date.now() < stop) {
+    const due = await db.collection("appAuthEventReminders").where("nextAt", "<=", Date.now()).limit(40).get();
+    const batch = due.docs.filter(queue => !failed.has(queue.id));
+    if (!batch.length) return;
+    await Promise.all(batch.map(async queue => {
+      try {
+        const pending = queue.data();
+        const source = db.doc(pending.source);
+        const [companyId, eventId] = [source.parent.parent.id, source.id];
+        if (!reminderCompanyEnabled(companyId)) { failed.add(queue.id); return; }
+        const plan = pending.plans[0];
+        const current = await source.get();
+        if (!plan || pending.checkpoint === pending.nextAt || !current.updateTime?.isEqual(pending.version)) {
+          await syncReminders(db, source, queue.ref, Date.now(), true);
+          return;
+        }
+        const occurrence = reminderOccurrence(current.data(), plan);
+        const ttl = plan.at + REMINDER_GRACE - Date.now();
+        const targets = occurrence && ttl > 0 ? await reminderTargets(companyId, occurrence) : [];
+        if (!await claimReminder(db, source, queue.ref, plan, pending.version) || !targets.length) return;
+        const reminderId = `${queue.id}_${plan.key}`;
+        const data = {
+          type: "event_reminder", title: `일정 알림 · ${REMINDER_LABELS[plan.mode]}`,
+          body: "클린매니저에서 일정을 확인하세요.", companyId, eventId,
+          reminderId, date: plan.date, original: plan.original,
+        };
+        const remaining = plan.at + REMINDER_GRACE - Date.now();
+        if (remaining <= 0) return;
+        for (let i = 0; i < targets.length; i += 500) {
+          await dispatchPush(targets.slice(i, i + 500), data, "eventReminder", {
+            android: { priority: "high", ttl: remaining },
+            webpush: { headers: { TTL: String(Math.floor(remaining / 1000)) } },
+          });
+        }
+      } catch (error) {
+        failed.add(queue.id);
+        console.error("[eventReminder] 처리 실패", { queue: queue.id, code: error.code || error.name });
+      }
+    }));
   }
 }
 
@@ -275,14 +401,6 @@ export const sendEventDeleteNotification = onDocumentDeleted(
   }
 );
 
-// KST(Asia/Seoul) 기준 오늘 날짜(YYYY-MM-DD). Cloud Functions 런타임은 로컬 타임존이
-// UTC라 new Date().getDate()를 그냥 쓰면 새벽 시간대(KST 0~9시)에 날짜가 하루 밀린다.
-// UTC 기준 getter만 써서(런타임 타임존 설정과 무관하게) KST로 보정해 계산한다.
-function todayKST() {
-  const kst = new Date(Date.now() + 9 * 3600 * 1000);
-  return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, "0")}-${String(kst.getUTCDate()).padStart(2, "0")}`;
-}
-
 // ── 매일 아침 "오늘 일정" 요약 알림 (시험 운영) ───────────────────────
 // 회사별 최고관리자(사장)에게만 보내고, 그 날 일정이 하나도 없으면 안 보낸다.
 // 수신자(사장)마다 notifyTeams로 선호 팀이 다를 수 있어, 전체 일정을 모아 한 번에 토큰
@@ -373,10 +491,15 @@ async function runDailyDigest(dateStr, titlePrefix) {
 }
 
 export const dailyScheduleDigest = onSchedule(
-  { region: REGION, schedule: "0 8 * * *", timeZone: "Asia/Seoul" },
-  async () => {
-    const log = await runDailyDigest(todayKST(), "오늘");
-    console.log(`[dailyScheduleDigest] ${log.join(" | ")}`);
+  { region: REGION, schedule: "* * * * *", timeZone: "Asia/Seoul" },
+  async ({ scheduleTime }) => {
+    // Reuse the deployed Scheduler job. Only its original 08:00 slot sends a digest.
+    const reminders = dispatchEventReminders();
+    if (!isDailyDigestSlot(scheduleTime)) return reminders;
+    const digest = runDailyDigest(seoulDate(Date.parse(scheduleTime)), "오늘")
+      .then(log => console.log(`[dailyScheduleDigest] ${log.join(" | ")}`));
+    const results = await Promise.allSettled([reminders, digest]);
+    for (const result of results) if (result.status === "rejected") throw result.reason;
   }
 );
 

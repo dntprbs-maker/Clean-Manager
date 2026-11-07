@@ -5,6 +5,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
 import android.util.Log;
 
@@ -49,6 +50,15 @@ final class AppNotifications {
 
             Intent intent = new Intent(context, MainActivity.class);
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            String reminderId = "event_reminder".equals(type) ? data.get("reminderId") : null;
+            if (reminderId != null) {
+                intent.setData(new Uri.Builder().scheme("cleanmanager").authority("reminder")
+                        .appendPath(reminderId).build());
+                intent.putExtra("reminderEvent", data.get("eventId"));
+                intent.putExtra("reminderCompany", data.get("companyId"));
+                intent.putExtra("reminderOriginal", data.get("original"));
+                intent.putExtra("widgetDate", data.get("date"));
+            }
             int flags = PendingIntent.FLAG_UPDATE_CURRENT
                     | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? PendingIntent.FLAG_IMMUTABLE : 0);
             PendingIntent pendingIntent = PendingIntent.getActivity(context, 0, intent, flags);
@@ -62,8 +72,9 @@ final class AppNotifications {
                     .setPriority(NotificationCompat.PRIORITY_HIGH)
                     .setContentIntent(pendingIntent);
 
-            int notifId = Math.abs(new Random().nextInt());
-            NotificationManagerCompat.from(context).notify(notifId, builder.build());
+            NotificationManagerCompat manager = NotificationManagerCompat.from(context);
+            if (reminderId != null) manager.notify(reminderId, 0, builder.setOnlyAlertOnce(true).build());
+            else manager.notify(Math.abs(new Random().nextInt()), builder.build());
         } catch (SecurityException e) {
             // POST_NOTIFICATIONS 권한이 아직 없을 때(Android 13+) — 조용히 무시
             Log.w(TAG, "알림 권한 없음, 표시 생략", e);

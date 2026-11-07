@@ -24,15 +24,24 @@ messaging.onBackgroundMessage(payload => {
     body: d.body || "",
     icon: "/icon-192.png",
     badge: "/favicon-32.png",
-    tag: d.eventId || undefined,   // 같은 일정 알림은 하나로 합침
+    tag: d.reminderId || d.eventId || undefined,
+    renotify: false,
     data: d,
   };
-  self.registration.showNotification(title, options);
+  return self.registration.showNotification(title, options);
 });
 
 // 알림 클릭 시 앱 열기
 self.addEventListener("notificationclick", event => {
   event.notification.close();
+  const d = event.notification.data;
+  if (d?.type === "event_reminder") {
+    const params = new URLSearchParams({
+      reminderEvent: d.eventId, reminderCompany: d.companyId, widgetDate: d.date, reminderOriginal: d.original || "",
+    });
+    event.waitUntil(clients.openWindow("/?" + params));
+    return;
+  }
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then(list => {
       for (const c of list) { if (c.url && "focus" in c) return c.focus(); }

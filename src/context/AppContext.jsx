@@ -506,6 +506,21 @@ export function Provider({ children, loginUser, onLogout }) {
   // copyFrom: 기존 일정을 복사해 새 일정으로 등록할 때의 원본 일정.
   // editId가 없으므로 저장은 addEvent(신규)로 흘러가고, 폼 초기값만 원본에서 가져온다.
   const [modal,setModal]       = useState({open:false,date:null,editId:null,scope:"all",instanceEv:null,copyFrom:null});
+  const [reminderLink, setReminderLink] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("reminderEvent");
+    const company = params.get("reminderCompany");
+    const date = params.get("widgetDate");
+    const original = params.get("reminderOriginal") || "";
+    const validDate = value => {
+      const time = Date.parse(`${value}T00:00:00Z`);
+      return /^\d{4}-\d{2}-\d{2}$/.test(value || "") && Number.isFinite(time)
+        && new Date(time).toISOString().slice(0, 10) === value;
+    };
+    if (!id || id.includes("/") || company !== loginUser.companyId
+      || !validDate(date) || (original && !validDate(original))) return null;
+    return { id, date, original };
+  });
   const widgetDate = (() => {
   try {
     const raw = new URLSearchParams(window.location.search).get("widgetDate");
@@ -562,7 +577,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
   const principalKey = JSON.stringify([currentUser.uid,currentUser.role,currentUser.team,currentUser.memberships]);
   const [serverReportRows,setServerReportRows]=useState([]);
   const [serverConfirmedAt,setServerConfirmedAt]=useState(null);
-  const pinnedIds = [...new Set([detEv?.id, fieldReportEv?.id, modal.editId, modal.instanceEv?.id, modal.copyFrom?.id].filter(Boolean))].sort().join('|');
+  const pinnedIds = [...new Set([detEv?.id, fieldReportEv?.id, modal.editId, modal.instanceEv?.id, modal.copyFrom?.id, reminderLink?.id].filter(Boolean))].sort().join('|');
   const group = (name, specs, receive) => subscribeGroup(loginUser.companyId,
     specs.map(s => ({ db, ...s })), receive,
     state => setDataStates(prev => ({ ...prev, [name]: state })));
@@ -611,7 +626,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
         if(!active)return;
         const widgetRange=widgetLease?{from:widgetLease.from,to:widgetLease.to}:snapshotData?.sharedWidget?{from:snapshotData.sharedWidget.from,to:snapshotData.sharedWidget.to}:null;
         const sameWidget=JSON.stringify(widgetRange)===JSON.stringify(snapshotData?.sharedWidget?{from:snapshotData.sharedWidget.from,to:snapshotData.sharedWidget.to}:null);
-        const conditional=hasSnapshot&&sameWidget&&scopeKey&&knownRevision!==null?{knownRevision,scopeKey,deltaVersion:1}:{};
+        const conditional=!reminderLink&&hasSnapshot&&sameWidget&&scopeKey&&knownRevision!==null?{knownRevision,scopeKey,deltaVersion:1}:{};
         const refreshed={events:[...pendingWrites.current.events].slice(0,20),reports:[...pendingWrites.current.reports].slice(0,20)};
         const readRequest={full:fullEvents||currentScreen==='report_history',from:range.start,to:range.end,ranges:windows,eventIds:pinnedIds.split('|').filter(Boolean),...(widgetRange?{widgetRange}:{}),deltaVersion:1,...conditional,...(refreshed.events.length?{refreshEventIds:refreshed.events.map(([id])=>id)}:{}),...(refreshed.reports.length?{refreshReportIds:refreshed.reports.map(([id])=>id)}:{})};
         let {data}=await httpsCallable(functions,"appReadData")(readRequest);
@@ -637,6 +652,20 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
         setServerConfirmedAt(data.serverAt);
         setDataStates(prev=>({...prev,events:{ready:true,cached:false,error:null},reportRelated:{ready:true,cached:false,error:null}}));
         if(widgetLease && snapshotData?.sharedWidget) await commitWidgetRead(widgetLease,{...snapshotData.sharedWidget,revision:knownRevision,serverAt:data.serverAt});
+        if (active && reminderLink) {
+          const { id, original, date } = reminderLink;
+          const matches = [...(snapshotData.events || []), ...(snapshotData.instances || [])].filter(event => event.id === id);
+          const occurrence = original
+            ? matches.find(event => event.__occurrenceOnly && event._origDate === original && event.start === date)
+              || expandRecurring(matches.filter(event => !event.__occurrenceOnly), { start: date, end: date })
+                .find(event => event._origDate === original && event.start === date)
+            : matches.find(event => !event.__occurrenceOnly && event.start === date);
+          if (occurrence) setDetEv(occurrence);
+          const url = new URL(window.location.href);
+          for (const key of ["reminderEvent", "reminderCompany", "reminderOriginal", "widgetDate"]) url.searchParams.delete(key);
+          window.history.replaceState(window.history.state, "", url);
+          setReminderLink(null);
+        }
       } catch(err) {handleError(err);}
       finally {await cancelWidgetRead(widgetLease);inFlight=false;if(active&&queued){const forceAgain=queuedForce;queued=false;queuedForce=false;load(forceAgain);}}
     };
@@ -657,7 +686,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
     const resume=()=>{if(document.visibilityState==='visible')load();};
     document.addEventListener('visibilitychange',resume);window.addEventListener('online',resume);
     return ()=>{active=false;clearInterval(timer);unsub();document.removeEventListener('visibilitychange',resume);window.removeEventListener('online',resume);};
-  },[serverRead,principalKey,loginUser.companyId,fullEvents,currentScreen,range.start,range.end,windows,pinnedIds,retryGeneration,nativeSharing]);
+  },[serverRead,principalKey,loginUser.companyId,fullEvents,currentScreen,range.start,range.end,windows,pinnedIds,retryGeneration,nativeSharing,reminderLink]);
   useEffect(()=>{
     if(!serverRead)return;
     const rows=[...serverReportRows].sort((a,b)=>(b.date||'').localeCompare(a.date||'')||b.id.localeCompare(a.id));

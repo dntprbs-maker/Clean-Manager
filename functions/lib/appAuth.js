@@ -167,7 +167,7 @@ export const appWriteData = onCall({ region: 'asia-northeast3', maxInstances: 5 
       .filter(([key]) => !key.startsWith('__') && !['_recurring', '_origDate', '_hasException'].includes(key))
       .map(([key, item]) => [key, withoutUiFields(item)])) : data;
   const clean = withoutUiFields(Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'id' && !key.startsWith('_'))));
-  const eventKeys = new Set(['title', 'description', 'start', 'end', 'startTime', 'endTime', 'allDay', 'calId', 'place', 'contact', 'photos', 'exceptions', 'leaderComment', 'leaderCommentBy', 'leaderCommentAt', 'finance', 'completed', 'status', 'team', 'source', 'siteId', 'assignmentId', 'createdAt', 'createdBy']);
+  const eventKeys = new Set(['title', 'description', 'start', 'end', 'startTime', 'endTime', 'allDay', 'calId', 'place', 'url', 'contact', 'photos', 'exceptions', 'reminderModes', 'leaderComment', 'leaderCommentBy', 'leaderCommentAt', 'finance', 'completed', 'status', 'team', 'source', 'siteId', 'assignmentId', 'createdAt', 'createdBy']);
   const reportKeys = new Set(['eventId', 'title', 'date', 'startTime', 'calId', 'teamName', 'teamColor', 'reporter', 'startMemo', 'memo', 'beforePhotos', 'beforeTotal', 'afterPhotos', 'afterTotal', 'place', 'workStart', 'workEnd', 'status', 'createdAt', 'completedAt', 'price', 'duration', 'updatedAt']);
   if (Object.keys(clean).some(key => kind === 'events'
     ? !eventKeys.has(key) && !key.startsWith('repeat') && !/^exceptions\.\d{4}-\d{2}-\d{2}$/.test(key)
