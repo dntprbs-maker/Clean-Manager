@@ -5,6 +5,9 @@
 import { Capacitor } from "@capacitor/core";
 import { claimToken } from "./fcm";
 
+let registration = null;
+let registrationError = null;
+let generation = 0;
 let started = false;
 
 export async function setupNativePush(user) {
@@ -12,6 +15,7 @@ export async function setupNativePush(user) {
   if (!user?.uid || !user?.companyId) return;
   if (started) return;
   started = true;
+  const current = ++generation;
 
   try {
     const { PushNotifications } = await import("@capacitor/push-notifications");
@@ -20,24 +24,39 @@ export async function setupNativePush(user) {
     if (perm.receive === "prompt" || perm.receive === "prompt-with-rationale") {
       perm = await PushNotifications.requestPermissions();
     }
+    if (current !== generation) return;
     if (perm.receive !== "granted") {
       console.warn("[nativePush] 알림 권한 거부됨:", perm.receive);
       started = false;
       return;
     }
 
-    await PushNotifications.addListener("registration", (token) => {
+    const handle = await PushNotifications.addListener("registration", (token) => {
+      if (current !== generation) return;
       claimToken(user, token.value).catch((e) =>
         console.warn("[nativePush] 토큰 등록 실패:", e)
       );
     });
-    await PushNotifications.addListener("registrationError", (err) => {
+    if (current !== generation) { await handle.remove(); return; }
+    registration = handle;
+    const errorHandle = await PushNotifications.addListener("registrationError", (err) => {
       console.warn("[nativePush] 등록 실패:", err);
     });
+    if (current !== generation) { await errorHandle.remove(); return; }
+    registrationError = errorHandle;
 
     await PushNotifications.register();
   } catch (e) {
     console.warn("[nativePush] 설정 실패:", e);
-    started = false;
+    if (current === generation) await stopNativePush();
   }
+}
+
+export async function stopNativePush() {
+  generation++;
+  started = false;
+  const listeners = [registration, registrationError];
+  registration = null;
+  registrationError = null;
+  await Promise.allSettled(listeners.map(listener => listener?.remove()));
 }

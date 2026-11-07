@@ -24,6 +24,7 @@ import { HOLIDAYS, WD, fmt, pd, diff, add, fmtTime } from "../../lib/dateTime";
 import { toLunarLabel } from "../../lib/lunar";
 import { CALS, calById, REGULAR_CAL_ID } from "../../lib/calendars";
 import { REPEAT_OPTS } from "../../lib/repeat";
+import { REMINDER_LABELS, reminderModes, reminderTime } from "../../../functions/lib/eventReminderTimes";
 import { getReportStatus } from "../../lib/reports";
 import { parseEventText } from "../../lib/eventTextParser";
 import { isSuperAdmin, isAdminStaff, isLeaderOf, isMemberOf, myTeamNames, hasLeadershipSomewhere, teamsLabel } from "../../lib/membership";
@@ -1034,7 +1035,7 @@ export function DetailSheet() {
             {canEditEvent && !isRegular && <>
               <button onClick={handleCopy} title="이 일정을 복사해 새 일정 만들기"
                 className="p-2 rounded-full hover:bg-gray-100"><Copy size={19} className="text-gray-600"/></button>
-              <button onClick={handleEdit}
+              <button onClick={handleEdit} aria-label="일정 수정"
                 className="p-2 rounded-full hover:bg-gray-100"><Edit3 size={19} className="text-gray-600"/></button>
               <button onClick={handleDelete}
                 className="p-2 rounded-full hover:bg-gray-100"><Trash2 size={19} className="text-gray-600"/></button>
@@ -2176,6 +2177,7 @@ export function EventModal() {
   // 반복일정의 "이 일정만/이후 전체" 수정은 클릭한 회차(instanceEv)의 값으로 폼을 채운다.
   const editEv = editId ? ((scope && scope!=="all" && instanceEv) ? instanceEv : events.find(e=>e.id===editId)) : null;
   const [form,setForm]=useState(blank(date));
+  const [reminderPreviewNow, setReminderPreviewNow] = useState(0);
   const [errs,setErrs]=useState({});
   const [anim,setAnim]=useState(false);
   const [pasteText,setPasteText]=useState("");
@@ -2194,6 +2196,10 @@ export function EventModal() {
   const origForm=useRef(null);
   const tRef=useRef(null);
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
+  const setReminder = (mode, checked) => setForm(previous => {
+    const modes = reminderModes(previous);
+    return { ...previous, reminderModes: checked ? [...modes, mode] : modes.filter(item => item !== mode) };
+  });
   const isDirty=()=>origForm.current && JSON.stringify(form)!==JSON.stringify(origForm.current);
   const tryClose=()=>{ if((editId||financeDirty)&&isDirty()) setExitConfirm(true); else closeModal(); };
 
@@ -2220,6 +2226,7 @@ export function EventModal() {
       // 복사본은 원본 값으로 채우되 editId가 없어 저장 시 새 일정으로 등록된다
       const initForm = editEv ? {...blank(editEv.start || date),...editEv} : isCopy ? copyOf(copyFrom) : blank(date);
       setForm(initForm);
+      setReminderPreviewNow(Date.now());
       origForm.current = {...initForm};
       setExitConfirm(false);
       setErrs({});
@@ -2290,7 +2297,7 @@ export function EventModal() {
         const url = await getDownloadURL(sRef);
         return { name: p.name, url, path };
       }));
-      const finalForm = { ...form, photos: uploadedPhotos, ...(financeDirty?{finance:prepareEventFinance(form.finance)}:{}) };
+      const finalForm = { ...form, reminderModes: reminderModes(form), photos: uploadedPhotos, ...(financeDirty?{finance:prepareEventFinance(form.finance)}:{}) };
       if (editId) {
         if (scope && scope !== "all" && instanceEv) {
           await updateEventScoped(instanceEv, scope, { ...finalForm, id: editId });
@@ -2620,6 +2627,25 @@ export function EventModal() {
 
         {/* 날짜 & 시간 — 네이버 앱 스타일 */}
         <DateTimePicker form={form} set={set} errs={errs} lockRepeat={scope==="instance"} userId={currentUser.id || currentUser.uid}/>
+        <fieldset className="px-4 py-3 border-b border-gray-100">
+          <legend className="text-sm font-semibold text-gray-800">일정 시작 전 알림</legend>
+          <p className="mb-2 text-xs text-gray-500">
+            {form.allDay ? "종일 일정은 전날 정오에 알릴 수 있어요." : "한국시간 기준이에요. 반복 일정은 회차마다 계산해요."}
+          </p>
+          {Object.entries(REMINDER_LABELS).filter(([mode]) => !form.allDay || mode === "previousNoon").map(([mode, label]) => {
+            const selected = reminderModes(form);
+            const at = reminderTime(form, mode);
+            const preview = at == null ? "시작 날짜와 시간을 입력하세요"
+              : at <= reminderPreviewNow ? "이 회차의 알림 시각이 지났어요"
+              : new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }).format(at);
+            return <label key={mode} className="flex min-h-9 items-center gap-2 text-sm text-gray-800">
+              <input type="checkbox" checked={selected.includes(mode)}
+                onChange={e => setReminder(mode, e.target.checked)}/>
+              <span>{label}</span>
+              <span className="ml-auto text-right text-xs text-gray-500">{preview}</span>
+            </label>;
+          })}
+        </fieldset>
 
         {/* 주소 */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-100">

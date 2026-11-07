@@ -21,8 +21,8 @@ import {
 import { Capacitor } from "@capacitor/core";
 import { restoreSession, endSession, watchWidgetSession } from "./lib/appAuth";
 import { db, functions, storage } from "./firebase";
-import { enablePush, disablePush, listenForeground } from "./fcm";
-import { setupNativePush } from "./nativePush";
+import { enablePush, disablePush, listenForeground, unbindReminderPushToken } from "./fcm";
+import { setupNativePush, stopNativePush } from "./nativePush";
 import { collection, doc, setDoc, getDoc, getDocs, updateDoc, query, where, serverTimestamp } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
@@ -283,6 +283,8 @@ export default function App() {
   }, []);
 
   const handleLogout = async () => {
+    await stopNativePush();
+    try { await unbindReminderPushToken(); } catch { /* 기존 로그아웃 흐름 유지 */ }
     try { await disablePush(loginUser); } catch { /* 무시 */ } // 이 기기 토큰 제거 → 로그아웃 상태에선 알림 안 옴
     await endSession();
     setLoginUser(null);
