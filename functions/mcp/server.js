@@ -2,11 +2,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerEventTools } from "./tools/events.js";
 import { registerEmployeeTools } from "./tools/employees.js";
 import { registerTeamTools } from "./tools/teams.js";
+import { registerFinanceTools } from "./tools/finance.js";
 import { SCOPES, hasScope } from "./lib/agents.js";
 import { err } from "./lib/toolResult.js";
 
 // 도구별 필요 권한. 여기 없는 도구(직원·팀 관리)는 전부 admin 권한이 필요하다.
 export const TOOL_SCOPES = {
+  get_event_finance: SCOPES.FINANCE_READ,
+  set_event_finance: SCOPES.FINANCE_WRITE,
+  attach_event_photos: SCOPES.WRITE,
   export_hub_changes: SCOPES.READ,
   export_hub_events: SCOPES.READ,
   list_events: SCOPES.READ,
@@ -22,7 +26,7 @@ export const TOOL_SCOPES = {
 // 여러 개/휘발성이라 세션을 유지하지 않는 편이 단순하고 안전함).
 // agent: 인증 단계에서 확인된 AI(누구인지·권한). 권한 없는 도구는 목록에서도 숨긴다.
 export function createMcpServer(companyId, agent) {
-  const server = new McpServer({ name: "clean-manager", version: "1.1.0" }, { capabilities: {} });
+  const server = new McpServer({ name: "clean-manager", version: "1.2.0" }, { capabilities: {} });
   const register = server.registerTool.bind(server);
   server.registerTool = (name, config, handler) => {
     const need = TOOL_SCOPES[name] || SCOPES.ADMIN;
@@ -33,6 +37,7 @@ export function createMcpServer(companyId, agent) {
     });
   };
   registerEventTools(server, companyId);
+  registerFinanceTools(server, companyId);
   registerEmployeeTools(server, companyId);
   registerTeamTools(server, companyId);
   return server;

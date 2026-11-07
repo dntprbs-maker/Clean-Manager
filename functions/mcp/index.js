@@ -65,8 +65,8 @@ const loggingVerifier = {
 
 app.all(
   "/mcp",
-  express.json(),
   requireBearerAuth({ verifier: loggingVerifier, resourceMetadataUrl }),
+  express.json({ limit: '28mb' }),
   async (req, res) => {
     const companyId = MCP_COMPANY_ID.value();
     const agent = req.auth?.extra?.agent;

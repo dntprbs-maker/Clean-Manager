@@ -14,6 +14,8 @@ export const AGENT_KEY_PREFIX = "cmk_";
 
 // 권한(scope)
 export const SCOPES = {
+  FINANCE_READ: "finance:read",
+  FINANCE_WRITE: "finance:write",
   READ: "events:read",            // 일정 조회·검색
   WRITE: "events:write",          // 일정 등록·수정
   DELETE_REQUEST: "events:delete_request", // 삭제 "요청"만 (실제 삭제는 관리자 승인 후 별도 처리)

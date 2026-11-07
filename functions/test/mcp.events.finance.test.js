@@ -35,8 +35,8 @@ beforeEach(async () => {
   await db.doc(`companies/${CO}/events/ev1`).set({ title: "상암동 정기청소", start: "2026-10-30", end: "2026-10-30", calId: "cal1" });
 });
 
-async function connect() {
-  const server = createMcpServer(CO, OWNER_AGENT);
+async function connect(agent = OWNER_AGENT) {
+  const server = createMcpServer(CO, agent);
   const [a, b] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "t", version: "1" });
   await Promise.all([server.connect(a), client.connect(b)]);
@@ -111,4 +111,55 @@ test("정산 정보: 없는 일정이면 거부", async () => {
     eventId: "nope", revenue: 1, payMethod: "leader_lump", leaderPay: { amount: 1 },
   });
   assert.equal(r.isError, true);
+});
+
+test('청소비→인원별 지급→비용 순서로 입력해도 이전 값·식·지급상태를 보존하고 반복 입력은 중복되지 않는다',async()=>{
+  const {call}=await connect();
+  let r=await call('set_event_finance',{eventId:'ev1',revenue:'15000×37'});
+  assert.equal(r.data.revenue,555000);assert.equal(r.data.profit,null);assert.equal(r.data.paymentRecorded,false);
+  const group={headcount:4,unitAmount:'100000',status:'paid'};
+  r=await call('set_event_finance',{eventId:'ev1',memberPays:[group]});
+  assert.equal(r.data.payout,400000);assert.equal(r.data.headcount,4);assert.equal(r.data.profit,155000);
+  assert.equal(r.data.finance.revenueExpression,'15000×37');
+  await call('set_event_finance',{eventId:'ev1',extraCosts:[{label:'주차비',amount:'2500×2'}]});
+  await call('set_event_finance',{eventId:'ev1',memberPays:[{headcount:4,unitAmount:100000}]});
+  r=await call('get_event_finance',{eventId:'ev1'});
+  assert.equal(r.data.finance.memberPays.length,1);assert.equal(r.data.finance.memberPays[0].status,'paid');
+  assert.equal(r.data.extraCosts,5000);assert.equal(r.data.profit,150000);
+  await call('set_event_finance',{eventId:'ev1',revenue:600000});
+  const after=await call('get_event_finance',{eventId:'ev1'});assert.equal(after.data.profit,195000);assert.equal(after.data.finance.memberPays[0].amountExpression,'100000×4');
+});
+
+test('정산 전용 권한은 직원관리 권한을 주지 않으며 일반 일정 조회로 금액이 새지 않는다',async()=>{
+  const owner=await connect();await owner.call('set_event_finance',{eventId:'ev1',revenue:900000,leaderPay:{amount:400000}});
+  const plain=await connect({agentId:'plain',scopes:['events:read','events:write']});
+  assert.equal((await plain.call('get_event',{eventId:'ev1'})).data.finance,undefined);
+  assert.ok((await plain.call('get_event_finance',{eventId:'ev1'})).isError);
+  assert.ok((await plain.call('set_event_finance',{eventId:'ev1',revenue:1})).isError);
+  const finance=await connect({agentId:'fin',scopes:['finance:read','finance:write']});
+  assert.equal((await finance.call('get_event_finance',{eventId:'ev1'})).data.revenue,900000);
+  assert.ok((await finance.call('list_employees',{})).isError);
+  const reader=await connect({agentId:'reader',scopes:['finance:read']});assert.ok((await reader.call('set_event_finance',{eventId:'ev1',revenue:1})).isError);
+});
+
+test('잘못된 식·인원·합계와 다른 회사 일정은 거절하고 원본을 바꾸지 않는다',async()=>{
+  const {call}=await connect();const before=structuredClone(db._store.get(`companies/${CO}/events/ev1`));
+  for(const patch of [{revenue:'15000×'},{revenue:'1;process.exit()'},{revenue:100000,memberPays:[{headcount:4,unitAmount:100000,amount:1}]},{revenue:100000,memberPays:[{headcount:0,unitAmount:1000}]},{revenue:100000,memberPays:[{employeeName:'A',amount:1},{employeeName:'A',amount:2}]}])assert.ok((await call('set_event_finance',{eventId:'ev1',...patch})).isError);
+  await db.doc('companies/other/events/other').set({title:'다른회사'});
+  assert.ok((await call('set_event_finance',{eventId:'other',revenue:1})).isError);
+  assert.deepEqual(db._store.get(`companies/${CO}/events/ev1`),before);
+});
+
+test('사진 추가는 기존 사진을 보존하고 응답에 내부 경로를 내보내지 않는다',async()=>{
+  const {call}=await connect();await db.doc(`companies/${CO}/events/ev1`).update({photos:[{name:'old.jpg',url:'https://example.com/old.jpg',path:'private/old'}]});
+  const r=await call('attach_event_photos',{eventId:'ev1',photos:[{name:'../../new.png',dataBase64:Buffer.from('photo').toString('base64'),mimeType:'image/png'}]});
+  assert.equal(r.isError,false,r.text);assert.equal(r.data.photos.length,2);assert.ok(r.data.photos.every(p=>p.path===undefined));
+  assert.equal(db._store.get(`companies/${CO}/events/ev1`).photos[0].path,'private/old');
+  assert.ok(!Object.keys(bucket._files)[0].includes('/../'));
+});
+
+test('위험하거나 잘못된 사진은 저장 전에 차단한다',async()=>{
+  const {call}=await connect();
+  for(const photo of [{name:'x.svg',dataBase64:'YWJj',mimeType:'image/svg+xml'},{name:'bad.png',dataBase64:'!!!!',mimeType:'image/png'},{name:'x',url:'javascript:alert(1)'},{name:'x',url:'http://example.com/a'},{name:'x',url:'https://example.com/a',dataBase64:'YWJj'}])assert.ok((await call('attach_event_photos',{eventId:'ev1',photos:[photo]})).isError);
+  assert.equal(Object.keys(bucket._files).length,0);assert.equal(db._store.get(`companies/${CO}/events/ev1`).photos,undefined);
 });
