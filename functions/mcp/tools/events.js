@@ -5,6 +5,7 @@ import { expandRecurringForFeed } from "../../lib/recurring.js";
 import { buildHubFeed } from "../../lib/hubFeed.js";
 import { exportHubChanges } from "../../lib/hubChanges.js";
 import { ok, err } from "../lib/toolResult.js";
+import { SCOPES, hasScope } from '../lib/agents.js';
 
 async function loadTeamNameByCalId(companyId) {
   const snap = await getDb().collection(`companies/${companyId}/cals`).get();
@@ -40,7 +41,9 @@ export const TEST_TITLE_PREFIX = "[MCP시험] ";
 
 const audit = (agent) => ({ agentId: agent?.agentId || "unknown", label: agent?.label || "", at: new Date().toISOString() });
 
-function toView(ev, teamByCal) {
+const publicPhotos = photos => (photos || []).map(({ name, url }) => ({ name, url }));
+const canReadFinance = agent => hasScope(agent, SCOPES.FINANCE_READ) || hasScope(agent, SCOPES.FINANCE_WRITE) || hasScope(agent, SCOPES.ADMIN);
+function toView(ev, teamByCal, agent) {
   return {
     id: ev.id,
     title: ev.title,
@@ -59,7 +62,7 @@ function toView(ev, teamByCal) {
     createdBy: ev.mcpCreatedBy?.label || undefined,
     // 앱 화면과 같은 모양(name/url)만 내보낸다 — Storage 내부 path는 비공개 정보라 뺀다.
     photos: (ev.photos || []).length > 0 ? ev.photos.map((p) => ({ name: p.name, url: p.url })) : undefined,
-    finance: ev.finance || undefined,
+    finance: canReadFinance(agent) ? ev.finance || undefined : undefined,
   };
 }
 
@@ -67,26 +70,42 @@ function toView(ev, teamByCal) {
 // 앱 화면(CalendarCore.jsx)이 올릴 때 쓰는 것과 같은 경로 규칙(companies/{cid}/events/{eid}/...)
 // 에 저장해 같은 Storage 버킷·권한 규칙을 그대로 탄다.
 const PHOTO_SHAPE = z.object({
-  name: z.string().min(1).describe("파일 이름 (확장자 포함)"),
-  url: z.string().optional().describe("이미 업로드돼 있는 사진이면 그 URL"),
-  dataBase64: z.string().optional().describe("새로 올릴 사진의 base64 인코딩 데이터(데이터 URI 접두어 없이)"),
+  name: z.string().min(1).max(200).describe("파일 이름 (확장자 포함)"),
+  url: z.string().max(4096).optional().describe("이미 업로드돼 있는 사진이면 그 URL"),
+  dataBase64: z.string().max(14_000_000).optional().describe("새로 올릴 사진의 base64 인코딩 데이터(데이터 URI 접두어 없이)"),
   mimeType: z.string().optional().describe("dataBase64일 때 MIME 타입(예: image/jpeg). 생략 시 image/jpeg로 처리"),
 });
 
 async function uploadPhotos(companyId, eventId, photos) {
   if (!photos || photos.length === 0) return undefined;
+  if (photos.length > 20) throw Error('사진은 한 번에 20장까지 첨부할 수 있습니다.');
+  let totalBytes = 0;
+  const validated = photos.map(p => {
+    if (p.url && p.dataBase64) throw Error('사진 URL과 새 데이터 중 하나만 입력해주세요.');
+    if (p.url) { const url = new URL(p.url); if (url.protocol !== 'https:' || url.username || url.password) throw Error('사진 URL은 HTTPS 주소여야 합니다.'); return p; }
+    if (!p.dataBase64 || p.dataBase64.length > 14_000_000 || p.dataBase64.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(p.dataBase64)) throw Error('사진의 base64 데이터가 올바르지 않습니다.');
+    if (!['image/jpeg','image/png','image/webp','image/gif'].includes(p.mimeType || 'image/jpeg')) throw Error('JPG·PNG·WEBP·GIF 사진만 첨부할 수 있습니다.');
+    const buffer = Buffer.from(p.dataBase64,'base64'); totalBytes += buffer.length;
+    if(buffer.toString('base64')!==p.dataBase64)throw Error('사진의 base64 데이터가 올바르지 않습니다.');
+    if (!buffer.length || buffer.length > 10 * 1024 * 1024 || totalBytes > 20 * 1024 * 1024) throw Error('사진은 장당 10MB, 합계 20MB 이하여야 합니다.');
+    return { ...p, buffer };
+  });
   const bucket = getBucket();
-  return Promise.all(photos.map(async (p) => {
+  return Promise.all(validated.map(async (p) => {
     if (p.url) return { name: p.name, url: p.url };
     if (!p.dataBase64) throw new Error(`사진 "${p.name}"에 url도 dataBase64도 없습니다.`);
-    const buffer = Buffer.from(p.dataBase64, "base64");
-    const path = `companies/${companyId}/events/${eventId}/${Date.now()}_${p.name}`;
+    const buffer = p.buffer;
+    const safeName = p.name.replace(/[^\p{L}\p{N}_. -]/gu,'_').replace(/^\.+/,'') || 'photo';
+    const path = `companies/${companyId}/events/${eventId}/${randomUUID()}_${safeName}`;
     const file = bucket.file(path);
     const token = randomUUID();
     await file.save(buffer, {
       metadata: { contentType: p.mimeType || "image/jpeg", metadata: { firebaseStorageDownloadTokens: token } },
     });
-    const url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+    const emulator = process.env.FIREBASE_STORAGE_EMULATOR_HOST;
+    if (emulator && !/^127\.0\.0\.1:\d+$/.test(emulator)) throw Error('잘못된 로컬 저장소 주소입니다.');
+    const origin = emulator ? `http://${emulator}` : 'https://firebasestorage.googleapis.com';
+    const url = `${origin}/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
     return { name: p.name, url, path };
   }));
 }
@@ -108,7 +127,7 @@ export function registerEventTools(server, companyId) {
     return ok(buildHubFeed(snap.docs.map(d=>({id:d.id,...d.data(),__hubUpdatedAt:d.updateTime?.toDate().toISOString() || null})), teams, args, reports.docs.map(d=>d.data())));
   });
   // 기간 안의 (반복 전개된) 일정 + 팀 필터
-  async function eventsInRange({ start, end, team }) {
+  async function eventsInRange({ start, end, team }, agent) {
     const snap = await eventsCol().get();
     const events = snap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
@@ -122,7 +141,7 @@ export function registerEventTools(server, companyId) {
     const filtered = team
       ? inRange.filter((ev) => ev.team === team || teamByCal[ev.calId] === team)
       : inRange;
-    return filtered.map((ev) => toView(ev, teamByCal));
+    return filtered.map((ev) => toView(ev, teamByCal, agent));
   }
 
   server.registerTool(
@@ -136,7 +155,7 @@ export function registerEventTools(server, companyId) {
         team: z.string().optional().describe("팀 이름으로 필터링 (선택)"),
       },
     },
-    async ({ start, end, team }) => ok(await eventsInRange({ start, end, team }))
+    async ({ start, end, team }, extra) => ok(await eventsInRange({ start, end, team }, extra?.agent))
   );
 
   server.registerTool(
@@ -153,12 +172,12 @@ export function registerEventTools(server, companyId) {
         onlyTest: z.boolean().optional().describe("true면 MCP 시험 일정만"),
       },
     },
-    async ({ date, start, end, query, team, onlyTest }) => {
+    async ({ date, start, end, query, team, onlyTest }, extra) => {
       const s0 = date || start;
       if (!s0) return err("date 또는 start가 필요합니다.");
       const e0 = date || end || s0;
       if (e0 < s0) return err("end는 start보다 빠를 수 없습니다.");
-      let list = await eventsInRange({ start: s0, end: e0, team });
+      let list = await eventsInRange({ start: s0, end: e0, team }, extra?.agent);
       if (query) {
         const q = query.toLowerCase();
         list = list.filter((ev) => [ev.title, ev.place, ev.description, ev.contact].some((v) => (v || "").toLowerCase().includes(q)));
@@ -175,11 +194,11 @@ export function registerEventTools(server, companyId) {
       description: "일정 id로 원본 일정 1건을 조회한다.",
       inputSchema: { eventId: z.string().describe("일정 id") },
     },
-    async ({ eventId }) => {
+    async ({ eventId }, extra) => {
       const snap = await eventsCol().doc(eventId).get();
       if (!snap.exists || snap.data().status === "deleted") return err(`일정 ${eventId}을 찾을 수 없습니다.`);
       const teamByCal = await loadTeamNameByCalId(companyId);
-      return ok(toView({ id: eventId, ...snap.data() }, teamByCal));
+      return ok(toView({ id: eventId, ...snap.data() }, teamByCal, extra?.agent));
     }
   );
 
@@ -226,7 +245,7 @@ export function registerEventTools(server, companyId) {
       if (uploadedPhotos) data.photos = uploadedPhotos;
       if (test) data.mcpTest = true;
       await docRef.set(data);
-      return ok({ id: docRef.id, ...data });
+      return ok({ id: docRef.id, ...data, ...(data.photos ? { photos: publicPhotos(data.photos) } : {}) });
     }
   );
 
@@ -287,60 +306,29 @@ export function registerEventTools(server, companyId) {
         }
       }
       await docRef.update(next);
-      return ok({ id: eventId, updated: next });
+      return ok({ id: eventId, updated: { ...next, ...(next.photos ? { photos: publicPhotos(next.photos) } : {}) } });
     }
   );
 
-  server.registerTool(
-    "set_event_finance",
-    {
-      title: "정산 정보 입력",
-      description:
-        "일정 1건의 정산(금액) 정보를 전체 교체한다 — 부분 수정이 아니라 매번 전체 값을 다시 보낸다. " +
-        "앱 상세 화면의 '정산 정보' 섹션(접으면 최종 손익 1줄, 펼치면 전체)과 같은 데이터다. " +
-        "사장·관리팀만 보이는 민감 정보라 이 도구는 admin 권한이 필요하다. " +
-        "손익 = revenue − (payMethod가 leader_lump면 leaderPay.amount, member_direct면 memberPays 합) − extraCosts 합.",
-      inputSchema: {
-        eventId: z.string().describe("정산 정보를 넣을 일정 id"),
-        revenue: z.number().nonnegative().describe("청소비(매출), 원"),
-        payMethod: z.enum(["leader_lump", "member_direct"]).describe("leader_lump=팀장 일괄 지급, member_direct=팀원 직접 지급"),
-        leaderPay: z.object({
-          amount: z.number().nonnegative(),
-          status: z.enum(["pending", "paid"]).optional(),
-        }).optional().describe("payMethod=leader_lump일 때 팀장에게 지급할(한) 금액"),
-        memberPays: z.array(z.object({
-          employeeName: z.string(),
-          amount: z.number().nonnegative(),
-        })).optional().describe("payMethod=member_direct일 때 팀원별 지급액"),
-        extraCosts: z.array(z.object({
-          label: z.string(),
-          amount: z.number().nonnegative(),
-        })).optional().describe("기타 현장 비용(주차비 등), 항목+금액"),
-        workers: z.array(z.object({
-          name: z.string(),
-          role: z.enum(["leader", "member"]).optional(),
-        })).optional().describe("이 현장에 참여한 작업자 목록"),
-      },
-    },
-    async ({ eventId, ...finance }, extra) => {
-      const docRef = eventsCol().doc(eventId);
-      const snap = await docRef.get();
-      if (!snap.exists || snap.data().status === "deleted") return err(`일정 ${eventId}을 찾을 수 없습니다.`);
-      if (finance.payMethod === "leader_lump" && !finance.leaderPay) {
-        return err("payMethod가 leader_lump면 leaderPay가 필요합니다.");
-      }
-      if (finance.payMethod === "member_direct" && !(finance.memberPays?.length)) {
-        return err("payMethod가 member_direct면 memberPays가 1건 이상 필요합니다.");
-      }
-      await docRef.update({ finance, mcpUpdatedBy: audit(extra?.agent) });
-      const payOut = finance.payMethod === "member_direct"
-        ? finance.memberPays.reduce((s, p) => s + p.amount, 0)
-        : finance.leaderPay.amount;
-      const costsSum = (finance.extraCosts || []).reduce((s, c) => s + c.amount, 0);
-      const profit = finance.revenue - payOut - costsSum;
-      return ok({ id: eventId, finance, profit });
-    }
-  );
+  server.registerTool('attach_event_photos', {
+    title: '현장 일정에 사진 추가', description: '기존 사진을 지우지 않고 새 사진만 추가한다. 업로드 데이터는 base64로 전달하거나 기존 HTTPS URL을 쓴다. 이후 get_event로 사진 URL을 확인한다.',
+    inputSchema: { eventId: z.string().min(1), photos: z.array(PHOTO_SHAPE).min(1).max(20) },
+  }, async ({ eventId, photos }, extra) => {
+    const ref = eventsCol().doc(eventId), original = await ref.get();
+    if (!original.exists || original.data().status === 'deleted') return err('일정을 찾을 수 없습니다.');
+    if ((original.data().photos || []).length + photos.length > 100) return err('일정당 사진은 100장까지 첨부할 수 있습니다.');
+    try {
+      const uploaded = await uploadPhotos(companyId,eventId,photos);
+      const merged = await getDb().runTransaction(async transaction => {
+        const snap = await transaction.get(ref); if (!snap.exists || snap.data().status === 'deleted') throw Error('일정을 찾을 수 없습니다.');
+        const all = [...(snap.data().photos || [])];
+        for (const photo of uploaded) if (!all.some(old => old.url === photo.url)) all.push(photo);
+        if (all.length > 100) throw Error('일정당 사진은 100장까지 첨부할 수 있습니다.');
+        transaction.set(ref,{photos:all,mcpUpdatedBy:audit(extra?.agent)},{merge:true});return all;
+      });
+      return ok({eventId,photos:publicPhotos(merged),added:uploaded.length});
+    } catch(error) { return err(`사진 첨부 실패: ${error.message}`); }
+  });
 
   // 삭제는 AI가 직접 하지 않는다. 요청만 남기고, 실제 삭제는 관리자가 확인 후 처리한다.
   // (구글 캘린더에서 온 일정은 앱에서 지워도 다음 동기화 때 되살아날 수 있어 더더욱 사람 확인이 필요)

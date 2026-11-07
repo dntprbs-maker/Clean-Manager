@@ -10,8 +10,12 @@ test('authentication migration scopes only its functions and includes indexes',(
 test('unknown index body or unrelated source changes keep broad fallback',()=>{
   assert.ok(deploymentTargets(['functions/index.js'],'+export const newFeature = 1;').startsWith('functions,'));
   assert.ok(deploymentTargets(['functions/index.js'],"+export { unknownFunction } from './lib/appAuth.js';").startsWith('functions,'));
-  assert.ok(deploymentTargets(['functions/mcp/server.js']).startsWith('functions,'));
+  assert.equal(deploymentTargets(['functions/mcp/server.js']),'functions:mcp');
   assert.ok(deploymentTargets(['functions/lib/appAuth.js'],'',false).startsWith('functions,'));
+});
+
+test('MCP photo/finance changes do not redeploy unrelated app, calendar, or rules',()=>{
+  assert.equal(deploymentTargets(['functions/mcp/tools/events.js','functions/mcp/tools/finance.js','functions/lib/moneyExpression.js','src/components/shared/PhotoLightbox.jsx']),'functions:mcp');
 });
 test('test and rules changes alone do not overwrite production functions',()=>{
   assert.equal(deploymentTargets(['functions/test/appAuth.test.js','firestore.rules']),'firestore:rules,firestore:indexes');

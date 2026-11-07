@@ -4,6 +4,8 @@ import { useState, useMemo, useEffect } from "react";
 import { X, Plus, Trash2, TrendingUp, TrendingDown } from "lucide-react";
 import { computeFinanceSummary, groupByMonth, filterByPeriod } from "../../lib/finance";
 import { useC } from "../../context/AppContext";
+import { MoneyExpressionInput } from '../../components/shared/MoneyExpressionInput';
+import { normalizeMoneyInput } from '../../../functions/lib/moneyExpression.js';
 
 const won = n => `${Number(n || 0).toLocaleString()}원`;
 
@@ -84,10 +86,10 @@ export function FinanceScreen() {
                 style={{background: t.type === "income" ? "#ecfdf5" : "#fff1f2"}}>
                 {t.type === "income" ? <TrendingUp size={16} className="text-emerald-600"/> : <TrendingDown size={16} className="text-rose-600"/>}
               </div>
-              <div className="flex-1 min-w-0">
+              <button type="button" aria-label={`${t.category || '미분류'} 금액 수정`} onClick={() => setFinanceModal({open:true,editId:t.id})} className="flex-1 min-w-0 text-left">
                 <p className="text-sm font-bold text-gray-900 truncate">{t.category || "미분류"}</p>
                 <p className="text-xs text-gray-400">{t.date}{t.memo ? ` · ${t.memo}` : ""}</p>
-              </div>
+              </button>
               <p className="text-sm font-extrabold shrink-0" style={{color: t.type === "income" ? "#059669" : "#e11d48"}}>
                 {t.type === "income" ? "+" : "-"}{won(t.amount)}
               </p>
@@ -112,24 +114,25 @@ export function FinanceScreen() {
 }
 
 // ── 수입·지출 등록 모달 ───────────────────────────────────────────────
-export function FinanceFormModal() {
-  const { financeModal, setFinanceModal, addTransaction } = useC();
-  const [type, setType] = useState("income");
-  const [date, setDate] = useState(seoulToday());
-  const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState("");
-  const [memo, setMemo] = useState("");
-
-  useEffect(() => {
-    if (financeModal.open) { setType("income"); setDate(seoulToday()); setAmount(""); setCategory(""); setMemo(""); }
-  }, [financeModal.open]);
-
-  if (!financeModal.open) return null;
+function FinanceEditor({ initial }) {
+  const { setFinanceModal, addTransaction, updateTransaction } = useC();
+  const [type, setType] = useState(initial?.type || 'income');
+  const [date, setDate] = useState(initial?.date || seoulToday());
+  const [amount, setAmount] = useState(initial?.amount ?? '');
+  const [amountExpression,setAmountExpression] = useState(initial?.amountExpression || '');
+  const [category, setCategory] = useState(initial?.category || '');
+  const [memo, setMemo] = useState(initial?.memo || '');
+  const [saving,setSaving] = useState(false), [error,setError] = useState('');
   const close = () => setFinanceModal({ open: false, editId: null });
-  const submit = () => {
-    if (!amount || !category.trim()) return;
-    addTransaction({ type, date, amount: Number(amount), category: category.trim(), memo: memo.trim() });
-    close();
+  const submit = async () => {
+    if (saving || !category.trim()) return;
+    try {
+      const parsed=normalizeMoneyInput(amount,amountExpression,{label:'금액',required:true});
+      const data={type,date,amount:parsed.amount,amountExpression:parsed.expression||null,category:category.trim(),memo:memo.trim()};
+      setSaving(true);setError('');
+      if(initial)await updateTransaction(initial.id,data);else await addTransaction(data);
+      close();
+    } catch(failure) { setError(failure.message || '저장하지 못했습니다. 다시 시도해주세요.');setSaving(false); }
   };
 
   return (
@@ -137,7 +140,7 @@ export function FinanceFormModal() {
       <div className="absolute inset-0 bg-black/40" onClick={close} />
       <div className="relative bg-white rounded-t-3xl p-5 shadow-2xl flex flex-col gap-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-gray-900">수입·지출 등록</h2>
+          <h2 className="text-lg font-bold text-gray-900">수입·지출 {initial?'수정':'등록'}</h2>
           <button onClick={close} className="p-2 -mr-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100">
             <X size={22}/>
           </button>
@@ -164,9 +167,9 @@ export function FinanceFormModal() {
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1">금액</label>
-          <input type="number" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value)}
-            placeholder="예: 500000"
-            className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
+          <MoneyExpressionInput label="수입·지출 금액" value={amount} expression={amountExpression} disabled={saving}
+            onChange={(value,expression)=>{setAmount(value);setAmountExpression(expression||'');}} placeholder="예: 15000×37"
+            className="py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1">항목</label>
@@ -180,12 +183,21 @@ export function FinanceFormModal() {
             className="w-full py-3 px-4 rounded-xl bg-gray-50 border border-gray-200 text-sm outline-none focus:border-blue-500"/>
         </div>
 
-        <button onClick={submit} disabled={!amount || !category.trim()}
+        {error&&<p role="alert" className="text-xs text-red-600">{error}</p>}
+        <button onClick={submit} disabled={saving || amount==='' || !category.trim()}
           className="w-full py-3 rounded-xl text-sm font-bold text-white mt-1 disabled:opacity-40"
           style={{background: "linear-gradient(135deg,#1a56db,#2563eb)"}}>
-          등록
+          {saving?'저장 중…':initial?'수정 저장':'등록'}
         </button>
       </div>
     </div>
   );
+}
+
+export function FinanceFormModal() {
+  const {financeModal,transactions}=useC();
+  if(!financeModal.open)return null;
+  const initial=financeModal.editId?transactions.find(row=>row.id===financeModal.editId):null;
+  if(financeModal.editId&&!initial)return null;
+  return <FinanceEditor key={financeModal.editId||'new'} initial={initial}/>;
 }

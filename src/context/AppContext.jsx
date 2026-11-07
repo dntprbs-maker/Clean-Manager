@@ -851,7 +851,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
     return setDoc(ref, { ...t, id: ref.id, createdBy: myUserId, createdAt: new Date().toISOString() }).then(()=>setFinanceMonths(prev=>[...new Set([...prev,(t.date||"").slice(0,7)])]));
   }, [companyRef, myUserId]);
   const updateTransaction = useCallback((id, patch) => {
-    updateDoc(doc(companyRef, "transactions", id), patch);
+    return updateDoc(doc(companyRef, "transactions", id), patch);
   }, [companyRef]);
   const deleteTransaction = useCallback(id => {
     deleteDoc(doc(companyRef, "transactions", id));

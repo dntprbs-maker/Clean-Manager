@@ -38,7 +38,7 @@ if (import.meta.env.VITE_USE_EMULATORS === 'true') {
   connectFirestoreEmulator(db, '127.0.0.1', Number(import.meta.env.VITE_FIRESTORE_EMULATOR_PORT || 8080));
   connectAuthEmulator(auth, `http://127.0.0.1:${Number(import.meta.env.VITE_AUTH_EMULATOR_PORT || 9099)}`, { disableWarnings: true });
   connectFunctionsEmulator(functions, '127.0.0.1', Number(import.meta.env.VITE_FUNCTIONS_EMULATOR_PORT || 5001));
-  connectStorageEmulator(storage, '127.0.0.1', 9199);
+  connectStorageEmulator(storage, '127.0.0.1', Number(import.meta.env.VITE_STORAGE_EMULATOR_PORT || 9199));
 }
 
 // FCM 푸시 알림 — 브라우저 지원 시에만 messaging 인스턴스 생성
