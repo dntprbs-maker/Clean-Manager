@@ -31,7 +31,7 @@ const db = getFirestore();
 const REGION = "asia-northeast3";
 const DOC = "companies/{companyId}/events/{eventId}";
 const OPENROUTER_API_KEY = defineSecret("OPENROUTER_API_KEY");
-const AI_MODEL = "openai/gpt-4o";
+const AI_MODEL = "openai/gpt-6-luna";
 
 // 시간 표시 도우미 (HH:MM → 오전/오후 h:mm)
 function fmtTime(t) {
