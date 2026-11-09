@@ -66,10 +66,11 @@ import {
   TeamScheduleScreen, DashboardScreen, NoticeScreen, ActivityLogScreen,
   ExternalLinksScreen, CompanySettingsModal, NotificationSettingsModal,
 } from "./features/misc/MiscScreens";
+import { ReceivedSchedules, ScheduleInviteEditor } from "./features/calendar/SharedSchedule";
 
 function AppInner() {
   const {
-    currentScreen, setCurrentScreen, currentUser, isDemo,
+    currentScreen, setCurrentScreen, currentUser, isDemo, cals, teams,
     modal, closeModal, detEv, setDetEv, fieldReportEv, setFieldReportEv,
     drawer, setDrawer, searchOpen, setSearchOpen,
     empModal, setEmpModal,
@@ -213,6 +214,15 @@ function AppInner() {
       )}
       {currentScreen === "employees"     && <EmployeeListScreen/>}
       {currentScreen === "team_schedule" && <TeamScheduleScreen/>}
+      {currentScreen === "received_schedules" && !isDemo && <ReceivedSchedules key={currentUser.uid}/>}
+      {currentScreen === "share_calendars" && !isDemo && currentUser.role === "최고관리자" &&
+        <section className="flex-1 overflow-y-auto p-5">
+          <h2 className="mb-4 text-lg font-bold">캘린더 공유 관리</h2>
+          {cals.map(cal => <details key={cal.id} className="border-b py-3">
+            <summary>{cal.label || cal.name}</summary>
+            <ScheduleInviteEditor calendarId={cal.id} teams={teams}/>
+          </details>)}
+        </section>}
       {currentScreen === "dashboard"     && <DashboardScreen/>}
       {currentScreen === "notice"        && <NoticeScreen/>}
       {currentScreen === "activity_log"  && <ActivityLogScreen/>}
@@ -283,7 +293,7 @@ export default function App() {
   }, []);
 
   const handleLogout = async () => {
-    try { await disablePush(loginUser); } catch { /* 무시 */ } // 이 기기 토큰 제거 → 로그아웃 상태에선 알림 안 옴
+    try { if (loginUser?.companyId) await disablePush(loginUser); } catch { /* 무시 */ } // 이 기기 토큰 제거 → 로그아웃 상태에선 알림 안 옴
     await endSession();
     setLoginUser(null);
     setAuthState("login");
@@ -303,6 +313,12 @@ export default function App() {
     );
   }
 
+  if (loginUser?.companyId === "") return (
+    <main className="mx-auto flex min-h-screen max-w-sm flex-col bg-white">
+      <button className="self-end p-4 text-sm text-gray-700" onClick={handleLogout}>로그아웃</button>
+      <ReceivedSchedules key={loginUser.uid}/>
+    </main>
+  );
   return (
     <Provider loginUser={loginUser} onLogout={handleLogout}>
       <AppInner/>

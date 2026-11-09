@@ -6,6 +6,7 @@ export class AppAuthError extends Error {
 }
 const fail = (code, message) => { throw new AppAuthError(code, message); };
 const active = d => d && d.status !== 'deleted';
+const accountCompany = data => data.companyId ?? '';
 const hash = s => createHash('sha256').update(s).digest('hex');
 const equal = (a, b) => timingSafeEqual(Buffer.from(hash(String(a))), Buffer.from(hash(String(b))));
 const safeUser = (data, uid, company, kind) => {
@@ -53,11 +54,15 @@ export function canViewWidgetEvent(event, principal, cals, assignments) {
   return membership.includes(cal?.label) || !!cal?.personal || (event.source === 'regular' && ownAssignments.has(event.assignmentId));
 }
 
-export async function verifyAppPrincipal(db, claims) {
-  if (!claims || !['admin', 'staff'].includes(claims.cmk) || !claims.cmid || !claims.cmCompany) fail('unauthenticated', '다시 로그인해주세요.');
+export async function verifyAppPrincipal(db, claims, { allowIndependent = false } = {}) {
+  if (!claims || !['admin', 'staff'].includes(claims.cmk) || !claims.cmid || typeof claims.cmCompany !== 'string') fail('unauthenticated', '다시 로그인해주세요.');
   const snap = await db.doc(`${claims.cmk === 'admin' ? 'admins' : 'staffs'}/${claims.cmid}`).get();
   const data = snap.data();
-  if (!active(data) || !data.pw || data.companyId !== claims.cmCompany || data.authVersion !== claims.cmv) fail('unauthenticated', '로그인이 만료되었습니다.');
+  if (!active(data) || !data.pw || !claims.cmv || accountCompany(data) !== claims.cmCompany || data.authVersion !== claims.cmv) fail('unauthenticated', '로그인이 만료되었습니다.');
+  if (!claims.cmCompany) {
+    if (!allowIndependent || claims.cmk !== 'staff') fail('permission-denied', '회사 소속 계정이 필요합니다.');
+    return { user: safeUser({ ...data, companyId: '' }, snap.id, {}, 'staff'), master: false, kind: 'staff', claims };
+  }
   const company = (await db.doc(`companies/${data.companyId}`).get()).data();
   if (!active(company)) fail('permission-denied', '사용할 수 없는 회사입니다.');
   const config = (await db.doc('appAuthConfig/master').get()).data() || {};
@@ -108,16 +113,18 @@ export function createAppAuthService({ db, issueToken, now = Date.now }) {
       }
       return live;
     });
-    const company = (await db.doc(`companies/${data.companyId}`).get()).data();
+    const companyId = accountCompany(data);
+    if (!companyId && kind !== 'staff') fail('permission-denied', '사용할 수 없는 회사입니다.');
+    const company = companyId ? (await db.doc(`companies/${companyId}`).get()).data() : {};
     if (!active(company)) fail('permission-denied', '사용할 수 없는 회사입니다.');
     const config = (await db.doc('appAuthConfig/master').get()).data() || {};
-    const claims = { cmCompany: data.companyId, cmid: doc.id, cmk: kind, cmv: data.authVersion,
+    const claims = { cmCompany: companyId, cmid: doc.id, cmk: kind, cmv: data.authVersion,
       cmMaster: kind === 'admin' && Array.isArray(config.accountIds) && config.accountIds.includes(doc.id) };
     const token = await issueToken(`cm_${kind}_${doc.id}`, claims);
-    return { token, user: safeUser(data, doc.id, company, kind), master: claims.cmMaster };
+    return { token, user: safeUser({ ...data, companyId }, doc.id, company, kind), master: claims.cmMaster };
   }
   async function restore(claims) {
-    const { user, master } = await verifyAppPrincipal(db, claims);
+    const { user, master } = await verifyAppPrincipal(db, claims, { allowIndependent: true });
     return { user, master };
   }
   return async function execute(input, auth, ip) {
@@ -127,7 +134,7 @@ export function createAppAuthService({ db, issueToken, now = Date.now }) {
       if (principal.kind !== 'staff') return input.action === 'companies' ? { companies: [] } : fail('permission-denied', '직원 계정으로 로그인해주세요.');
       const own = (await db.doc(`staffs/${principal.user.uid}`).get()).data();
       const found = await accounts(own.phone);
-      const eligible = found.docs.filter(d => d.data().pw && equal(d.data().pw, own.pw));
+      const eligible = found.docs.filter(d => d.data().companyId && d.data().pw && equal(d.data().pw, own.pw));
       if (input.action === 'switch') {
         const target = eligible.find(d => d.data().companyId === input.companyId);
         if (!target) fail('permission-denied', '대상 회사 계정으로 다시 로그인해주세요.');
@@ -175,6 +182,7 @@ export function createAppAuthService({ db, issueToken, now = Date.now }) {
       await db.runTransaction(async tx => {
         const live = (await tx.get(target.ref)).data();
         if (!active(live) || live.pw) fail('failed-precondition', '이미 설정되었습니다. 다시 로그인해주세요.');
+        if (!live.companyId) fail('failed-precondition', '이미 설정된 개인 회원 계정만 로그인할 수 있습니다.');
         tx.set(target.ref, { pw: password, authVersion: randomUUID() }, { merge: true });
         tx.set(db.doc(`companies/${live.companyId}/users/${target.id}`), { pw: password }, { merge: true });
       });
@@ -185,15 +193,16 @@ export function createAppAuthService({ db, issueToken, now = Date.now }) {
     // password to grant access to another company's account with same phone.
     const valid = docs.filter(d => d.data().pw && equal(d.data().pw, password));
     if (!valid.length) fail('unauthenticated', '아이디 또는 비밀번호를 확인해주세요.');
-    if (!companyId && valid.length > 1) {
+    if (companyId === undefined && valid.length > 1) {
       const companies = [];
       for (const d of valid) {
-        const c = (await db.doc(`companies/${d.data().companyId}`).get()).data();
-        if (active(c)) companies.push({ companyId: d.data().companyId, companyName: c.name || '클린메니져' });
+        const id = accountCompany(d.data());
+        const c = id ? (await db.doc(`companies/${id}`).get()).data() : { name: '개인 회원' };
+        if (active(c)) companies.push({ companyId: id, companyName: c.name || '클린메니져' });
       }
       return { companies };
     }
-    const target = companyId ? valid.find(d => d.data().companyId === companyId) : valid[0];
+    const target = companyId === undefined ? valid[0] : valid.find(d => accountCompany(d.data()) === companyId);
     if (!target) fail('permission-denied', '소속 회사를 확인해주세요.');
     return session(target, kind, password);
   };

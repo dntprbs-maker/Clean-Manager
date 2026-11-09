@@ -69,6 +69,7 @@ export async function restoreSession() {
 export async function syncWidgetSession(user) {
   if (!Capacitor.isNativePlatform() || !auth.currentUser || !user) return;
   try {
+    if (!user.companyId) { await WidgetSession.clearSession(); return; }
     await WidgetSession.setSession({ idToken: await auth.currentUser.getIdToken(), refreshToken: auth.currentUser.refreshToken, companyId: user.companyId, userId: auth.currentUser.uid });
   } catch {
     console.warn('[WidgetSession] 위젯 인증을 위해 최신 앱 업데이트가 필요합니다.');

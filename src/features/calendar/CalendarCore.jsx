@@ -34,6 +34,7 @@ import { openLightbox } from "../../components/shared/PhotoLightbox";
 import { askRecurringScope } from "../../components/shared/RecurringScopeSheet";
 import { RepeatToggleButton, RepeatPanel, WheelPicker } from "../../components/shared/RepeatPicker";
 import { RegularCleaningDetailBody } from "../regular-cleaning/RegularCleaningDetailBody";
+import { ScheduleInviteEditor } from "./SharedSchedule";
 
 // ── 연속 일정 레이아웃 알고리즘 ──────────────────────────────────
 export function buildLayout(events, wk) {
@@ -940,7 +941,7 @@ export function CalendarView() {
 
 // ── 이벤트 상세 Bottom Sheet ──────────────────────────────────────
 export function DetailSheet() {
-  const { detEv, setDetEv, deleteEvent, deleteEventScoped, openModal, openCopyModal, setFieldReportEv, currentUser, cals, updateLeaderComment, reports } = useC();
+  const { detEv, setDetEv, deleteEvent, deleteEventScoped, openModal, openCopyModal, setFieldReportEv, currentUser, cals, updateLeaderComment, reports, isDemo, teams } = useC();
   const [vis,setVis]=useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [savedComment, setSavedComment] = useState("");
@@ -1043,6 +1044,8 @@ export function DetailSheet() {
         </div>
 
         <div className="flex-1 overflow-y-auto pb-24 max-h-[80vh]">
+        {!isDemo && isSuperAdmin(currentUser) && <ScheduleInviteEditor
+          key={`${detEv.id}:${detEv._origDate || ""}`} eventId={detEv.id} day={detEv._origDate} teams={teams}/>}
         {isRegular ? <RegularCleaningDetailBody detEv={detEv} cal={cal}/> : <>
           {/* 담당팀 */}
           <div className="flex items-center px-5 py-4 border-b border-gray-50 gap-1">
@@ -1375,7 +1378,7 @@ export function BottomTabBar() {
 
 // ── 사이드 드로어 (스와이프 열기/닫기 지원) ───────────────────────
 export function SideDrawer() {
-  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, setNotificationSettingsModal, onLogout, assignments, extraCalFilter, setExtraCalFilterModal } = useC();
+  const { drawer, setDrawer, cals, toggleCal, currentUser, setCurrentUser, loginUser, setCurrentScreen, users, notices, setCompanySettingsModal, setNotificationSettingsModal, onLogout, assignments, extraCalFilter, setExtraCalFilterModal, isDemo } = useC();
   const [pwModal, setPwModal] = useState(false);
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -1596,6 +1599,20 @@ export function SideDrawer() {
               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100 transition-colors">
               <MapPin size={20} className="text-emerald-500" />
               <span className="text-sm font-medium text-gray-700 flex-1 text-left">정기청소 근무관리</span>
+            </button>
+          )}
+          {!isDemo && isSuperAdmin(currentUser) && (
+            <button onClick={() => { setCurrentScreen("share_calendars"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100">
+              <Calendar size={20} className="text-indigo-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">캘린더 공유 관리</span>
+            </button>
+          )}
+          {!isDemo && !isSuperAdmin(currentUser) && (
+            <button onClick={() => { setCurrentScreen("received_schedules"); setDrawer(false); }}
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white active:bg-gray-100">
+              <Calendar size={20} className="text-indigo-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1 text-left">공유받은 일정</span>
             </button>
           )}
           {/* 팀별 일정 - 순수 팀원(어느 팀에서도 리더/관리 아님)은 제외 */}

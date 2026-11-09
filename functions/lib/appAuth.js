@@ -7,14 +7,15 @@ import { getApps, initializeApp } from 'firebase-admin/app';
 import { createAppAuthService, AppAuthError, verifyAppPrincipal, publicProfile, canViewWidgetEvent, projectCalendar } from './appAuthCore.js';
 import { recordAppReadChange, readAppChanges, getSourceIds } from './appReadChanges.js';
 import { expandRecurring } from './appRecurrence.js';
+import { handleSharedSchedule } from './sharedSchedule.js';
 import { getMemberships, isAdminStaff, isLeaderOf } from './membership.js';
 import { prepareScopedRead, readScopeKey, normalizeReadScope, loadScopedEventSnapshots, loadScopedReportSnapshots, ScopedReadError, widgetErrorStatus, widgetEvent, projectWidgetRange, mayReadFullReportLedger } from './appScopedReads.js';
 
 if (!getApps().length) initializeApp();
 const service = createAppAuthService({ db: getFirestore(), issueToken: (uid, claims) => getAuth().createCustomToken(uid, claims) });
-export const verifyLiveAppSession = async request => {
+export const verifyLiveAppSession = async (request, options) => {
   if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
-  try { return await verifyAppPrincipal(getFirestore(), request.auth.token); }
+  try { return await verifyAppPrincipal(getFirestore(), request.auth.token, options); }
   catch (e) { throw new HttpsError(e.code || 'unauthenticated', e.message); }
 };
 export const appAuth = onCall({ region: 'asia-northeast3', maxInstances: 5 }, async request => {
@@ -24,6 +25,15 @@ export const appAuth = onCall({ region: 'asia-northeast3', maxInstances: 5 }, as
     // Do not log request credentials or raw account documents.
     console.error('[appAuth] request failed', e.code || e.name);
     throw new HttpsError('internal', '로그인 처리 중 문제가 발생했습니다. 다시 시도해주세요.');
+  }
+});
+
+export const appSharedSchedule = onCall({ region: 'asia-northeast3', maxInstances: 5 }, async request => {
+  const principal = await verifyLiveAppSession(request, { allowIndependent: true });
+  try { return await handleSharedSchedule(getFirestore(), principal, request.data); }
+  catch (e) {
+    if (e instanceof AppAuthError) throw new HttpsError(e.code, e.message);
+    throw e;
   }
 });
 
