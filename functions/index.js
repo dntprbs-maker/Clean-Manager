@@ -95,8 +95,8 @@ async function dispatchPush(targets, data, logLabel, options = {}) {
 const reminderTokenRef = token => db.collection("appAuthReminderTokens").doc(
   createHash("sha256").update(token).digest("hex")
 );
-const reminderCompanyEnabled = companyId => !process.env.REMINDER_QA_COMPANY
-  || process.env.REMINDER_QA_COMPANY === companyId;
+const reminderCompanyEnabled = companyId => companyId === "qa_pagination"
+  && process.env.REMINDER_QA_COMPANY === companyId;
 
 export const syncReminderPushToken = onCall({ region: REGION }, async request => {
   const principal = await verifyAppPrincipal(db, request.auth?.token).catch(error => {
