@@ -31,6 +31,15 @@ export function RegularCleaningHubScreen() {
         </button>
       </div>
       <div className="px-4 py-4 flex flex-col gap-3">
+        <a href="https://fieldnote-cleaning.pages.dev/" target="_blank" rel="noopener noreferrer"
+          className="text-left w-full rounded-2xl p-4 flex items-center gap-3 bg-white border border-gray-100 hover:border-blue-200 transition-all">
+          <span className="text-2xl shrink-0" aria-hidden="true">📋</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-gray-900">현장노트 열기</p>
+            <p className="text-xs text-gray-400 mt-0.5">정기청소 작업일지·사진·특이사항 기록</p>
+          </div>
+          <ChevronLeft size={16} className="text-gray-300 rotate-180 shrink-0" aria-hidden="true"/>
+        </a>
         {menuItems.length === 0 ? (
           <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
             <div className="text-4xl mb-3">🧹</div>
