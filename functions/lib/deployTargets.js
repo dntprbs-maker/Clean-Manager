@@ -1,4 +1,4 @@
-export const APP_FUNCTIONS = ['appAuth','appAccount','appReadData','appWriteData','appWidgetData','appProfileChanged','appAdminCredentialChanged','appStaffCredentialChanged','appReadEventChanged','appReadReportChanged','appReadCalendarChanged','appReadAssignmentChanged','appReadUserChanged','confirmMonthlySettlement','calendarFeed','widgetEventChanged','widgetCalChanged'];
+export const APP_FUNCTIONS = ['appAuth','appAccount','appReadData','appWriteData','appSharedSchedule','appWidgetData','appProfileChanged','appAdminCredentialChanged','appStaffCredentialChanged','appReadEventChanged','appReadReportChanged','appReadCalendarChanged','appReadAssignmentChanged','appReadUserChanged','confirmMonthlySettlement','calendarFeed','widgetEventChanged','widgetCalChanged'];
 
 // Fail back to the existing whole-functions deployment for unknown runtime
 // changes. This migration must not redeploy unrelated MCP/Google/ICS code.
@@ -7,7 +7,7 @@ export function deploymentTargets(files, indexDiff = '', configUnchanged = true)
   if(configUnchanged && runtime.length && runtime.every(f=>f.startsWith('functions/mcp/')||f==='functions/lib/moneyExpression.js')) {
     return ['functions:mcp',...(files.includes('firestore.rules')?['firestore:rules']:[]),...(files.includes('firestore.indexes.json')?['firestore:indexes']:[])].join(',');
   }
-  const allowed = new Set(['functions/index.js','functions/lib/appAuth.js','functions/lib/appAuthCore.js','functions/lib/appRecurrence.js','functions/lib/appScopedReads.js','functions/lib/appReadChanges.js','functions/lib/widgetPush.js','functions/lib/settlement.js','functions/lib/settlementApi.js']);
+  const allowed = new Set(['functions/index.js','functions/lib/appAuth.js','functions/lib/sharedSchedule.js','functions/lib/appAuthCore.js','functions/lib/appRecurrence.js','functions/lib/appScopedReads.js','functions/lib/appReadChanges.js','functions/lib/widgetPush.js','functions/lib/settlement.js','functions/lib/settlementApi.js']);
   const oldFeed='    const visible = expanded.filter(ev => ev.start >= cutoff && ev.start <= horizon);';
   const newFeed='    const visible = expanded.filter(ev => ev.calId === cal && ev.start >= cutoff && ev.start <= horizon);';
   if(indexDiff.includes('-'+oldFeed)&&indexDiff.includes('+'+newFeed))indexDiff=indexDiff.replace('-'+oldFeed,'').replace('+'+newFeed,'');

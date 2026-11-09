@@ -19,6 +19,7 @@ import { handleWebhook, runMaintenance } from "./lib/gcal/service.js";
 import { handleAdmin } from "./lib/gcal/adminPage.js";
 import process from "node:process";
 export { mcp } from "./mcp/index.js";
+export { appSharedSchedule } from './lib/appAuth.js';
 export { appAuth, appAccount, appWidgetData, appReadData, appWriteData, appProfileChanged, appAdminCredentialChanged, appStaffCredentialChanged,
   appReadEventChanged, appReadReportChanged, appReadCalendarChanged, appReadAssignmentChanged, appReadUserChanged } from './lib/appAuth.js';
 export { hubEventChanged, hubCalendarChanged, hubReportChanged } from './lib/hubChangeTriggers.js';

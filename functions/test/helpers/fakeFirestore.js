@@ -36,6 +36,7 @@ export function createFakeDb() {
         const ok = filters.every(({ field, op, value }) => {
           const v = field.split(".").reduce((o, k) => o?.[k], d);
           if (op === "==") return v === value;
+          if (op === "in") return value.includes(v);
           if (op === "<") return v !== undefined && v < value;
           throw new Error(`unsupported op ${op}`);
         });
