@@ -141,7 +141,8 @@ async function reminderTargets(companyId, event) {
     const kind = profile.ref.parent.id === "admins" ? "admin" : "staff";
     const user = { ...profile.data(), uid: profile.id };
     if (user.status === "deleted" || !Array.isArray(user.fcmTokens) || !user.fcmTokens.length
-      || (cal?.personal && cal.ownerId !== profile.id)
+      || (cal?.personal && cal.ownerId !== profile.id
+        && !(kind === "admin" && typeof user.id === "string" && cal.ownerId === user.id))
       || !allowsTeam(user, cal?.personal ? "" : (cal?.label || cal?.name || event.team))
       || !canViewWidgetEvent(event, { kind, user }, cal ? [cal] : [], assignments)) return [];
     if (kind === "staff" && !cal?.personal && !isMemberOfTeam(user, "관리팀")
