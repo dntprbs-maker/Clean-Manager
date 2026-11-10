@@ -24,6 +24,7 @@ import { HOLIDAYS, WD, fmt, pd, diff, add, fmtTime } from "../../lib/dateTime";
 import { toLunarLabel } from "../../lib/lunar";
 import { CALS, calById, REGULAR_CAL_ID } from "../../lib/calendars";
 import { REPEAT_OPTS } from "../../lib/repeat";
+import { Capacitor } from "@capacitor/core";
 import { REMINDER_LABELS, reminderModes, reminderTime } from "../../../functions/lib/eventReminderTimes";
 import { getReportStatus } from "../../lib/reports";
 import { parseEventText } from "../../lib/eventTextParser";
@@ -2644,7 +2645,7 @@ export function EventModal() {
 
         {/* 날짜 & 시간 — 네이버 앱 스타일 */}
         <DateTimePicker form={form} set={set} errs={errs} lockRepeat={scope==="instance"} userId={currentUser.id || currentUser.uid}/>
-        <fieldset className="px-4 py-3 border-b border-gray-100">
+        {Capacitor.isNativePlatform() && <fieldset className="px-4 py-3 border-b border-gray-100">
           <legend className="text-sm font-semibold text-gray-800">일정 시작 전 알림</legend>
           <p className="mb-2 text-xs text-gray-500">
             {form.allDay ? "종일 일정은 전날 정오에 알릴 수 있어요." : "한국시간 기준이에요. 반복 일정은 회차마다 계산해요."}
@@ -2662,7 +2663,7 @@ export function EventModal() {
               <span className="ml-auto text-right text-xs text-gray-500">{preview}</span>
             </label>;
           })}
-        </fieldset>
+        </fieldset>}
 
         {/* 주소 */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-100">
