@@ -506,7 +506,15 @@ export const dailyScheduleDigest = onSchedule(
 
 // ── AI 일정 추출 (Gemini) ────────────────────────────────────────
 // 카카오톡 상담 대화 / 메모지 사진에서 일정 정보(제목·날짜·시간·장소·연락처)를 추출
-const TODAY_HINT = () => new Date().toISOString().slice(0, 10);
+const TODAY_HINT = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+const DATE_HINT = () => {
+  const today = TODAY_HINT();
+  const date = new Date(`${today}T00:00:00Z`);
+  const mondayOffset = (date.getUTCDay() + 6) % 7;
+  const dateAt = offset => new Date(date.getTime() + offset * 86400000).toISOString().slice(0, 10);
+  const week = offset => Array.from("월화수목금토일", (day, index) => `${day}요일=${dateAt(offset + index - mondayOffset)}`).join(", ");
+  return `한국시간 기준 오늘은 ${today}, 내일=${dateAt(1)}, 모레=${dateAt(2)}, 글피=${dateAt(3)}.\n한 주는 월요일에 시작해. 이번 주: ${week(0)}\n다음 주: ${week(7)}\n상대 날짜는 날짜표를 따르고, 대화에서 변경된 날짜는 마지막으로 서로 확정한 날짜를 사용해.`;
+};
 
 // 클라이언트의 정규식 추출(메모 모드, src/lib/eventTextParser.js)이 쓰는 제목 토큰 라벨을
 // 그대로 복제 — 두 추출 경로(정규식/AI)가 서로 다른 기준으로 제목을 지어내면 회사가
@@ -539,7 +547,7 @@ ${parts}
 const EXTRACT_PROMPT = (context, titleRule, typeKeywords) => `너는 청소업체 일정 관리 앱의 비서야. 아래 ${context}에서 청소/방문 일정 정보를 뽑아 JSON으로만 답해.
 사진/대화 안에는 실제 청소 일정과 무관한 내용(다른 잡담, 앱 사용법 문의, 링크 미리보기 카드, 웹사이트 이름/URL 등)이 섞여 있을 수 있어.
 그런 것들은 절대 제목이나 내용으로 쓰지 말고, 반드시 "주소/평수/날짜/연락처 등이 포함된 실제 청소·방문 일정 내용"만 찾아서 추출해.
-오늘 날짜는 ${TODAY_HINT()}이야. 연도가 명시되지 않은 날짜는 오늘 기준 가까운 미래로 추정해.
+${DATE_HINT()} 연도가 명시되지 않은 날짜는 오늘 기준 가까운 미래로 추정하고, 명시된 날짜와 연도는 그대로 사용해.
 시간이 "오전"/"오후"처럼 대략적으로만 언급되고 정확한 시각이 없으면: "오전"은 09:00, "오후"는 14:00을 시작 시각으로 기본 사용해.
 ${titleGuide(titleRule, typeKeywords)}
 반드시 아래 스키마의 JSON 객체 하나만 출력하고, 정보가 없는 필드는 빈 문자열("")로 남겨.

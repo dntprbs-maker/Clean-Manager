@@ -1,3 +1,5 @@
+import { seoulToday } from "./dateTime.js";
+
 // ── 제목 규칙 기본값 ──────────────────────────────────────────────
 export const DEFAULT_TITLE_RULE = ["time", "district", "area"];
 export const DEFAULT_TYPE_KEYWORDS = ["입주청소", "정기청소", "에어컨청소", "특수청소", "줄눈청소"];
@@ -17,7 +19,8 @@ export function parseEventText(text, titleRule = DEFAULT_TITLE_RULE, typeKeyword
     startTime:"09:00", endTime:"10:00",
     place:"", description:text.trim(), url:"", calId:"", repeat:"none",
   };
-  const yr = new Date().getFullYear();
+  const today = seoulToday();
+  const yr = today.slice(0, 4);
 
   // 날짜: "26.07.10" / "2026.07.10" / "26-07-10" / "6월 15일" / "6/15"
   const d0 = text.match(/(\d{2,4})[.\-]\s*(\d{1,2})[.\-]\s*(\d{1,2})(?!\d)/);
@@ -42,9 +45,13 @@ export function parseEventText(text, titleRule = DEFAULT_TITLE_RULE, typeKeyword
   // 상대 날짜(절대 날짜가 위에서 안 잡혔을 때만) — "오늘/내일/모레/글피",
   // "N일 후/뒤", "이번주/다음주/저번주 O요일", 수식어 없는 "O요일"(가장 가까운 미래로 해석)
   if (!result.start) {
-    const now = new Date();
-    const addDays = (base, n) => { const dt = new Date(base); dt.setDate(dt.getDate()+n); return dt; };
-    const toDateStr = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+    // 한국 날짜를 UTC 자정으로 표현해 기기 시간대나 서머타임 없이 날짜만 계산한다.
+    const now = new Date(`${today}T00:00:00Z`);
+    const addDays = (base, n) => {
+      const dt = new Date(base);
+      dt.setUTCDate(dt.getUTCDate() + n);
+      return dt;
+    };
     const WD_MAP = { "일":0, "월":1, "화":2, "수":3, "목":4, "금":5, "토":6 };
 
     let relDate = null;
@@ -66,14 +73,15 @@ export function parseEventText(text, titleRule = DEFAULT_TITLE_RULE, typeKeyword
       if (wdMatch) {
         const weekWord = wdMatch[1] || "";
         const targetWd = WD_MAP[wdMatch[2]];
-        const todayWd  = now.getDay();
-        const thisWeekStart = addDays(now, -todayWd); // 이번 주 일요일
+        const todayWd = now.getUTCDay();
+        const thisWeekStart = addDays(now, -((todayWd + 6) % 7)); // 이번 주 월요일
+        const targetOffset = (targetWd + 6) % 7;
         if (/다음|담/.test(weekWord)) {
-          relDate = addDays(thisWeekStart, 7 + targetWd);
+          relDate = addDays(thisWeekStart, 7 + targetOffset);
         } else if (/저번|지난/.test(weekWord)) {
-          relDate = addDays(thisWeekStart, -7 + targetWd);
+          relDate = addDays(thisWeekStart, -7 + targetOffset);
         } else if (/이번/.test(weekWord)) {
-          relDate = addDays(thisWeekStart, targetWd);
+          relDate = addDays(thisWeekStart, targetOffset);
         } else {
           // 수식어 없이 "O요일"만 — 예약 등록 맥락이라 오늘 포함 가장 가까운 미래로 해석
           relDate = addDays(now, (targetWd - todayWd + 7) % 7);
@@ -82,7 +90,7 @@ export function parseEventText(text, titleRule = DEFAULT_TITLE_RULE, typeKeyword
     }
 
     if (relDate) {
-      const s = toDateStr(relDate);
+      const s = relDate.toISOString().slice(0, 10);
       result.start = s;
       result.end   = s;
     }
