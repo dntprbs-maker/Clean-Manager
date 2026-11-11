@@ -1,5 +1,6 @@
 import { EventFinanceAccordion } from '../../components/shared/EventFinanceAccordion';
 import { prepareEventFinance } from '../../lib/eventFinance';
+import { newEventTime, seoulTime } from "../../lib/eventFormTime";
 import { seoulToday } from "../../lib/dateTime";
 import { authenticate, endSession } from "../../lib/appAuth";
 import {
@@ -1817,7 +1818,7 @@ export function ExtraCalFilterModal() {
 }
 
 // ── 일정 추가 모달 ────────────────────────────────────────────────
-const blank=date=>({title:"",description:"",contact:"",team:"",start:date||seoulToday(),end:date||seoulToday(),allDay:false,startTime:"09:00",endTime:"10:00",place:"",url:"",calId:"",
+const blank=date=>({title:"",description:"",contact:"",team:"",...newEventTime(date),allDay:false,place:"",url:"",calId:"",
   repeat:"none",repeatInterval:1,repeatWeekdays:[],
   repeatMonthlyType:"day",repeatMonthlyDay:null,repeatMonthlyOrdinal:1,repeatMonthlyWeekday:null,
   repeatYearlyType:"date",repeatYearlyMonth:null,repeatYearlyDay:null,repeatYearlyOrdinal:1,repeatYearlyWeekday:null,
@@ -1919,7 +1920,7 @@ export function DateTimePicker({ form, set, errs, lockRepeat, userId }) {
   const parseTimeH24 = t => {
     if (!t) return { h24: 9, m: 0 };
     const [hh, mm] = t.split(":").map(Number);
-    return { h24: hh, m: Math.round(mm / 5) * 5 % 60 };
+    return { h24: hh, m: mm };
   };
   const fmtH24 = h => {
     const ap = h < 12 ? "오전" : "오후";
@@ -1953,22 +1954,14 @@ export function DateTimePicker({ form, set, errs, lockRepeat, userId }) {
       set("start", dateStr);
       if (dateStr > form.end) set("end", dateStr);
       if (!form.allDay) {
-        // 기존 시간차(분)를 유지하면서 종료 시간도 같이 조정
-        const [oldSH, oldSM] = (form.startTime||"09:00").split(":").map(Number);
-        const [oldEH, oldEM] = (form.endTime||"10:00").split(":").map(Number);
-        const diffMin = (oldEH*60+oldEM) - (oldSH*60+oldSM);
-        const newStartMin = h24*60 + m;
-        const totalEndMin = newStartMin + (diffMin > 0 ? diffMin : 60);
-        const dayOverflow = Math.floor(totalEndMin / (24*60));
-        const newEndMin = totalEndMin % (24*60);
-        const endTimeStr = `${String(Math.floor(newEndMin/60)).padStart(2,"0")}:${String(newEndMin%60).padStart(2,"0")}`;
+        // 날짜를 포함한 소요시간을 유지한다(자정·여러 날 일정 포함).
+        const oldStart = new Date(`${form.start}T${form.startTime || "09:00"}:00+09:00`);
+        const oldEnd = new Date(`${form.end}T${form.endTime || "10:00"}:00+09:00`);
+        const duration = oldEnd - oldStart;
+        const newEnd = new Date(new Date(`${dateStr}T${timeStr}:00+09:00`).getTime() + (duration > 0 ? duration : 3600000));
         set("startTime", timeStr);
-        set("endTime", endTimeStr);
-        if (dayOverflow > 0) {
-          const endDate = pd(dateStr);
-          endDate.setDate(endDate.getDate() + dayOverflow);
-          set("end", fmt(endDate));
-        }
+        set("endTime", seoulTime(newEnd));
+        set("end", seoulToday(newEnd));
       }
     } else {
       set("end", dateStr < form.start ? form.start : dateStr);
@@ -2011,7 +2004,7 @@ export function DateTimePicker({ form, set, errs, lockRepeat, userId }) {
   };
   const chDay = (v, delta=0) => { const b = baseDate(); b.setDate(b.getDate() + delta); reSync(b); };
   const chH24 = (v, delta=0) => { const b = baseDate(); b.setHours(b.getHours() + delta); reSync(b); };
-  const chMin = (v, delta=0) => { const b = baseDate(); b.setMinutes(b.getMinutes() + delta*5); reSync(b); };
+  const chMin = (v, delta=0) => { const b = baseDate(); b.setMinutes(b.getMinutes() + delta); reSync(b); };
   // 즐겨찾기 시작시간 — 지금 고르고 있는 날짜는 그대로 두고 시/분만 그 값으로 바꾼다.
   const pickFavoriteTime = timeStr => {
     const [hh, mm] = timeStr.split(":").map(Number);
@@ -2032,7 +2025,7 @@ export function DateTimePicker({ form, set, errs, lockRepeat, userId }) {
   const months  = Array.from({length:12},(_,i) => i+1);
   const days    = Array.from({length:daysInMonth},(_,i) => i+1);
   const hours24 = Array.from({length:24},(_,i) => i);
-  const mins    = Array.from({length:12},(_,i) => i*5);
+  const mins    = Array.from({length:60},(_,i) => i);
 
   return (
     <div className="border-b border-gray-100">
@@ -2112,6 +2105,8 @@ export function DateTimePicker({ form, set, errs, lockRepeat, userId }) {
             {/* 시작시간 편집 중: 즐겨찾기 시간 원터치 버튼 */}
             {!form.allDay && activePicker==="start" && (
               <div className="px-4 pt-2 pb-1 border-t border-gray-100">
+                <button type="button" onClick={()=>pickFavoriteTime(seoulTime())}
+                  className="mb-2 px-3 py-1.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700">현재시간</button>
                 <FavoriteTimeRow userId={userId} value={`${String(pH24).padStart(2,"0")}:${String(pMin).padStart(2,"0")}`} onPick={pickFavoriteTime}/>
               </div>
             )}
@@ -2128,14 +2123,14 @@ export function DateTimePicker({ form, set, errs, lockRepeat, userId }) {
             )}
             <div className="flex items-center justify-between px-4 py-2 pb-6 border-t border-gray-100">
               <button onClick={()=>{
-                // 시작 피커: 날짜뿐 아니라 시간도 지금 시각으로(분은 휠 단위인 5분으로 반올림).
+                // 시작 피커: 오늘 한국 날짜와 현재 시각으로 맞춘다.
                 // 종료 피커: "오늘"이 아니라 "시작과 같게" — 종료만 따로 오늘로 맞출 일은 없고,
                 // 시작을 기준으로 다시 잡는 게 자연스럽다(2026-11-02 요청).
                 let y, mo, d, h24, min;
                 if (activePicker === "start") {
-                  const t = new Date();
-                  y = t.getFullYear(); mo = t.getMonth()+1; d = t.getDate();
-                  h24 = t.getHours(); min = Math.round(t.getMinutes()/5)*5 % 60;
+                  const now = new Date();
+                  [y, mo, d] = seoulToday(now).split("-").map(Number);
+                  [h24, min] = seoulTime(now).split(":").map(Number);
                 } else {
                   const sd = pd(form.start) || new Date();
                   const [sh, sm] = (form.startTime||"09:00").split(":").map(Number);
@@ -2196,6 +2191,7 @@ export function EventModal() {
   const editEv = editId ? ((scope && scope!=="all" && instanceEv) ? instanceEv : events.find(e=>e.id===editId)) : null;
   const [form,setForm]=useState(blank(date));
   const [reminderPreviewNow, setReminderPreviewNow] = useState(0);
+  const [reminderOpen, setReminderOpen] = useState(false);
   const [errs,setErrs]=useState({});
   const [anim,setAnim]=useState(false);
   const [pasteText,setPasteText]=useState("");
@@ -2245,6 +2241,7 @@ export function EventModal() {
       const initForm = editEv ? {...blank(editEv.start || date),...editEv} : isCopy ? copyOf(copyFrom) : blank(date);
       setForm(initForm);
       setReminderPreviewNow(Date.now());
+      setReminderOpen(false);
       origForm.current = {...initForm};
       setExitConfirm(false);
       setErrs({});
@@ -2645,8 +2642,19 @@ export function EventModal() {
 
         {/* 날짜 & 시간 — 네이버 앱 스타일 */}
         <DateTimePicker form={form} set={set} errs={errs} lockRepeat={scope==="instance"} userId={currentUser.id || currentUser.uid}/>
-        {Capacitor.isNativePlatform() && <fieldset className="px-4 py-3 border-b border-gray-100">
-          <legend className="text-sm font-semibold text-gray-800">일정 시작 전 알림</legend>
+        {Capacitor.isNativePlatform() && <section className="border-b border-gray-100">
+          <button type="button" aria-expanded={reminderOpen} aria-controls="event-reminder-options"
+            onClick={()=>{setReminderOpen(value=>!value);setReminderPreviewNow(Date.now());}}
+            className="w-full flex items-center gap-3 px-4 py-3 text-left">
+            <Bell size={18} className="text-gray-400 shrink-0"/>
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm font-semibold text-gray-800">일정 시작 전 알림</span>
+              <span className="block text-xs text-gray-500 mt-1">{reminderModes(form).map(mode=>REMINDER_LABELS[mode]).join(" · ") || "알림 없음"}</span>
+            </span>
+            <ChevronDown size={18} className={`text-gray-400 shrink-0 transition-transform ${reminderOpen ? "rotate-180" : ""}`}/>
+          </button>
+          <fieldset id="event-reminder-options" hidden={!reminderOpen} className="px-4 pb-3">
+          <legend className="sr-only">일정 시작 전 알림 선택</legend>
           <p className="mb-2 text-xs text-gray-500">
             {form.allDay ? "종일 일정은 전날 정오에 알릴 수 있어요." : "한국시간 기준이에요. 반복 일정은 회차마다 계산해요."}
           </p>
@@ -2663,7 +2671,8 @@ export function EventModal() {
               <span className="ml-auto text-right text-xs text-gray-500">{preview}</span>
             </label>;
           })}
-        </fieldset>}
+          </fieldset>
+        </section>}
 
         {/* 주소 */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-100">
