@@ -41,6 +41,25 @@ export const TEST_TITLE_PREFIX = "[MCP시험] ";
 
 const audit = (agent) => ({ agentId: agent?.agentId || "unknown", label: agent?.label || "", at: new Date().toISOString() });
 
+// 시각 필드는 "09:05"처럼 두 자리 HH:MM(24시간제)만 받는다.
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const isTime = (t) => typeof t === "string" && TIME_RE.test(t);
+
+// YYYY-MM-DD에 일수를 더한다 (기기 시간대·서머타임 영향 없이 UTC 기준).
+function addDays(date, n) {
+  const [y, m, d] = date.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + n));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+}
+
+// "HH:MM"에서 분을 더한 시각과 자정 넘김 일수를 구한다 (23:30 + 60분 → 00:30, 1일).
+function shiftTime(time, minutes) {
+  const [h, m] = time.split(":").map(Number);
+  const total = h * 60 + m + minutes;
+  const inDay = ((total % 1440) + 1440) % 1440;
+  return { time: `${String(Math.floor(inDay / 60)).padStart(2, "0")}:${String(inDay % 60).padStart(2, "0")}`, days: Math.floor(total / 1440) };
+}
+
 const publicPhotos = photos => (photos || []).map(({ name, url }) => ({ name, url }));
 const canReadFinance = agent => hasScope(agent, SCOPES.FINANCE_READ) || hasScope(agent, SCOPES.FINANCE_WRITE) || hasScope(agent, SCOPES.ADMIN);
 function toView(ev, teamByCal, agent) {
@@ -226,11 +245,22 @@ export function registerEventTools(server, companyId) {
     async (input, extra) => {
       const { title: rawTitle, start, team, test, photos, ...rest } = input;
       const title = test && !rawTitle.startsWith(TEST_TITLE_PREFIX) ? TEST_TITLE_PREFIX + rawTitle : rawTitle;
-      const end = rest.end || start;
+      let end = rest.end || start;
       if (end < start) return err("end는 start보다 빠를 수 없습니다.");
-      if (!rest.allDay && rest.startTime && rest.endTime && rest.endTime <= rest.startTime) {
-        return err("allDay가 아니면 endTime은 startTime보다 늦어야 합니다.");
+      if (!rest.allDay) {
+        if (rest.startTime !== undefined && !isTime(rest.startTime)) return err("startTime은 HH:MM(24시간제) 형식이어야 합니다.");
+        if (rest.endTime !== undefined && !isTime(rest.endTime)) return err("endTime은 HH:MM(24시간제) 형식이어야 합니다.");
+        // 시작 시각만 주면 종료 시각을 1시간 뒤로 채운다 (23시대면 다음 날로 넘어감).
+        if (rest.startTime && rest.endTime === undefined) {
+          const { time, days } = shiftTime(rest.startTime, 60);
+          rest.endTime = time;
+          if (rest.end === undefined) end = addDays(start, days);
+        }
+        if (rest.startTime && rest.endTime !== undefined && end === start && rest.endTime <= rest.startTime) {
+          return err("allDay가 아니면 endTime은 startTime보다 늦어야 합니다.");
+        }
       }
+      rest.end = end;
       const calId = await resolveCalId(companyId, team);
       if (team && !calId) return err(`팀 "${team}"을 찾을 수 없습니다. list_teams로 존재하는 팀 이름을 확인하세요.`);
 
@@ -285,8 +315,26 @@ export function registerEventTools(server, companyId) {
       const snap = await docRef.get();
       if (!snap.exists || snap.data().status === "deleted") return err(`일정 ${eventId}을 찾을 수 없습니다.`);
       const cur = snap.data();
+      const allDay = patch.allDay !== undefined ? patch.allDay : !!cur.allDay;
       const nStart = patch.start ?? cur.start;
-      const nEnd = patch.end ?? cur.end ?? nStart;
+      let nEnd = patch.end ?? cur.end ?? nStart;
+      const touchesSchedule = ["start", "end", "allDay", "startTime", "endTime"].some((k) => patch[k] !== undefined);
+      if (!allDay && touchesSchedule) {
+        if (patch.startTime !== undefined && !isTime(patch.startTime)) return err("startTime은 HH:MM(24시간제) 형식이어야 합니다.");
+        if (patch.endTime !== undefined && !isTime(patch.endTime)) return err("endTime은 HH:MM(24시간제) 형식이어야 합니다.");
+        // 시작 시각만 바꾸면 종료 시각을 1시간 뒤로 맞춘다 (23시대면 날짜도 다음 날로).
+        if (patch.startTime !== undefined && patch.endTime === undefined) {
+          const { time, days } = shiftTime(patch.startTime, 60);
+          patch.endTime = time;
+          if (patch.end === undefined) nEnd = addDays(nStart, days);
+        }
+        const nStartTime = patch.startTime ?? cur.startTime;
+        const nEndTime = patch.endTime ?? cur.endTime;
+        if (nStartTime && nEndTime && nEnd === nStart && nEndTime <= nStartTime) {
+          return err("allDay가 아니면 endTime은 startTime보다 늦어야 합니다.");
+        }
+        patch.end = nEnd;
+      }
       if (nEnd < nStart) return err("end는 start보다 빠를 수 없습니다.");
       if (cur.mcpTest && patch.title !== undefined && !patch.title.startsWith(TEST_TITLE_PREFIX)) {
         patch.title = TEST_TITLE_PREFIX + patch.title; // 시험 일정 표시는 수정해도 유지
