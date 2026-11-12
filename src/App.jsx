@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 
 import { Capacitor } from "@capacitor/core";
+import { App as NativeApp } from "@capacitor/app";
+import { closeBackLayer, previousScreen } from "./lib/backNavigation";
 import { restoreSession, endSession, watchWidgetSession } from "./lib/appAuth";
 import { db, functions, storage } from "./firebase";
 import { enablePush, disablePush, listenForeground, unbindReminderPushToken } from "./fcm";
@@ -78,6 +80,7 @@ function AppInner() {
     notificationSettingsModal, setNotificationSettingsModal,
     siteModal, setSiteModal, assignmentModal, setAssignmentModal,
     extraPaymentModal, setExtraPaymentModal,
+    financeModal, setFinanceModal, extraCalFilterModal, setExtraCalFilterModal,
     eventModalGuardRef,
   } = useC();
   const needsSetup = !isDemo && !currentUser?.companyName;
@@ -88,15 +91,12 @@ function AppInner() {
   // 일정 추가/수정 모달은 X버튼과 동일하게, 수정 중인 내용이 있으면 저장 확인부터
   // 묻는 tryClose(eventModalGuardRef)를 거친다.
   //
-  // "기본화면(캘린더)에서 뒤로가기 시 종료 확인창"은 시도했다가 포기함(2026-07-22) —
-  // popstate 핸들러 "안에서" pushState로 히스토리를 되채워 뒤로가기를 못 나가게 막는
-  // 방식은 크롬 계열 브라우저가 back-button 남용(가두기) 방지 로직으로 무력화한다는 걸
-  // 실기기 테스트로 확인함(히스토리 길이가 재적립 없이 계속 줄어들다 바닥에서 그냥 탭이
-  // 닫혀버림). 웹에서는 안정적으로 구현 불가 — 나중에 네이티브 앱 전환 시 재검토.
+  // 업데이트한 Android 앱은 App 플러그인으로 직접 처리한다. 웹/구형 APK는
+  // 기존 popstate 경로를 유지한다. 캘린더 루트에서만 앱을 백그라운드로 보낸다.
   const backLayers = [
     { open: !!fieldReportEv, close: () => setFieldReportEv(null) },
-    { open: !!detEv,         close: () => setDetEv(null) },
     { open: modal.open,      close: () => (eventModalGuardRef?.current || closeModal)() },
+    { open: !!detEv,         close: () => setDetEv(null) },
     { open: showNotifyPrompt, close: () => setShowNotifyPrompt(false) },
     { open: empModal.open,           close: () => setEmpModal({ open: false, editId: null }) },
     { open: companySettingsModal,    close: () => setCompanySettingsModal(false) },
@@ -104,10 +104,30 @@ function AppInner() {
     { open: siteModal.open,          close: () => setSiteModal({ open: false, editId: null }) },
     { open: assignmentModal.open,    close: () => setAssignmentModal({ open: false, editId: null, presetSiteId: null }) },
     { open: extraPaymentModal.open,  close: () => setExtraPaymentModal({ open: false, employeeId: null }) },
+    { open: financeModal.open, close: () => setFinanceModal({ open: false, editId: null }) },
+    { open: extraCalFilterModal, close: () => setExtraCalFilterModal(false) },
     { open: searchOpen, close: () => setSearchOpen(false) },
     { open: drawer,      close: () => setDrawer(false) },
-    { open: currentScreen !== "calendar", close: () => setCurrentScreen("calendar") },
+    { open: currentScreen !== "calendar", close: () => setCurrentScreen(previousScreen(currentScreen)) },
   ];
+  const nativeBack = Capacitor.getPlatform() === 'android' && Capacitor.isPluginAvailable('App');
+  const backHandlerRef = useRef(null);
+  useEffect(() => {
+    backHandlerRef.current = () => {
+      if (closeBackLayer()) return;
+      const top = backLayers.find(layer => layer.open);
+      if (top) top.close();
+      else NativeApp.minimizeApp();
+    };
+  });
+  useEffect(() => {
+    if (!nativeBack) return;
+    let disposed = false;
+    const listener = NativeApp.addListener('backButton', () => {
+      if (!disposed) backHandlerRef.current?.();
+    });
+    return () => { disposed = true; listener.then(handle => handle.remove()); };
+  }, [nativeBack]);
   const openCount = backLayers.filter(l => l.open).length;
   const prevOpenCountRef = useRef(0);
   const isPopRef = useRef(false); // 방금 감소가 실제 뒤로가기(popstate)로 인한 것인지
@@ -122,6 +142,8 @@ function AppInner() {
   // 되감아 장부를 맞춘다. 이때 발생하는 popstate는 "레이어 닫기"를 또 실행하면 안 되므로
   // skipNextPopRef로 개수를 세어 건너뛴다(진짜 뒤로가기로 인한 감소는 isPopRef로 구분).
   useEffect(() => {
+    // Native back closes React layers directly; never consume WebView history twice.
+    if (nativeBack) return;
     if (isPopRef.current) { isPopRef.current = false; prevOpenCountRef.current = openCount; return; }
     const diff = openCount - prevOpenCountRef.current;
     if (diff > 0) {
@@ -134,6 +156,7 @@ function AppInner() {
   });
 
   useEffect(() => {
+    if (nativeBack) return;
     const onPopState = () => {
       if (skipNextPopRef.current > 0) { skipNextPopRef.current -= 1; return; } // 코드가 예약한 되감기 — 무시
       const top = backLayers.find(l => l.open);

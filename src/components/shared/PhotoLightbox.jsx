@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useBackLayer } from '../../hooks/useBackLayer';
 import { X, ChevronLeft, Plus, Minus, RotateCcw } from 'lucide-react';
 
 let showPhotos = null;
@@ -77,6 +78,7 @@ function ZoomablePhoto({ url, onSwipe, description }) {
 }
 export function PhotoLightbox() {
   const [state, setState] = useState(null);
+  useBackLayer(!!state, () => setState(null), 300);
   useEffect(() => { showPhotos = setState; return () => { showPhotos = null; }; }, []);
   useEffect(() => {
     if (!state) return;
