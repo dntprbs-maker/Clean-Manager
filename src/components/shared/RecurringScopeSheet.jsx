@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useBackLayer } from '../../hooks/useBackLayer';
 
 // ── 반복일정 수정/삭제 범위 선택 시트 ────────────────────────────
 // askRecurringScope(ev, "edit"|"delete") → Promise<"instance"|"following"|"all"|null(취소)>
@@ -11,6 +12,7 @@ export const askRecurringScope = (ev, action) => new Promise(resolve => {
 
 export function RecurringScopeSheet() {
   const [state, setState] = useState(null);
+  useBackLayer(!!state, () => { setState(null); state.resolve(null); }, 200);
   useEffect(() => { _setScopeAskState = setState; return () => { _setScopeAskState = null; }; }, []);
   if (!state) return null;
   const { ev, action, resolve } = state;

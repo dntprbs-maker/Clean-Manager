@@ -1,4 +1,5 @@
 import { EventFinanceAccordion } from '../../components/shared/EventFinanceAccordion';
+import { useBackLayer } from '../../hooks/useBackLayer';
 import { prepareEventFinance } from '../../lib/eventFinance';
 import { newEventTime, seoulTime } from "../../lib/eventFormTime";
 import { seoulToday } from "../../lib/dateTime";
@@ -944,7 +945,7 @@ export function CalendarView() {
 
 // ── 이벤트 상세 Bottom Sheet ──────────────────────────────────────
 export function DetailSheet() {
-  const { detEv, setDetEv, deleteEvent, deleteEventScoped, openModal, openCopyModal, setFieldReportEv, currentUser, cals, updateLeaderComment, reports, isDemo, teams } = useC();
+  const { detEv, setDetEv, deleteEvent, deleteEventScoped, openModal, openCopyModal, fieldReportEv, setFieldReportEv, modal, currentUser, cals, updateLeaderComment, reports, isDemo, teams } = useC();
   const [vis,setVis]=useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [savedComment, setSavedComment] = useState("");
@@ -965,6 +966,11 @@ export function DetailSheet() {
       return ()=>clearTimeout(t);
     }
   },[vis, detEv?.id, cal, currentUser]);
+  useBackLayer(!!detEv && !modal.open && !fieldReportEv, () => {
+    if (isLeaderOf(currentUser, cal.label) && commentDraft.trim() &&
+        !window.confirm("입력한 추가사항을 저장하지 않고 나가시겠습니까?")) return;
+    setDetEv(null);
+  }, 5);
   if(!detEv) return null;
   // 정기청소 배정에서 자동 생성된 일정 — 배정 관리 화면에서만 바꿀 수 있고, 본문도 별도 렌더링
   const isRegular = detEv.source === "regular";
@@ -994,14 +1000,14 @@ export function DetailSheet() {
     if (detEv._recurring) {
       const scope = detEv.__occurrenceOnly ? "instance" : await askRecurringScope(detEv, "edit");
       if (!scope) return;
-      close(); setTimeout(()=>openModal(null, detEv.id, scope, detEv), 300);
+      openModal(null, detEv.id, scope, detEv);
     } else {
-      close(); setTimeout(()=>openModal(null, detEv.id), 300);
+      openModal(null, detEv.id);
     }
   };
   // 복사 — 반복 일정이어도 "이 일정만/이후 전체"를 물을 필요가 없다.
   // 어차피 반복 설정을 뺀 단발 일정 하나를 새로 만드는 것이라 클릭한 회차 내용만 가져오면 된다.
-  const handleCopy = () => { close(); setTimeout(()=>openCopyModal(detEv), 300); };
+  const handleCopy = () => { openCopyModal(detEv); };
   const handleDelete = async () => {
     try {
     if (detEv._recurring) {
@@ -1021,6 +1027,7 @@ export function DetailSheet() {
     <div
       className="absolute inset-0 z-[60] flex flex-col bg-white"
       style={{
+        visibility: modal.open ? "hidden" : "visible",
         transform: vis ? "translateY(0)" : "translateY(100%)",
         transition: "transform 0.32s cubic-bezier(0.32,0.72,0,1)",
         pointerEvents: vis ? "auto" : "none",
@@ -1908,6 +1915,8 @@ function FavoriteTimeRow({ userId, value, onPick }) {
 export function DateTimePicker({ form, set, errs, lockRepeat, userId }) {
   const [activePicker, setActivePicker] = useState(null); // null | "start" | "end"
   const [repeatOpen, setRepeatOpen] = useState(false);
+  useBackLayer(!!activePicker, () => setActivePicker(null), 30);
+  useBackLayer(repeatOpen, () => setRepeatOpen(false), 20);
 
   // 피커 내부 상태(ref로 항상 최신값 유지, h24는 0~23 연속)
   const ps = useRef({ year:2026, month:1, day:1, h24:9, min:0 });
@@ -2215,7 +2224,9 @@ export function EventModal() {
     return { ...previous, reminderModes: checked ? [...modes, mode] : modes.filter(item => item !== mode) };
   });
   const isDirty=()=>origForm.current && JSON.stringify(form)!==JSON.stringify(origForm.current);
-  const tryClose=()=>{ if((editId||financeDirty)&&isDirty()) setExitConfirm(true); else closeModal(); };
+  const tryClose=()=>{ if(isDirty() || pasteText.trim() || imgFile) setExitConfirm(true); else closeModal(); };
+  useBackLayer(open && exitConfirm, () => setExitConfirm(false), 100);
+  useBackLayer(open && calDropOpen, () => setCalDropOpen(false), 40);
 
   // 안드로이드 뒤로가기도 X버튼과 동일하게 tryClose(저장 확인)를 거치도록 등록.
   // tryClose가 최신 form을 클로저로 물고 있어 매 렌더마다 갱신하고, 닫히면 비운다.
