@@ -3000,7 +3000,7 @@ export function FloatingButtons() {
 // ── 앱 루트 ───────────────────────────────────────────────────────
 // ── 검색 모달 ───────────────────────────────────────────────
 export function SearchModal() {
-  const { searchOpen, setSearchOpen, searchQuery: q, setSearchQuery: setQ, visibleEvents, setDetEv } = useC();
+  const { searchOpen, setSearchOpen, searchQuery: q, setSearchQuery: setQ, visibleEvents, detEv, setDetEv, modal } = useC();
   
   if (!searchOpen) return null;
 
@@ -3012,7 +3012,7 @@ export function SearchModal() {
   ).sort((a,b) => new Date(b.start) - new Date(a.start)) : [];
 
   return (
-    <div className="absolute inset-0 z-[60] bg-white flex flex-col">
+    <div className="absolute inset-0 z-[60] bg-white flex flex-col" style={{ visibility: detEv || modal.open ? "hidden" : "visible" }}>
       <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
         <button onClick={() => setSearchOpen(false)} className="p-2 -ml-2 rounded-full hover:bg-gray-50">
           <ChevronLeft size={24} className="text-gray-700"/>
@@ -3042,7 +3042,7 @@ export function SearchModal() {
         {res.map(ev => {
           const cal = CALS.find(c=>c.id===ev.calId);
           return (
-            <div key={ev.id} onClick={() => { setDetEv(ev); setSearchOpen(false); }} className="bg-white p-4 border-b border-gray-100 active:bg-gray-50 cursor-pointer">
+            <div key={ev.id} onClick={() => setDetEv(ev)} className="bg-white p-4 border-b border-gray-100 active:bg-gray-50 cursor-pointer">
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor: cal?.color||"#333"}}/>
