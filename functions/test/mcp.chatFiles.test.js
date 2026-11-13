@@ -18,3 +18,10 @@ test('만료, 비이미지, 크기 초과, 리다이렉트 실패 처리', async
  await assert.rejects(downloadChatPhotos([file],async()=>new Response(png,{headers:{'content-length':String(11*1024*1024)}})),/10MB/);
  await assert.rejects(downloadChatPhotos([file],async()=>{throw Error('redirect');}),/다운로드/);
 });
+
+test('실제 ChatGPT 일본 리전 파일 저장소만 허용하며 임의 Azure 저장소는 거부', async () => {
+ const real={...file,download_url:'https://oaisdmntprjapaneast.blob.core.windows.net/test'};
+ const result=await downloadChatPhotos([real],async()=>new Response(png));
+ assert.equal(result[0].mimeType,'image/png');
+ await assert.rejects(downloadChatPhotos([{...file,download_url:'https://evil.blob.core.windows.net/test'}]),/호스트/);
+});
