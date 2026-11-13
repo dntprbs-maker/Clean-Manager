@@ -188,3 +188,34 @@ test('없는 대상 사진 교체는 업로드 전에 거부한다', async () =>
   assert.equal(r.isError,true);
   assert.equal(Object.keys(bucket._files).length,0);
 });
+
+test('ChatGPT 첨부 도구 메타데이터 및 클라우드 추가·교체 종단 저장', async () => {
+ const server = createMcpServer(CO, OWNER_AGENT);
+ const [a,b] = InMemoryTransport.createLinkedPair();
+ const client = new Client({name:'file-test',version:'1'});
+ await Promise.all([server.connect(a),client.connect(b)]);
+ const listed = await client.listTools();
+ for (const [name, field] of [['attach_event_photos','files'],['replace_event_photo','file']]) {
+  const tool = listed.tools.find(t=>t.name===name);
+  assert.deepEqual(tool._meta['openai/fileParams'],[field]);
+  const schema = tool.inputSchema.properties[field];
+  const obj = schema.items || schema;
+  assert.deepEqual(obj.required,['download_url','file_id']);
+  for (const prop of ['download_url','file_id','mime_type','file_name']) assert.ok(obj.properties[prop]);
+ }
+ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64');
+ const oldFetch=globalThis.fetch;
+ globalThis.fetch=async()=>new Response(png);
+ try {
+  const file={download_url:'https://files.oaiusercontent.com/test',file_id:'file-test',file_name:'cloud.png'};
+  let r=await client.callTool({name:'attach_event_photos',arguments:{eventId:'ev1',files:[file]}});
+  assert.ok(!r.isError,JSON.stringify(r));
+  const first=JSON.parse(r.content[0].text).photos[0];
+  assert.ok(first.url.includes('firebasestorage.googleapis.com'));
+  r=await client.callTool({name:'replace_event_photo',arguments:{eventId:'ev1',photoUrl:first.url,file:{...file,file_name:'replaced.png'}}});
+  assert.ok(!r.isError,JSON.stringify(r));
+  const final=(await db.doc(`companies/${CO}/events/ev1`).get()).data();
+  assert.equal(final.photos.length,1); assert.equal(final.photos[0].name,'replaced.png'); assert.equal(final.title,'상암동 정기청소');
+  assert.deepEqual(Object.values(bucket._files)[0].buffer,png);
+ } finally {globalThis.fetch=oldFetch; await client.close(); await server.close();}
+});
