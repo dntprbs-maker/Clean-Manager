@@ -9,7 +9,7 @@ test('클라우드 사진은 실제 바이트로 변환되고 임시 URL은 저�
 });
 test('임의 호스트, 내부 주소, 사용자정보, HTTP, 포트 거부', async () => {
  for (const url of ['http://files.oaiusercontent.com/x','https://127.0.0.1/x','https://files.oaiusercontent.com.evil.com/x','https://user@files.oaiusercontent.com/x','https://files.oaiusercontent.com:444/x']) {
-  await assert.rejects(downloadChatPhotos([{...file,download_url:url}],()=>{ throw Error('호출되면 안 됨'); }),/공식/);
+  await assert.rejects(downloadChatPhotos([{...file,download_url:url}],()=>{ throw Error('호출되면 안 됨'); }),/호스트/);
  }
 });
 test('만료, 비이미지, 크기 초과, 리다이렉트 실패 처리', async () => {
