@@ -7,9 +7,6 @@
       "hosting": {
         "main": [
           "clean-manager-60bc9"
-        ],
-        "attendance": [
-          "clean-manager-attendance"
         ]
       }
     }
