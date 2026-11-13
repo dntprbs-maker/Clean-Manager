@@ -23,7 +23,7 @@ export async function downloadChatPhotos(files, fetcher = fetch) {
     try { url = new URL(file.download_url); } catch { throw Error('ChatGPT 파일 다운로드 주소가 없습니다. 사진을 다시 첨부해주세요.'); }
     if (url.protocol !== 'https:' || url.username || url.password || url.port ||
       !(url.hostname === 'files.oaiusercontent.com' || url.hostname.endsWith('.oaiusercontent.com'))) {
-      throw Error('ChatGPT 공식 첨부파일 주소만 허용합니다. 사진을 대화에 다시 첨부해주세요.');
+      throw Error(`ChatGPT 첨부파일 호스트가 허용되지 않았습니다 (${url.hostname.slice(0,200)}). 관리자에게 이 호스트만 전달해주세요. 다운로드 전체 주소는 공유하지 마세요.`);
     }
     let response;
     try { response = await fetcher(url.href, { redirect: 'error', signal: AbortSignal.timeout(30_000) }); }
