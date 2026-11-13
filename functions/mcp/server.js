@@ -11,6 +11,8 @@ export const TOOL_SCOPES = {
   get_event_finance: SCOPES.FINANCE_READ,
   set_event_finance: SCOPES.FINANCE_WRITE,
   attach_event_photos: SCOPES.WRITE,
+  replace_event_photo: SCOPES.WRITE,
+  remove_event_photo: SCOPES.WRITE,
   export_hub_changes: SCOPES.READ,
   export_hub_events: SCOPES.READ,
   list_events: SCOPES.READ,
