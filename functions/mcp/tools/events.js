@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CHAT_FILE, downloadChatPhotos } from '../lib/chatFiles.js';
 import { randomUUID } from "node:crypto";
 import { getDb, getBucket } from "../lib/db.js";
 import { expandRecurringForFeed } from "../../lib/recurring.js";
@@ -359,14 +360,16 @@ export function registerEventTools(server, companyId) {
   );
 
   server.registerTool('attach_event_photos', {
-    title: '현장 일정에 사진 추가', description: '기존 사진을 지우지 않고 새 사진만 추가한다. 업로드 데이터는 base64로 전달하거나 기존 HTTPS URL을 쓴다. 이후 get_event로 사진 URL을 확인한다.',
-    inputSchema: { eventId: z.string().min(1), photos: z.array(PHOTO_SHAPE).min(1).max(20) },
-  }, async ({ eventId, photos }, extra) => {
+    title: '현장 일정에 사진 추가', description: 'ChatGPT 대화 첨부 사진은 files로 전달한다. 서버가 파일을 다운로드하여 영구 저장한다. 일정 생성 후에도 이 도구로 첨부한다. 기존 사진은 보존한다. 로컬 업로드는 photos의 base64 또는 기존 HTTPS URL도 지원한다. 이후 get_event로 확인한다.',
+    _meta: { 'openai/fileParams': ['files'] },
+    inputSchema: { eventId: z.string().min(1), photos: z.array(PHOTO_SHAPE).min(1).max(20).optional(), files: z.array(CHAT_FILE).min(1).max(20).optional() },
+  }, async ({ eventId, photos, files }, extra) => {
+    if (!!photos === !!files) return err("photos 또는 ChatGPT 첨부 files 중 하나만 전달해주세요.");
     const ref = eventsCol().doc(eventId), original = await ref.get();
     if (!original.exists || original.data().status === 'deleted') return err('일정을 찾을 수 없습니다.');
-    if ((original.data().photos || []).length + photos.length > 100) return err('일정당 사진은 100장까지 첨부할 수 있습니다.');
+    if ((original.data().photos || []).length + (photos || files).length > 100) return err('일정당 사진은 100장까지 첨부할 수 있습니다.');
     try {
-      const uploaded = await uploadPhotos(companyId,eventId,photos);
+      const uploaded = await uploadPhotos(companyId,eventId,files ? await downloadChatPhotos(files) : photos);
       const merged = await getDb().runTransaction(async transaction => {
         const snap = await transaction.get(ref); if (!snap.exists || snap.data().status === 'deleted') throw Error('일정을 찾을 수 없습니다.');
         const all = [...(snap.data().photos || [])];
@@ -383,14 +386,16 @@ export function registerEventTools(server, companyId) {
     server.registerTool(replace ? 'replace_event_photo' : 'remove_event_photo', {
       title: replace ? '일정 사진 한 장 교체' : '일정 사진 한 장 삭제',
       description: '먼저 get_event로 조회한 photoUrl을 지정한다. ' +
-        (replace ? '해당 사진을 새 사진으로 교체하며 순서를 유지한다.' : '사용자가 삭제를 요청한 사진만 일정에서 제거한다.') +
+        (replace ? '해당 사진을 새 사진으로 교체하며 순서를 유지한다. ChatGPT 첨부는 file로 전달한다.' : '사용자가 삭제를 요청한 사진만 일정에서 제거한다.') +
         ' 다른 사진과 일정은 보존한다. 저장소 원본 파일은 영구 삭제하지 않는다.',
+      ...(replace ? { _meta: { 'openai/fileParams': ['file'] } } : {}),
       inputSchema: {
         eventId: z.string().min(1),
         photoUrl: z.string().min(1).max(4096).describe('현재 일정에 첨부된 대상 사진의 정확한 URL'),
-        ...(replace ? { photo: PHOTO_SHAPE.describe('교체할 새 사진') } : {}),
+        ...(replace ? { photo: PHOTO_SHAPE.optional().describe('로컬 또는 URL 사진'), file: CHAT_FILE.optional().describe('ChatGPT에 첨부한 교체 사진') } : {}),
       },
-    }, async ({ eventId, photoUrl, photo }, extra) => {
+    }, async ({ eventId, photoUrl, photo, file }, extra) => {
+      if (replace && (!!photo === !!file)) return err("photo 또는 ChatGPT 첨부 file 중 하나만 전달해주세요.");
       const ref = eventsCol().doc(eventId);
       const check = snap => {
         if (!snap.exists || snap.data().status === 'deleted') throw Error('일정을 찾을 수 없습니다.');
@@ -400,7 +405,7 @@ export function registerEventTools(server, companyId) {
       };
       try {
         check(await ref.get());
-        const uploaded = replace ? (await uploadPhotos(companyId, eventId, [photo]))[0] : null;
+        const uploaded = replace ? (await uploadPhotos(companyId, eventId, file ? await downloadChatPhotos([file]) : [photo]))[0] : null;
         const result = await getDb().runTransaction(async transaction => {
           const photos = check(await transaction.get(ref));
           const next = replace
