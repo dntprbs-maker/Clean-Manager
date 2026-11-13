@@ -163,3 +163,28 @@ test('위험하거나 잘못된 사진은 저장 전에 차단한다',async()=>{
   for(const photo of [{name:'x.svg',dataBase64:'YWJj',mimeType:'image/svg+xml'},{name:'bad.png',dataBase64:'!!!!',mimeType:'image/png'},{name:'x',url:'javascript:alert(1)'},{name:'x',url:'http://example.com/a'},{name:'x',url:'https://example.com/a',dataBase64:'YWJj'}])assert.ok((await call('attach_event_photos',{eventId:'ev1',photos:[photo]})).isError);
   assert.equal(Object.keys(bucket._files).length,0);assert.equal(db._store.get(`companies/${CO}/events/ev1`).photos,undefined);
 });
+
+test('사진 개별 교체·삭제는 순서와 다른 일정 필드를 보존한다', async () => {
+  const {call} = await connect();
+  const photos = [{name:'a.jpg',url:'https://example.com/a.jpg'}, {name:'b.jpg',url:'https://example.com/b.jpg'}];
+  await call('attach_event_photos',{eventId:'ev1',photos});
+  const replaced = await call('replace_event_photo',{eventId:'ev1',photoUrl:photos[0].url,photo:{name:'new.png',dataBase64:Buffer.from('test').toString('base64'),mimeType:'image/png'}});
+  assert.equal(replaced.isError,false,replaced.text);
+  assert.equal(replaced.data.photos[0].name,'new.png');
+  assert.deepEqual(replaced.data.photos[1],photos[1]);
+  const removed = await call('remove_event_photo',{eventId:'ev1',photoUrl:replaced.data.photos[0].url});
+  assert.equal(removed.isError,false,removed.text);
+  assert.deepEqual(removed.data.photos,[photos[1]]);
+  assert.equal(Object.keys(bucket._files).length,1);
+  const got=await call('get_event',{eventId:'ev1'});
+  assert.equal(got.data.title,'상암동 정기청소');
+  assert.deepEqual(got.data.photos,[photos[1]]);
+  assert.equal((await call('remove_event_photo',{eventId:'ev1',photoUrl:photos[0].url})).isError,true);
+});
+
+test('없는 대상 사진 교체는 업로드 전에 거부한다', async () => {
+  const {call}=await connect();
+  const r=await call('replace_event_photo',{eventId:'ev1',photoUrl:'https://example.com/missing',photo:{name:'x.png',dataBase64:'dGVzdA==',mimeType:'image/png'}});
+  assert.equal(r.isError,true);
+  assert.equal(Object.keys(bucket._files).length,0);
+});

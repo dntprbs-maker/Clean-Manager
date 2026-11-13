@@ -378,6 +378,42 @@ export function registerEventTools(server, companyId) {
     } catch(error) { return err(`사진 첨부 실패: ${error.message}`); }
   });
 
+  // URL로 대상을 특정하고 트랜잭션에서 재확인하여 다른 사진·일정 필드를 보존한다.
+  for (const replace of [true, false]) {
+    server.registerTool(replace ? 'replace_event_photo' : 'remove_event_photo', {
+      title: replace ? '일정 사진 한 장 교체' : '일정 사진 한 장 삭제',
+      description: '먼저 get_event로 조회한 photoUrl을 지정한다. ' +
+        (replace ? '해당 사진을 새 사진으로 교체하며 순서를 유지한다.' : '사용자가 삭제를 요청한 사진만 일정에서 제거한다.') +
+        ' 다른 사진과 일정은 보존한다. 저장소 원본 파일은 영구 삭제하지 않는다.',
+      inputSchema: {
+        eventId: z.string().min(1),
+        photoUrl: z.string().min(1).max(4096).describe('현재 일정에 첨부된 대상 사진의 정확한 URL'),
+        ...(replace ? { photo: PHOTO_SHAPE.describe('교체할 새 사진') } : {}),
+      },
+    }, async ({ eventId, photoUrl, photo }, extra) => {
+      const ref = eventsCol().doc(eventId);
+      const check = snap => {
+        if (!snap.exists || snap.data().status === 'deleted') throw Error('일정을 찾을 수 없습니다.');
+        const photos = snap.data().photos || [];
+        if (!photos.some(p => p.url === photoUrl)) throw Error('대상 사진이 없습니다. get_event로 다시 조회해주세요.');
+        return photos;
+      };
+      try {
+        check(await ref.get());
+        const uploaded = replace ? (await uploadPhotos(companyId, eventId, [photo]))[0] : null;
+        const result = await getDb().runTransaction(async transaction => {
+          const photos = check(await transaction.get(ref));
+          const next = replace
+            ? photos.map(p => p.url === photoUrl ? { ...uploaded, ...(uploaded.url === p.url && p.path ? { path: p.path } : {}) } : p)
+            : photos.filter(p => p.url !== photoUrl);
+          transaction.set(ref, { photos: next, mcpUpdatedBy: audit(extra?.agent) }, { merge: true });
+          return next;
+        });
+        return ok({ eventId, photos: publicPhotos(result), storageFilesDeleted: false });
+      } catch (error) { return err(`사진 변경 실패: ${error.message}`); }
+    });
+  }
+
   // 삭제는 AI가 직접 하지 않는다. 요청만 남기고, 실제 삭제는 관리자가 확인 후 처리한다.
   // (구글 캘린더에서 온 일정은 앱에서 지워도 다음 동기화 때 되살아날 수 있어 더더욱 사람 확인이 필요)
   server.registerTool(

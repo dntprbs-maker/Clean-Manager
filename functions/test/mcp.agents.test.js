@@ -41,7 +41,7 @@ const readOnly = { agentId: "ro", label: "읽기전용", scopes: ["events:read"]
 
 test("에이전트 권한에 따라 도구 목록이 달라진다 (일반 AI는 직원·팀 관리 및 실삭제 도구 없음)", async () => {
   const { tools } = await connect(chorong);
-  assert.deepEqual(tools, ["attach_event_photos", "create_event", "export_hub_changes", "export_hub_events", "get_event", "list_events", "list_teams", "request_event_deletion", "search_events", "update_event"]);
+  assert.deepEqual(tools, ["attach_event_photos", "create_event", "export_hub_changes", "export_hub_events", "get_event", "list_events", "list_teams", "remove_event_photo", "replace_event_photo", "request_event_deletion", "search_events", "update_event"]);
   assert.ok(!tools.includes("delete_event"));
   const ro = await connect(readOnly);
   assert.deepEqual(ro.tools, ["export_hub_changes", "export_hub_events", "get_event", "list_events", "list_teams", "search_events"]);
@@ -159,4 +159,5 @@ test("SDK 인증 미들웨어 통과: 접속키·OAuth 토큰 OK, 잘못된 키�
   assert.equal((await run(key)).status, 401);
   assert.equal((await run("tokA")).status, 401);
 });
+
 
