@@ -36,3 +36,13 @@ test('호주 동부 첨부 저장소 허용 및 유사 호스트 차단', async 
   await assert.rejects(downloadChatPhotos([{...file,download_url:url}], async () => { throw Error('호출되면 안 됨'); }), /호스트/);
  }
 });
+test('미국 서부 첨부 저장소는 허용하고 유사 주소는 다운로드 전에 거부', async () => {
+ const host = 'oaisdmntprwestus.blob.core.windows.net';
+ const result = await downloadChatPhotos([{...file, download_url:`https://${host}/test`}], async (_url, opts) => { assert.equal(opts.redirect, 'error'); return new Response(png); });
+ assert.equal(result[0].dataBase64, png.toString('base64'));
+ for (const url of [`https://${host}.evil.com/test`, 'https://evil.blob.core.windows.net/test', 'https://oaisdmntprwestus2.blob.core.windows.net/test', `http://${host}/test`, `https://user@${host}/test`, `https://${host}:444/test`]) {
+  let called = false;
+  await assert.rejects(downloadChatPhotos([{...file,download_url:url}], async () => { called=true; throw Error('unexpected'); }), /호스트/);
+  assert.equal(called, false);
+ }
+});
