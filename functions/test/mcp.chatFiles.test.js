@@ -25,3 +25,14 @@ test('실제 ChatGPT 일본 리전 파일 저장소만 허용하며 임의 Azure
  assert.equal(result[0].mimeType,'image/png');
  await assert.rejects(downloadChatPhotos([{...file,download_url:'https://evil.blob.core.windows.net/test'}]),/호스트/);
 });
+
+test('호주 동부 첨부 저장소 허용 및 유사 호스트 차단', async () => {
+ const host = 'oaisdmntpraustraliaeast.blob.core.windows.net';
+ let calls = 0;
+ const result = await downloadChatPhotos([{...file, download_url:`https://${host}/test`}], async (_url, opts) => { calls++; assert.equal(opts.redirect, 'error'); return new Response(png); });
+ assert.equal(calls, 1);
+ assert.equal(result[0].dataBase64, png.toString('base64'));
+ for (const url of [`https://${host}.evil.com/test`, 'https://evil.blob.core.windows.net/test', 'https://oaisdmntpraustraliaeast2.blob.core.windows.net/test', `http://${host}/test`, `https://user@${host}/test`, `https://${host}:444/test`]) {
+  await assert.rejects(downloadChatPhotos([{...file,download_url:url}], async () => { throw Error('호출되면 안 됨'); }), /호스트/);
+ }
+});
