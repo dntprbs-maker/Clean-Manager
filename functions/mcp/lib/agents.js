@@ -25,6 +25,7 @@ export const SCOPES = {
 // 기본 등록 대상. 실제 키·권한은 Firestore 문서가 기준이며, 이 표는 스크립트 기본값일 뿐이다.
 export const DEFAULT_AGENTS = {
   chorong: { label: "초롱이", platform: "ChatGPT" },
+  jian: { label: "지안", platform: "ChatGPT" },
   harry: { label: "해리", platform: "Hermes" },
   ari: { label: "아리", platform: "Claude" },
   dexd: { label: "덱스D", platform: "Codex 데스크톱" },

@@ -17,6 +17,7 @@
 | AI | agentId | 연결 방식 | 기본 권한 |
 |---|---|---|---|
 | 초롱이 (ChatGPT) | `chorong` | OAuth (커넥터) | 조회·검색·등록·수정·삭제요청 |
+| 지안 (ChatGPT) | `jian` | OAuth 또는 Bearer | 조회·검색·등록·수정·삭제요청 |
 | 해리 (Hermes) | `harry` | OAuth(`auth: oauth`) 또는 `headers` | 〃 |
 | 아리 (Claude) | `ari` | OAuth (claude.ai 커넥터) | 〃 |
 | 덱스D (Codex 데스크톱) | `dexd` | `bearer_token_env_var` 또는 `codex mcp login` | 〃 |
