@@ -1,3 +1,4 @@
+import { syncEventCalendar } from "../../lib/eventCalendar.js";
 import { z } from "zod";
 import { CHAT_FILE, downloadChatPhotos } from '../lib/chatFiles.js';
 import { randomUUID } from "node:crypto";
@@ -15,12 +16,6 @@ async function loadTeamNameByCalId(companyId) {
   return map;
 }
 
-async function resolveCalId(companyId, teamName) {
-  if (!teamName) return null;
-  const snap = await getDb().collection(`companies/${companyId}/cals`).get();
-  const hit = snap.docs.find((d) => { const c = d.data(); return c.label === teamName || c.name === teamName; });
-  return hit ? hit.id : null;
-}
 
 const REPEAT_FIELDS = {
   repeat: z.enum(["none", "daily", "weekly", "monthly", "yearly"]).optional(),
@@ -75,7 +70,7 @@ function toView(ev, teamByCal, agent) {
     place: ev.place,
     contact: ev.contact,
     description: ev.description,
-    team: ev.team || teamByCal[ev.calId] || null,
+    team: teamByCal[ev.calId] ?? ev.team ?? null,
     calId: ev.calId || null,
     repeat: ev.repeat && ev.repeat !== "none" ? ev.repeat : undefined,
     mcpTest: ev.mcpTest ? true : undefined,
@@ -159,7 +154,7 @@ export function registerEventTools(server, companyId) {
       return ev.start <= end && evEnd >= start;
     });
     const filtered = team
-      ? inRange.filter((ev) => ev.team === team || teamByCal[ev.calId] === team)
+      ? inRange.filter((ev) => (teamByCal[ev.calId] ?? ev.team) === team)
       : inRange;
     return filtered.map((ev) => toView(ev, teamByCal, agent));
   }
@@ -238,13 +233,14 @@ export function registerEventTools(server, companyId) {
         contact: z.string().optional().describe("연락처"),
         description: z.string().optional().describe("메모/특이사항"),
         team: z.string().optional().describe("담당 팀 이름 (기존에 있는 팀이어야 함)"),
+        calId: z.string().optional().describe("담당 달력 ID"),
         test: z.boolean().optional().describe("시험용 일정이면 true — 제목 앞에 [MCP시험]이 붙고 직원 알림이 가지 않는다"),
         photos: z.array(PHOTO_SHAPE).optional().describe("첨부 사진 목록"),
         ...REPEAT_FIELDS,
       },
     },
     async (input, extra) => {
-      const { title: rawTitle, start, team, test, photos, ...rest } = input;
+      const { title: rawTitle, start, team, calId: selectedCalId, test, photos, ...rest } = input;
       const title = test && !rawTitle.startsWith(TEST_TITLE_PREFIX) ? TEST_TITLE_PREFIX + rawTitle : rawTitle;
       let end = rest.end || start;
       if (end < start) return err("end는 start보다 빠를 수 없습니다.");
@@ -262,8 +258,12 @@ export function registerEventTools(server, companyId) {
         }
       }
       rest.end = end;
-      const calId = await resolveCalId(companyId, team);
-      if (team && !calId) return err(`팀 "${team}"을 찾을 수 없습니다. list_teams로 존재하는 팀 이름을 확인하세요.`);
+      const calendars = await getDb().collection(`companies/${companyId}/cals`).get();
+      let assignment;
+      try {
+        assignment = syncEventCalendar({ ...(team !== undefined ? { team } : {}), ...(selectedCalId !== undefined ? { calId: selectedCalId } : {}) }, calendars.docs.map(d => ({ ...d.data(), id: d.id })));
+      } catch (e) { return err(e.message); }
+
 
       const docRef = eventsCol().doc();
       let uploadedPhotos;
@@ -272,7 +272,7 @@ export function registerEventTools(server, companyId) {
       } catch (e) {
         return err(`사진 업로드 실패: ${e.message}`);
       }
-      const data = { title, start, end, team: team || "", calId: calId || "", ...rest, mcpCreatedBy: audit(extra?.agent) };
+      const data = { title, start, end, team: assignment.team || "", calId: assignment.calId || "", ...rest, mcpCreatedBy: audit(extra?.agent) };
       if (uploadedPhotos) data.photos = uploadedPhotos;
       if (test) data.mcpTest = true;
       await docRef.set(data);
@@ -291,6 +291,7 @@ export function registerEventTools(server, companyId) {
     contact: z.string().optional(),
     description: z.string().optional(),
     team: z.string().optional(),
+    calId: z.string().optional(),
     photos: z.array(PHOTO_SHAPE).optional().describe("전체 교체 — 기존 사진을 유지하려면 그 사진도 url로 함께 포함해서 보낼 것"),
     ...REPEAT_FIELDS,
   };
@@ -342,10 +343,11 @@ export function registerEventTools(server, companyId) {
       }
 
       const next = { ...patch, mcpUpdatedBy: audit(extra?.agent) };
-      if (patch.team !== undefined) {
-        const calId = await resolveCalId(companyId, patch.team);
-        if (patch.team && !calId) return err(`팀 "${patch.team}"을 찾을 수 없습니다.`);
-        next.calId = calId || "";
+      if (patch.team !== undefined || patch.calId !== undefined) {
+        const calendars = await getDb().collection(`companies/${companyId}/cals`).get();
+        try {
+          Object.assign(next, syncEventCalendar(patch, calendars.docs.map(d => ({ ...d.data(), id: d.id })), cur));
+        } catch (e) { return err(e.message); }
       }
       if (patch.photos !== undefined) {
         try {
