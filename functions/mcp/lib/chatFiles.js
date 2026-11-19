@@ -8,6 +8,14 @@ export const CHAT_FILE = z.object({
   file_name: z.string().optional(),
 });
 const MAX = 10 * 1024 * 1024;
+// Exact storage accounts observed in authenticated ChatGPT file inputs.
+// Azure account-name prefixes alone are not proof of ownership.
+const CHAT_STORAGE_HOSTS = new Set([
+  'oaisdmntprjapaneast.blob.core.windows.net',
+  'oaisdmntpraustraliaeast.blob.core.windows.net',
+  'oaisdmntprwestus.blob.core.windows.net',
+  'oaisdmntprindiasocentral.blob.core.windows.net',
+]);
 function imageType(b) {
   if (b.length >= 3 && b[0] === 255 && b[1] === 216 && b[2] === 255) return 'image/jpeg';
   if (b.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return 'image/png';
@@ -17,14 +25,20 @@ function imageType(b) {
 }
 export async function downloadChatPhotos(files, fetcher = fetch) {
   if (!files?.length || files.length > 20) throw Error('사진은 1~20장까지 전달해주세요.');
-  const result = []; let total = 0;
-  for (const file of files) {
+  const blocked = new Set();
+  const urls = files.map(file => {
     let url;
     try { url = new URL(file.download_url); } catch { throw Error('ChatGPT 파일 다운로드 주소가 없습니다. 사진을 다시 첨부해주세요.'); }
     if (url.protocol !== 'https:' || url.username || url.password || url.port ||
-      !(url.hostname === 'oaisdmntprjapaneast.blob.core.windows.net' || url.hostname === 'oaisdmntpraustraliaeast.blob.core.windows.net' || url.hostname === 'oaisdmntprwestus.blob.core.windows.net' || url.hostname === 'files.oaiusercontent.com' || url.hostname.endsWith('.oaiusercontent.com'))) {
-      throw Error(`ChatGPT 첨부파일 호스트가 허용되지 않았습니다 (${url.hostname.slice(0,200)}). 관리자에게 이 호스트만 전달해주세요. 다운로드 전체 주소는 공유하지 마세요.`);
+      !(CHAT_STORAGE_HOSTS.has(url.hostname) || url.hostname === 'files.oaiusercontent.com' || url.hostname.endsWith('.oaiusercontent.com'))) {
+      blocked.add(url.hostname.slice(0,200));
     }
+    return url;
+  });
+  if (blocked.size) throw Error(`ChatGPT 첨부파일 호스트가 허용되지 않았습니다 (${[...blocked].join(', ')}). 관리자에게 이 호스트만 전달해주세요. 다운로드 전체 주소는 공유하지 마세요.`);
+  const result = []; let total = 0;
+  for (const [index, file] of files.entries()) {
+    const url = urls[index];
     let response;
     try { response = await fetcher(url.href, { redirect: 'error', signal: AbortSignal.timeout(30_000) }); }
     catch { throw Error('첨부파일 다운로드에 실패했습니다. 사진을 다시 첨부해주세요.'); }

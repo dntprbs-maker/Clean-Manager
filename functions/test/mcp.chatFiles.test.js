@@ -46,3 +46,27 @@ test('미국 서부 첨부 저장소는 허용하고 유사 주소는 다운로�
   assert.equal(called, false);
  }
 });
+test('네 지역 파일4장을 한 요청에서 내려받고 영구 저장용 데이터로 변환', async () => {
+ const hosts = ['oaisdmntprjapaneast','oaisdmntpraustraliaeast','oaisdmntprwestus','oaisdmntprindiasocentral'];
+ const files = hosts.map((host,i)=>({...file, file_name:`현장${i+1}.png`,download_url:`https://${host}.blob.core.windows.net/test?sig=private`}));
+ const result = await downloadChatPhotos(files, async (_url,opts)=>{assert.equal(opts.redirect,'error'); return new Response(png);});
+ assert.equal(result.length,4);
+ assert.deepEqual(result.map(p=>p.name),files.map(f=>f.file_name));
+ assert.ok(result.every(p=>p.dataBase64===png.toString('base64') && !p.url));
+});
+
+test('모든 파일 주소를 사전 검사하여 차단 호스트 전체만 보고하고 다운로드하지 않는다', async () => {
+ let calls=0;
+ const urls=['https://files.oaiusercontent.com/test','https://unknown1.blob.core.windows.net/a?sig=secret1','https://unknown2.blob.core.windows.net/b?sig=secret2'];
+ await assert.rejects(downloadChatPhotos(urls.map(download_url=>({...file,download_url})),async()=>{calls++;return new Response(png);}), error=>{
+  assert.match(error.message,/unknown1.blob.core.windows.net/);
+  assert.match(error.message,/unknown2.blob.core.windows.net/);
+  assert.doesNotMatch(error.message,/secret|sig=|https:/);
+  return true;
+ });
+ assert.equal(calls,0);
+ for(const url of ['https://oaisdmntprindiasocentral.blob.core.windows.net.evil.com/test','https://oaisdmntprfake.blob.core.windows.net/test','https://oaisdmntprindiasocentral2.blob.core.windows.net/test']) {
+  await assert.rejects(downloadChatPhotos([{...file,download_url:url}],async()=>{calls++;return new Response(png);}),/호스트/);
+ }
+ assert.equal(calls,0);
+});
