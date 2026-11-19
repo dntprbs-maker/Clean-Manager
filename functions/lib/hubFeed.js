@@ -30,7 +30,7 @@ export function buildHubFeed(events, teams, { start, end, offset = 0, snapshot }
       all_day: Boolean(e.allDay), timezone: 'Asia/Seoul', location: e.place || null,
       recurring_event_id: e.repeat && e.repeat !== 'none' ? e.id : null,
       recurrence: e.repeat && e.repeat !== 'none' ? JSON.stringify(Object.fromEntries(Object.entries(e).filter(([k])=>k.startsWith('repeat')))) : null,
-      calendar_id: e.calId || null, worker: e.team || teams[e.calId] || null,
+      calendar_id: e.calId || null, worker: teams[e.calId] ?? e.team ?? null,
       source_url: 'https://clean-manager-60bc9.web.app/',
     })).sort((a,b)=>a.source_id.localeCompare(b.source_id));
   return { schema_version: 1, snapshot: revision, window_from: start, window_to: addDays(end,1), total: rows.length,

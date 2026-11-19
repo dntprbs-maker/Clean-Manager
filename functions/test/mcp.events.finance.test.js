@@ -219,3 +219,19 @@ test('ChatGPT 첨부 도구 메타데이터 및 클라우드 추가·교체 종�
   assert.deepEqual(Object.values(bucket._files)[0].buffer,png);
  } finally {globalThis.fetch=oldFetch; await client.close(); await server.close();}
 });
+
+
+test("팀·달력 양방향 변경과 calId 기준 조회·필터", async () => {
+  await db.doc(`companies/${CO}/cals/cal2`).set({ label: "B팀" });
+  await db.doc(`companies/${CO}/events/ev1`).update({ team: "옛팀" });
+  const { call } = await connect();
+  assert.equal((await call("get_event",{eventId:"ev1"})).data.team,"A팀");
+  assert.equal((await call("list_events",{start:"2026-10-30",end:"2026-10-30",team:"옛팀"})).data.length,0);
+  assert.equal((await call("update_event",{eventId:"ev1",patch:{calId:"cal2"}})).isError,false);
+  assert.equal((await db.doc(`companies/${CO}/events/ev1`).get()).data().team,"B팀");
+  await call("update_event",{eventId:"ev1",patch:{team:"A팀"}});
+  assert.equal((await db.doc(`companies/${CO}/events/ev1`).get()).data().calId,"cal1");
+  const created=await call("create_event",{title:"양방향 시험",start:"2026-11-20",calId:"cal2",test:true});
+  assert.equal(created.isError,false,created.text);
+  assert.equal(created.data.team,"B팀");
+});
