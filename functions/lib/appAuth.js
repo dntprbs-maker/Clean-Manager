@@ -2,7 +2,7 @@ import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { randomUUID } from 'node:crypto';
 import { getAuth } from 'firebase-admin/auth';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getFirestore as untrackedFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { createAppAuthService, AppAuthError, verifyAppPrincipal, publicProfile, canViewWidgetEvent, projectCalendar } from './appAuthCore.js';
 import { recordAppReadChange, readAppChanges, getSourceIds } from './appReadChanges.js';
@@ -11,15 +11,20 @@ import { handleSharedSchedule } from './sharedSchedule.js';
 import { getMemberships, isAdminStaff, isLeaderOf } from './membership.js';
 import { prepareScopedRead, readScopeKey, normalizeReadScope, loadScopedEventSnapshots, loadScopedReportSnapshots, ScopedReadError, widgetErrorStatus, widgetEvent, projectWidgetRange, mayReadFullReportLedger } from './appScopedReads.js';
 
+import { trackedFirestore, withReadUsage, identifyReadUsage } from './readUsage.js';
+const getFirestore = () => trackedFirestore(untrackedFirestore());
+const usageOnCall = (name, options, handler) => onCall(options, withReadUsage(name, handler));
+const usageOnRequest = (name, options, handler) => onRequest(options, withReadUsage(name, handler));
+
 if (!getApps().length) initializeApp();
 const service = createAppAuthService({ db: getFirestore(), issueToken: (uid, claims) => getAuth().createCustomToken(uid, claims) });
 export const verifyLiveAppSession = async (request, options) => {
   if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
-  try { return await verifyAppPrincipal(getFirestore(), request.auth.token, options); }
+  try { const principal = await verifyAppPrincipal(getFirestore(), request.auth.token, options); identifyReadUsage(principal); return principal; }
   catch (e) { throw new HttpsError(e.code || 'unauthenticated', e.message); }
 };
-export const appAuth = onCall({ region: 'asia-northeast3', maxInstances: 5 }, async request => {
-  try { return await service(request.data, request.auth, request.rawRequest.ip); }
+export const appAuth = usageOnCall('appAuth', { region: 'asia-northeast3', maxInstances: 5 }, async request => {
+  try { const result = await service(request.data, request.auth, request.rawRequest.ip); if (result.user) identifyReadUsage({ user: result.user, kind: result.user.role === '최고관리자' ? 'admin' : 'staff' }); return result; }
   catch (e) {
     if (e instanceof AppAuthError) throw new HttpsError(e.code, e.message);
     // Do not log request credentials or raw account documents.
@@ -28,7 +33,7 @@ export const appAuth = onCall({ region: 'asia-northeast3', maxInstances: 5 }, as
   }
 });
 
-export const appSharedSchedule = onCall({ region: 'asia-northeast3', maxInstances: 5 }, async request => {
+export const appSharedSchedule = usageOnCall('appSharedSchedule', { region: 'asia-northeast3', maxInstances: 5 }, async request => {
   const principal = await verifyLiveAppSession(request, { allowIndependent: true });
   try { return await handleSharedSchedule(getFirestore(), principal, request.data); }
   catch (e) {
@@ -66,7 +71,7 @@ export const appReadCalendarChanged = invalidateRead('cals');
 export const appReadAssignmentChanged = invalidateRead('assignments');
 export const appReadUserChanged = invalidateRead('users');
 
-export const appReadData = onCall({ region: 'asia-northeast3', maxInstances: 5 }, async request => {
+export const appReadData = usageOnCall('appReadData', { region: 'asia-northeast3', maxInstances: 5 }, async request => {
   const principal = await verifyLiveAppSession(request);
   const db = getFirestore();
   let prepared;
@@ -151,7 +156,7 @@ export const appReadData = onCall({ region: 'asia-northeast3', maxInstances: 5 }
     serverAt, revision, scopeKey };
 });
 
-export const appWriteData = onCall({ region: 'asia-northeast3', maxInstances: 5 }, async request => {
+export const appWriteData = usageOnCall('appWriteData', { region: 'asia-northeast3', maxInstances: 5 }, async request => {
   const principal = await verifyLiveAppSession(request);
   const { kind, id, value = {}, merge = false, remove = false, expectedVersion, arrayUnionFields = {} } = request.data || {};
   if (!['events', 'reports'].includes(kind) || (id !== undefined && (typeof id !== 'string' || !id || id.includes('/')))
@@ -226,7 +231,7 @@ export const appWriteData = onCall({ region: 'asia-northeast3', maxInstances: 5 
   return { id: ref.id, version: saved.updateTime?.toDate().toISOString() || null };
 });
 
-export const appAccount = onCall({ region: 'asia-northeast3', maxInstances: 5 }, async request => {
+export const appAccount = usageOnCall('appAccount', { region: 'asia-northeast3', maxInstances: 5 }, async request => {
   const principal = await verifyLiveAppSession(request);
   const db = getFirestore();
   const { action, employeeId, oldPassword, newPassword } = request.data || {};
@@ -264,7 +269,7 @@ export const appAccount = onCall({ region: 'asia-northeast3', maxInstances: 5 },
   return { ok: true, requiresLogin: action === 'changePassword' };
 });
 
-export const appWidgetData = onRequest({ region: 'asia-northeast3', maxInstances: 5 }, async (req, res) => {
+export const appWidgetData = usageOnRequest('appWidgetData', { region: 'asia-northeast3', maxInstances: 5 }, async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (req.method !== 'POST') { res.status(405).json({ error: 'method-not-allowed' }); return; }
   try {
@@ -273,6 +278,7 @@ export const appWidgetData = onRequest({ region: 'asia-northeast3', maxInstances
     const claims = await getAuth().verifyIdToken(token, true);
     const db = getFirestore();
     const principal = await verifyAppPrincipal(db, claims);
+    identifyReadUsage(principal);
     const company = principal.user.companyId;
     const body=req.body||{};
     const prepared=body.eventId===undefined?await prepareScopedRead(db,company,body,principal):null;
