@@ -1,3 +1,4 @@
+import { syncEventCalendar } from "./eventCalendar.js";
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { randomUUID } from 'node:crypto';
@@ -193,6 +194,14 @@ export const appWriteData = usageOnCall('appWriteData', { region: 'asia-northeas
     const old = current.data();
     if (id && !current.exists && (merge || remove || expectedVersion !== undefined)) throw new HttpsError('not-found', '자료가 삭제되었습니다.');
     if (expectedVersion !== undefined && current.updateTime?.toDate().toISOString() !== expectedVersion) throw new HttpsError('aborted', '다른 사용자가 수정했습니다. 새로 확인해주세요.');
+    if (kind === 'events' && !remove) {
+      try {
+        Object.assign(clean, syncEventCalendar(clean, cals, old || {}));
+        for (const key of Object.keys(clean).filter(k => /^exceptions\.\d{4}-\d{2}-\d{2}$/.test(k))) {
+          if (!clean[key]?._deleted) clean[key] = syncEventCalendar(clean[key], cals, { ...old, ...old?.exceptions?.[key.slice(11)] });
+        }
+      } catch (e) { throw new HttpsError('invalid-argument', e.message); }
+    }
     const next = { ...old, ...clean, id: ref.id };
     if (kind === 'events') {
       const commentsOnly = !remove && current.exists && Object.keys(clean).every(key => ['leaderComment', 'leaderCommentBy', 'leaderCommentAt'].includes(key));
