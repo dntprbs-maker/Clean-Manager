@@ -299,7 +299,7 @@ export function registerEventTools(server, companyId) {
     "update_event",
     {
       title: "일정 수정",
-      description: "기존 일정을 부분 수정한다. patch에 넣은 필드만 바뀌고 나머지는 그대로 유지된다(전체 덮어쓰기 아님).",
+      description: "기존 일정을 부분 수정한다. 제목·날짜·시간을 바꿀 때 메모를 생략하면 기존 메모 끝에 수정 이력 한 줄을 자동으로 추가한다.",
       inputSchema: {
         eventId: z.string().describe("수정할 일정 id (list_events로 조회한 id)"),
         // 일부 MCP 클라이언트가 nested object 인자를 JSON 문자열로 감싸서 보내는 경우가
@@ -354,7 +354,38 @@ export function registerEventTools(server, companyId) {
           return err(`사진 업로드 실패: ${e.message}`);
         }
       }
-      await docRef.update(next);
+      if (patch.description === undefined && (patch.title !== undefined || touchesSchedule)) {
+        const saved = await getDb().runTransaction(async (transaction) => {
+          const latest = await transaction.get(docRef);
+          if (!latest.exists || latest.data().status === "deleted") return false;
+          const current = latest.data();
+          const fields = {
+            title: "제목", start: "시작일", end: "종료일",
+            startTime: "시작시간", endTime: "종료시간", allDay: "종일",
+          };
+          const display = (value) => String(value ?? "미지정").replace(/[\r\n]+/g, " ");
+          const changes = Object.entries(fields)
+            .filter(([key]) => next[key] !== undefined && next[key] !== current[key])
+            .map(([key, label]) => `${label} ${display(current[key])} → ${display(next[key])}`);
+          if (changes.length) {
+            const stamp = new Intl.DateTimeFormat("sv-SE", {
+              timeZone: "Asia/Seoul", dateStyle: "short", timeStyle: "short",
+            }).format(new Date(next.mcpUpdatedBy.at));
+            const actor = display(next.mcpUpdatedBy.label || next.mcpUpdatedBy.agentId);
+            const line = `[${stamp} · ${actor}] ${changes.join(", ")}`;
+            const original = current.description ?? "";
+            const description = original ? `${original}\n${line}` : line;
+            transaction.set(docRef, { ...next, description }, { merge: true });
+            return { description };
+          }
+          transaction.set(docRef, next, { merge: true });
+          return {};
+        });
+        if (!saved) return err(`일정 ${eventId}을 찾을 수 없습니다.`);
+        Object.assign(next, saved);
+      } else {
+        await docRef.update(next);
+      }
       return ok({ id: eventId, updated: { ...next, ...(next.photos ? { photos: publicPhotos(next.photos) } : {}) } });
     }
   );
