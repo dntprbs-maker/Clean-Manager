@@ -121,12 +121,12 @@ service cloud.firestore {
         // Staff consume appReadData's per-principal calendar projection.
         allow read: if master() || owner(companyId);
         allow create: if master() || owner(companyId)
-          || (request.resource.data.get('personal', false) != true && manager(companyId))
-          || (member(companyId) && request.resource.data.get('personal', false) == true && request.resource.data.get('ownerId', '') == request.auth.token.cmid);
+          || (request.resource.data.get('personal', false) != true && manager(companyId) && !request.resource.data.keys().hasAny(['viewAccess']))
+          || (member(companyId) && request.resource.data.get('personal', false) == true && request.resource.data.get('ownerId', '') == request.auth.token.cmid && !request.resource.data.keys().hasAny(['viewAccess']));
         allow update: if master() || owner(companyId)
-          || (resource.data.get('personal', false) != true && request.resource.data.get('personal', false) != true && manager(companyId))
+          || (resource.data.get('personal', false) != true && request.resource.data.get('personal', false) != true && manager(companyId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['viewAccess']))
           || (member(companyId) && (
-          (resource.data.get('personal', false) == true && resource.data.get('ownerId', '') == request.auth.token.cmid && request.resource.data.get('ownerId', '') == request.auth.token.cmid && request.resource.data.get('personal', false) == true)
+          (resource.data.get('personal', false) == true && resource.data.get('ownerId', '') == request.auth.token.cmid && request.resource.data.get('ownerId', '') == request.auth.token.cmid && request.resource.data.get('personal', false) == true && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['viewAccess']))
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checked'])));
         allow delete: if master() || owner(companyId)
           || (resource.data.get('personal', false) != true && manager(companyId))

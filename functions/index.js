@@ -1,3 +1,4 @@
+import { calendarViewDecision } from './lib/calendarAccess.js';
 // Clean-Manager Cloud Functions — 일정 등록/수정/삭제 시 담당 팀원에게 푸시 알림
 import { onDocumentCreated, onDocumentUpdated, onDocumentDeleted, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onCall, HttpsError, onRequest } from "firebase-functions/v2/https";
@@ -23,7 +24,7 @@ import { handleWebhook, runMaintenance } from "./lib/gcal/service.js";
 import { handleAdmin } from "./lib/gcal/adminPage.js";
 import process from "node:process";
 export { mcp } from "./mcp/index.js";
-export { appSharedSchedule } from './lib/appAuth.js';
+export { appCalendarAccess, appSharedSchedule } from './lib/appAuth.js';
 export { appAuth, appAccount, appWidgetData, appReadData, appWriteData, appProfileChanged, appAdminCredentialChanged, appStaffCredentialChanged,
   appReadEventChanged, appReadReportChanged, appReadCalendarChanged, appReadAssignmentChanged, appReadUserChanged } from './lib/appAuth.js';
 export { hubEventChanged, hubCalendarChanged, hubReportChanged } from './lib/hubChangeTriggers.js';
@@ -291,10 +292,12 @@ async function notifyTeam(companyId, eventId, ev, action) {
 
   // 2) 알림 받을 직원 추리기 (다대다 멤버십 기준)
   const usersSnap = await db.collection(`companies/${companyId}/users`).get();
+  const calendar = ev.calId ? (await db.doc(`companies/${companyId}/cals/${ev.calId}`).get()).data() : null;
   const targets = [];
   usersSnap.forEach((d) => {
     const u = d.data();
     if (u.status === "deleted") return;
+    if (calendarViewDecision(calendar, { kind:'staff', user:{...u, uid:d.id} }) === false) return;
     const isTeamMember = teamName && isMemberOfTeam(u, teamName);
     const isManager = !teamName && isMemberOfTeam(u, "관리팀") && allowsTeam(u, teamName);
     if (isTeamMember || isManager) {
@@ -690,7 +693,7 @@ export const calendarFeed = onRequest({ region: REGION, cors: true }, async (req
   try {
     const calSnap = await db.doc(`companies/${company}/cals/${cal}`).get();
     const calData = calSnap.data();
-    if (!calSnap.exists || !calData?.feedToken || calData.feedToken !== token) {
+    if (!calSnap.exists || calData?.viewAccess?.mode === 'selected' || !calData?.feedToken || calData.feedToken !== token) {
       res.status(403).send("접근 권한이 없습니다.");
       return;
     }

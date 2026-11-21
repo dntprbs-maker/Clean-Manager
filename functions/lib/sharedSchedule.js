@@ -1,3 +1,4 @@
+import { calendarViewDecision } from './calendarAccess.js';
 import { createHash } from 'node:crypto';
 import { AppAuthError } from './appAuthCore.js';
 import { getMemberships } from './membership.js';
@@ -77,7 +78,7 @@ export async function handleSharedSchedule(db, principal, input) {
       });
       if (calendarId) {
         const calendar = (await db.doc(`companies/${host}/cals/${calendarId}`).get()).data();
-        if (!active(calendar)) return [];
+        if (!active(calendar) || (calendar.viewAccess?.mode === 'selected' && (host !== companyId || calendarViewDecision(calendar, principal) !== true))) return [];
         if (!byHost.has(host)) byHost.set(host, loadScopedEventSnapshots(db, host, { ranges: [{ from, to }], eventIds: [] }));
         const { docs } = await byHost.get(host);
         const rows = docs.map(doc => ({ ...doc.data(), id: doc.id })).filter(row => active(row) &&
@@ -87,6 +88,10 @@ export async function handleSharedSchedule(db, principal, input) {
       }
       const event = (await db.doc(`companies/${host}/events/${id}`).get()).data();
       const row = occurrence(event && { ...event, id }, day);
+      if (row?.calId) {
+        const calendar = (await db.doc(`companies/${host}/cals/${row.calId}`).get()).data();
+        if (calendar?.viewAccess?.mode === 'selected' && (host !== companyId || calendarViewDecision(calendar, principal) !== true)) return [];
+      }
       return row ? [view(row)] : [];
     }));
     return { events: [...new Map(events.flat().map(row => [row.id, row])).values()].sort((a, b) => a.start.localeCompare(b.start)) };

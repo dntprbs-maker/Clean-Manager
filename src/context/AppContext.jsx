@@ -1,3 +1,4 @@
+import { calendarViewDecision } from '../../functions/lib/calendarAccess.js';
 import { syncEventCalendar } from "../../functions/lib/eventCalendar.js";
 import { readScheduleCache, writeScheduleCache, mergeScheduleSnapshot, clearScheduleCache, applySavedEntity } from '../lib/scheduleCache';
 import { seoulToday } from "../lib/dateTime";
@@ -844,8 +845,11 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
   // currentUser.id는 SideDrawer의 "다른 직원으로 보기" 테스트 전환 시에만 있고,
   // 실제 로그인 사용자(loginUser)는 uid만 있으므로 둘 다 대비해 폴백함.
   const myUserId = currentUser.id || currentUser.uid;
-  const isMine = useCallback(c => !c.personal || c.ownerId === myUserId || currentUser.role === "최고관리자",
-    [myUserId, currentUser.role]);
+  const isMine = useCallback(c => {
+    const access = calendarViewDecision(c, { kind: isSuperAdmin(currentUser) ? 'admin' : 'staff', user: { ...currentUser, uid: myUserId } });
+    return access !== null ? access : !c.personal || c.ownerId === myUserId || currentUser.role === "최고관리자";
+  },
+    [myUserId, currentUser]);
   const visibleCals = useMemo(() => cals.filter(isMine), [cals, isMine]);
 
   // 관리팀 전용 로컬(브라우저 한정) 필터 — 평소엔 내 팀 것만 보다가, 필요할 때만 다른 팀
@@ -917,7 +921,8 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
       if (myTeams.length || myAssignmentIds.size || extraCalFilter) {
         const allowedCalIds = new Set(cals.filter(c => myTeams.includes(c.label)).map(c => c.id));
         evs = evs.filter(e =>
-          allowedCalIds.has(e.calId) ||
+          calendarViewDecision(cals.find(c=>c.id===e.calId), { kind:'staff',user:{...currentUser,uid:myUserId} }) === true ||
+        allowedCalIds.has(e.calId) ||
           cals.find(c=>c.id===e.calId)?.personal ||
           (e.source === "regular" && myAssignmentIds.has(e.assignmentId)) ||
           extraAllows(e)

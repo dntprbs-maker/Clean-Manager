@@ -1,3 +1,4 @@
+import { calendarViewDecision } from './calendarAccess.js';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { getMemberships, isAdminStaff } from './membership.js';
 
@@ -25,14 +26,15 @@ export function projectCalendar(cal, principal) {
   if (cal.status === 'deleted') return null;
   const ownPersonal = cal.personal === true && cal.ownerId === principal.user.uid;
   const owner = principal.kind === 'admin' || principal.master;
-  if (cal.personal && !ownPersonal && !owner) return null;
+  const access = calendarViewDecision(cal, principal);
+  if (access === false || (access === null && cal.personal && !ownPersonal && !owner)) return null;
   const managesShared = !cal.personal && isAdminStaff(principal.user);
   const mySharedTeam = !cal.personal && cal.id !== 'regular_cleaning'
     && getMemberships(principal.user).some(m => m.team === cal.label);
-  const fields = ['id', 'label', 'name', 'color', 'checked', 'isField', 'personal', 'ownerId'];
+  const fields = ['id', 'label', 'name', 'color', 'checked', 'isField', 'personal', 'ownerId', 'viewAccess'];
   // A regular-cleaning feed contains all assignments, so assignment membership
   // alone must never disclose its bearer token to an ordinary staff member.
-  if (owner || ownPersonal || managesShared || mySharedTeam) fields.push('feedToken');
+  if (access === null && (owner || ownPersonal || managesShared || mySharedTeam)) fields.push('feedToken');
   if (owner || ownPersonal || managesShared) fields.push('icsSubscriptionUrl', 'icsSubscriptionLastSyncAt', 'icsSubscriptionLastError');
   const result = Object.fromEntries(fields.filter(k => cal[k] !== undefined).map(k => [k, cal[k]]));
   if ((owner || ownPersonal || managesShared) && cal.gcalPushStatus) {
@@ -46,6 +48,8 @@ export function canViewWidgetEvent(event, principal, cals, assignments) {
   if (event.status === 'deleted') return false;
   const cal = cals.find(c => c.id === event.calId);
   if (cal?.status === 'deleted') return false;
+  const access = calendarViewDecision(cal, principal);
+  if (access !== null) return access;
   if (cal?.personal && cal.ownerId !== principal.user.uid && principal.kind !== 'admin') return false;
   if (principal.kind === 'admin' || isAdminStaff(principal.user)) return true;
   const membership = getMemberships(principal.user).map(m => m.team);

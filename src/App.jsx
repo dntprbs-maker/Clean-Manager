@@ -1,3 +1,4 @@
+import CalendarAccessEditor from './features/calendar/CalendarAccessEditor';
 /**
  * 클린메니져 — 네이버 캘린더 완전 재현
  * 3단계 스와이프 모드:
@@ -72,7 +73,7 @@ import { ReceivedSchedules, ScheduleInviteEditor } from "./features/calendar/Sha
 
 function AppInner() {
   const {
-    currentScreen, setCurrentScreen, currentUser, isDemo, cals, teams,
+    currentScreen, setCurrentScreen, currentUser, isDemo, cals, teams, users,
     modal, closeModal, detEv, setDetEv, fieldReportEv, setFieldReportEv,
     drawer, setDrawer, searchOpen, setSearchOpen,
     empModal, setEmpModal,
@@ -243,7 +244,8 @@ function AppInner() {
           <h2 className="mb-4 text-lg font-bold">캘린더 공유 관리</h2>
           {cals.map(cal => <details key={cal.id} className="border-b py-3">
             <summary>{cal.label || cal.name}</summary>
-            <ScheduleInviteEditor calendarId={cal.id} teams={teams}/>
+            <CalendarAccessEditor calendar={cal} teams={teams} users={users}/>
+            {cal.viewAccess?.mode !== "selected" && <ScheduleInviteEditor calendarId={cal.id} teams={teams}/>}
           </details>)}
         </section>}
       {currentScreen === "dashboard"     && <DashboardScreen/>}

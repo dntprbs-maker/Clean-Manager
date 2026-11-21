@@ -1,3 +1,4 @@
+import { saveCalendarAccess, CalendarAccessError } from './calendarAccess.js';
 import { syncEventCalendar } from "./eventCalendar.js";
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
@@ -307,4 +308,10 @@ export const appWidgetData = onRequest({ region: 'asia-northeast3', maxInstances
     const status = widgetErrorStatus(code);
     res.status(status).json({ error: status === 503 ? 'unavailable' : code });
   }
+});
+
+export const appCalendarAccess = onCall({ region: 'asia-northeast3', maxInstances: 5 }, async request => {
+  const principal = await verifyLiveAppSession(request);
+  try { return await saveCalendarAccess(getFirestore(), principal, request.data); }
+  catch (e) { if (e instanceof CalendarAccessError) throw new HttpsError(e.code, e.message); throw e; }
 });

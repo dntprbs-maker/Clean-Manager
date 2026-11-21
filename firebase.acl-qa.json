@@ -1,0 +1,1 @@
+{"firestore": {"rules": "firestore.rules", "indexes": "firestore.indexes.json"}, "functions": {"source": "functions/test/emulator-entry", "codebase": "acl-qa"}, "emulators": {"firestore": {"host": "127.0.0.1", "port": 8180}, "auth": {"host": "127.0.0.1", "port": 9198}, "functions": {"host": "127.0.0.1", "port": 5101}, "ui": {"enabled": false}, "singleProjectMode": true}}
