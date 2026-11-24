@@ -7,6 +7,8 @@ import { auth, functions } from '../firebase';
 const request = httpsCallable(functions, 'appAuth');
 const WidgetSession = registerPlugin('WidgetSession');
 let nativeWidgetDelta=false;
+let nativeCalendarSync=false;
+export const supportsScheduledCalendarSync = () => nativeCalendarSync;
 const store = user => { localStorage.setItem('loginUser', JSON.stringify(user)); localStorage.setItem('scheduleSessionIdentity',JSON.stringify({authUid:auth.currentUser?.uid,companyId:user.companyId,userId:user.uid}));return user; };
 // Sharing is optional: a missing native callback must never block the calendar.
 export async function optionalWidgetOperation(operation, milliseconds = 2500) {
@@ -17,7 +19,7 @@ export async function optionalWidgetOperation(operation, milliseconds = 2500) {
 }
 export async function supportsWidgetSharing() {
   if (!Capacitor.isNativePlatform()) return false;
-  try { const capability=await optionalWidgetOperation(WidgetSession.capabilities());nativeWidgetDelta=capability?.deltaVersion===1;return capability?.supported===true; }
+  try { const capability=await optionalWidgetOperation(WidgetSession.capabilities());nativeWidgetDelta=capability?.deltaVersion===1;nativeCalendarSync=capability?.scheduledCalendarSync===true;return capability?.supported===true; }
   catch { return false; }
 }
 export async function beginWidgetRead(companyId, knownRevision) {
