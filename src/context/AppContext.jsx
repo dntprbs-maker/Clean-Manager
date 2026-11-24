@@ -33,11 +33,71 @@ export function Provider({ children, loginUser, onLogout }) {
   const companyRef = doc(db, "companies", loginUser.companyId);
   const [currentUser, setCurrentUser] = useState(loginUser);
   const [retryGeneration, setRetryGeneration] = useState(0);
+  const webCalendarSync = !Capacitor.isNativePlatform();
+  const syncCalendarRef = useRef(null);
+  const syncCalendarNow = useCallback(() => syncCalendarRef.current?.(), []);
+  const outboxKey = JSON.stringify(['calendar-outbox-v1', loginUser.companyId, auth.currentUser?.uid]);
+  function getCalendarOutbox() {
+    return JSON.parse(localStorage.getItem(outboxKey) || '[]');
+  }
+
+  async function queueCalendarWrite(id, value, mode, expectedVersion) {
+    if (!auth.currentUser?.uid || !navigator.locks) throw Error('이 브라우저에서는 일정 변경을 안전하게 저장할 수 없습니다.');
+    await navigator.locks.request(outboxKey, () => {
+      const rows = getCalendarOutbox();
+      const previous = rows.find(row => row.id === id);
+      if (!previous && !expectedVersion && mode !== 'set') throw Error('일정을 먼저 동기화해 주세요.');
+      rows.push({ id, value, mode, expectedVersion, logId: crypto.randomUUID() });
+      localStorage.setItem(outboxKey, JSON.stringify(rows));
+    });
+    setEvents(rows => applySavedEntity(rows, id, value, mode === 'delete'));
+    return { id, pending: true };
+  }
+
+  async function uploadCalendarOutbox() {
+    if (!navigator.locks) {
+      if (getCalendarOutbox().length) throw Error('전송 대기 중인 일정을 처리할 수 없습니다.');
+      return;
+    }
+    await navigator.locks.request(outboxKey, async () => {
+      const rows = getCalendarOutbox();
+      const accountId = auth.currentUser?.uid;
+      while (rows.length) {
+        if (!accountId || auth.currentUser?.uid !== accountId) throw Error('로그인이 변경되었습니다.');
+        const row = rows[0];
+        const { data } = await httpsCallable(functions, 'appWriteData')({
+          kind: 'events', id: row.id, ...(row.value ? { value: row.value } : {}),
+          merge: row.mode === 'update', remove: row.mode === 'delete',
+          ...(row.expectedVersion ? { expectedVersion: row.expectedVersion } : {}),
+        });
+        rows.shift();
+        const next = rows.find(item => item.id === row.id);
+        if (next && data.version) next.expectedVersion = data.version;
+        localStorage.setItem(outboxKey, JSON.stringify(rows));
+        pendingWrites.current.events.set(row.id, ++pendingWrites.current.sequence);
+        const now = new Date();
+        const action = row.mode === 'delete' ? '삭제' : row.expectedVersion ? '수정' : '등록';
+        await setDoc(doc(companyRef, 'activityLogs', row.logId), {
+          time: now.toISOString(), date: fmt(now), user: loginUser.name || '관리자',
+          action, detail: row.value?.title ? `'${row.value.title}' 일정을 동기화했습니다.` : '일정 변경을 동기화했습니다.',
+        }).catch(error => console.warn('일정 변경 기록 저장 실패', error.code));
+
+      }
+    });
+  }
   const pendingWrites=useRef({events:new Map(),reports:new Map(),sequence:0});
   const [nativeSharing, setNativeSharing] = useState(()=>Capacitor.isNativePlatform()?null:false);
   useEffect(()=>{let active=true;supportsWidgetSharing().then(value=>{if(active)setNativeSharing(value);});return()=>{active=false;};},[]);
   useEffect(() => { setCurrentUser(loginUser); }, [loginUser]);
 
+
+  useEffect(() => {
+    if (!webCalendarSync) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') syncCalendarNow();
+    }, 30 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [webCalendarSync, syncCalendarNow]);
 
   // Firestore 데이터
   const [events, setEvents] = useState([]);
@@ -123,6 +183,10 @@ export function Provider({ children, loginUser, onLogout }) {
 
   async function writeEntity(kind,id,value,mode='set') {
     const clean=value?Object.fromEntries(Object.entries(value).filter(([k])=>!k.startsWith('_'))):undefined;
+    if (webCalendarSync && kind === 'events') {
+      const existing = events.find(event => event.id === id);
+      return queueCalendarWrite(id, clean, mode, value?.__readVersion || existing?.__readVersion);
+    }
     if(!isSuperAdmin(loginUser) && ['events','reports'].includes(kind)) {
       const expectedVersion=kind==='events'?(value?.__readVersion||events.find(e=>e.id===id)?.__readVersion):undefined;
       const {data}=await httpsCallable(functions,'appWriteData')({kind,id,...(clean?{value:clean}:{}),merge:mode==='update',remove:mode==='delete',...(expectedVersion?{expectedVersion}:{})});
@@ -243,6 +307,7 @@ export function Provider({ children, loginUser, onLogout }) {
   const addLog = useCallback((action, detail) => {
     const newLogRef = doc(collection(companyRef, "activityLogs"));
     const now = new Date();
+    if (webCalendarSync && /일정/.test(detail)) return;
     setDoc(newLogRef, {
       time: now.toISOString(),
       date: fmt(now),
@@ -410,7 +475,7 @@ export function Provider({ children, loginUser, onLogout }) {
     const saved=writeEntity("events",ev.id,ev);
     addLog("수정", `'${ev.title}' 일정을 수정했습니다.`);
     return saved;
-  }, [addLog, companyRef]);
+  }, [addLog, companyRef, events]);
 
   const deleteEvent = useCallback(id => {
     const target = events.find(e => e.id === id);
@@ -569,7 +634,11 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
   const [reportHasMore, setReportHasMore] = useState(false);
   const [logHasMore, setLogHasMore] = useState(false);
   const range = calendarRange(current, selDate, calendarDay);
-  const windows = useMemo(()=>calendarWindows(current,selDate,calendarDay),[current,selDate,calendarDay]);
+  // Dates already covered by the same window share the same subscriptions.
+  const windowKey = JSON.stringify(calendarWindows(current,selDate,calendarDay));
+  const cachedWindows = useMemo(() => JSON.parse(windowKey), [windowKey]);
+  const nativeWindows = useMemo(() => calendarWindows(current,selDate,calendarDay), [current,selDate,calendarDay]);
+  const windows = webCalendarSync ? cachedWindows : nativeWindows;
   const fullEvents = searchOpen || currentScreen === "dashboard";
   // The native app and widget consume one server-authorized event snapshot.
   // Browser and Android both persist the authorized response locally.
@@ -602,7 +671,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
     let active=true,inFlight=false,queued=false,queuedForce=false,hasSnapshot=false,verified=false;
     let knownRevision=null,scopeKey=null,snapshotData=null;
     const cacheKey=JSON.stringify([auth.currentUser?.uid,loginUser.companyId,principalKey,fullEvents||currentScreen==='report_history',windows,pinnedIds]);
-    const apply=data=>{setEvents([...(data.events||[]),...(data.instances||[])]);setCals(data.cals||[]);setCalsLoaded(true);setReportRelated(data.reports||[]);setServerReportRows(data.reports||[]);};
+    const apply=data=>{const rows=[...(data.events||[]),...(data.instances||[])];setEvents(webCalendarSync ? getCalendarOutbox().reduce((list,row)=>applySavedEntity(list,row.id,row.value,row.mode==='delete'),rows) : rows);setCals(data.cals||[]);setCalsLoaded(true);setReportRelated(data.reports||[]);setServerReportRows(data.reports||[]);};
     setServerConfirmedAt(null);
     setDataStates(prev=>({...prev,events:{ready:false,cached:true,error:null},reportRelated:{ready:false,cached:true,error:null}}));
     const hydrated=readScheduleCache(cacheKey).then(cached=>{if(active&&cached?.data){snapshotData=cached.data;knownRevision=snapshotData.revision;scopeKey=snapshotData.scopeKey;hasSnapshot=true;if(!pendingWrites.current.events.size&&!pendingWrites.current.reports.size)apply(snapshotData);}});
@@ -617,6 +686,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
       let widgetLease=null;
       setDataStates(prev=>({...prev,events:{ready:false,cached:hasSnapshot,error:null},reportRelated:{ready:false,cached:hasSnapshot,error:null}}));
       try {
+        if (webCalendarSync) await uploadCalendarOutbox();
         if(nativeSharing) {
           // A small authoritative head check also detects changes whose push
           // notification never reached an otherwise fresh native cache.
@@ -669,6 +739,13 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
       } catch(err) {handleError(err);}
       finally {await cancelWidgetRead(widgetLease);inFlight=false;if(active&&queued){const forceAgain=queuedForce;queued=false;queuedForce=false;load(forceAgain);}}
     };
+    if (webCalendarSync) {
+      syncCalendarRef.current = load;
+      hydrated.then(() => {
+        if (active && hasSnapshot) setServerConfirmedAt(snapshotData.serverAt);
+      }).catch(handleError);
+      return () => { active = false; syncCalendarRef.current = null; };
+    }
     const observeRevision=snapshot=>{
       if(!active||snapshot.metadata.fromCache)return;
       const value=snapshot.data()?.revision;
@@ -927,7 +1004,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
 
   return (
     <Ctx.Provider value={{
-      serverConfirmedAt, dataStates, dataReady: Object.values(dataStates).length > 0 && Object.values(dataStates).every(s=>s.ready),
+      serverConfirmedAt, syncCalendarNow: webCalendarSync ? syncCalendarNow : undefined, dataStates, dataReady: Object.values(dataStates).length > 0 && Object.values(dataStates).every(s=>s.ready),
       financeMonth,setFinanceMonth,financeMonths,setCalendarDay, settlementMonth, setSettlementMonth, reportPageSize, setReportPageSize, reportHasMore, reportFacets, reportRows, setReportFilterActive, logPageSize, setLogPageSize, logHasMore, logFacets, setLogFilterActive,
       events,visibleEvents,addEvent,updateEvent,deleteEvent,updateEventScoped,deleteEventScoped,updateLeaderComment,
       fieldReportEv,setFieldReportEv,
@@ -966,7 +1043,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
       eventModalGuardRef,
       companyId: loginUser.companyId
     }}>
-      <DataSyncBanner lastConfirmedAt={serverConfirmedAt} states={dataStates} retry={()=>setRetryGeneration(n=>n+1)}/>
+      <DataSyncBanner lastConfirmedAt={serverConfirmedAt} states={dataStates} retry={webCalendarSync ? syncCalendarNow : ()=>setRetryGeneration(n=>n+1)} scheduled={webCalendarSync}/>
       {children}
     </Ctx.Provider>
   );
