@@ -677,7 +677,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
     const hydrated=readScheduleCache(cacheKey).then(cached=>{if(active&&cached?.data){snapshotData=cached.data;knownRevision=snapshotData.revision;scopeKey=snapshotData.scopeKey;hasSnapshot=true;if(!pendingWrites.current.events.size&&!pendingWrites.current.reports.size)apply(snapshotData);}});
     const revisionRef=doc(companyRef,'meta','readRevision');
     const handleError=err=>{if(active){setDataStates(prev=>({...prev,events:{ready:false,cached:false,error:err.code||'unavailable'},reportRelated:{ready:false,cached:false,error:err.code||'unavailable'}}));if(['functions/permission-denied','functions/unauthenticated','permission-denied','unauthenticated'].includes(err.code)){setEvents([]);setReports([]);setReportRows([]);setReportRelated([]);setDetEv(null);setFieldReportEv(null);clearScheduleCache();onLogout();}}};
-    const load=async(force=false)=>{
+    const load=async(force=false, bootstrap=false)=>{
       if(!active)return;
       if(inFlight){queued=true;queuedForce=queuedForce||force;return;}
       inFlight=true;
@@ -686,7 +686,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
       let widgetLease=null;
       setDataStates(prev=>({...prev,events:{ready:false,cached:hasSnapshot,error:null},reportRelated:{ready:false,cached:hasSnapshot,error:null}}));
       try {
-        if (webCalendarSync) await uploadCalendarOutbox();
+        if (webCalendarSync && !bootstrap) await uploadCalendarOutbox();
         if(nativeSharing) {
           // A small authoritative head check also detects changes whose push
           // notification never reached an otherwise fresh native cache.
@@ -742,7 +742,9 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
     if (webCalendarSync) {
       syncCalendarRef.current = load;
       hydrated.then(() => {
-        if (active && hasSnapshot) setServerConfirmedAt(snapshotData.serverAt);
+        if (!active) return;
+        if (hasSnapshot) setServerConfirmedAt(snapshotData.serverAt);
+        else return load(false, true);
       }).catch(handleError);
       return () => { active = false; syncCalendarRef.current = null; };
     }
