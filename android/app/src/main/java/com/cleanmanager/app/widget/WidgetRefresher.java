@@ -7,50 +7,14 @@ import android.content.Context;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
-/**
- * 위젯 4종이 각자 하던 Firestore 조회를 한 곳으로 모은다.
- * 앱을 열고 닫거나 30분 주기 갱신이 겹쳐도, 같은 기간을 5분 안에 두 번 읽지 않도록
- * 캐시의 조회 범위·시각을 확인해서 실제 조회를 한 번으로 줄인다.
- */
+/** Widgets draw the schedule snapshot shared by the app on this device. */
 public final class WidgetRefresher {
-
-    private static final long CALENDAR_TTL_MS = 6 * 60 * 60 * 1000L;  // 캘린더 색상 재조회 간격
-    private static final Object LOCK = new Object();
-
     private WidgetRefresher() {}
 
-    /** [from,to] 를 포함하도록 캐시를 보장한다. 실제 네트워크 조회를 했으면 true. */
     static boolean ensureRange(Context context, String from, String to, boolean force) {
-        Context appContext = context.getApplicationContext();
-        synchronized (LOCK) {
-            if (force) WidgetSessionStore.invalidateData(appContext);
-            String sessionScope = WidgetSessionStore.scope(appContext);
-            if (!WidgetSessionStore.isSignedIn(appContext)) { WidgetCache.clear(appContext); return false; }
-            // 락을 잡은 뒤 다시 확인한다 — 다른 위젯이 그새 채워 놨을 수 있다.
-            WidgetCache.Snapshot cached = WidgetCache.load(appContext);
-            long dataRevision = WidgetSessionStore.dataRevision(appContext);
-            if (WidgetSharedRead.defer(sessionScope, dataRevision, from, to)) return false;
-            long fence = WidgetSharedRead.nativeFence();
-            long now = System.currentTimeMillis();
-            boolean covers = cached.rangeFrom != null && cached.rangeTo != null
-                    && cached.rangeFrom.compareTo(from) <= 0 && cached.rangeTo.compareTo(to) >= 0;
-            if (!WidgetRefreshPolicy.needsFetch(force, covers, cached.eventsFetchedAt, now, cached.dataRevision, dataRevision)) return false;
-
-            // Keep the already covered window so its server cursor remains valid.
-            String requestFrom=covers?cached.rangeFrom:from, requestTo=covers?cached.rangeTo:to;
-            FirestoreEventFetcher.RangeResult result=FirestoreEventFetcher.fetchCachedRange(appContext,requestFrom,requestTo,cached);
-            if(result==null)return false; // Network failure retains the visible disk cache.
-            java.util.concurrent.atomic.AtomicBoolean saved = new java.util.concurrent.atomic.AtomicBoolean(false);
-            WidgetSessionStore.runIfCurrentRevision(appContext, sessionScope, dataRevision, () -> {
-                if (WidgetSharedRead.nativeMayPublish(fence)) {
-                    saved.set(WidgetCache.saveVersioned(appContext,result.events,result.calendars,requestFrom,requestTo,
-                            now,dataRevision,result.revision,result.scopeKey));
-                }
-            });
-            return saved.get();
-        }
+        if (!WidgetSessionStore.isSignedIn(context)) WidgetCache.clear(context);
+        return false;
     }
 
     /** 이번 달 1일 - 7일 ~ 이번 달 말일 + 14일. 주간·2주·월간 현재 화면을 모두 덮는 범위. */
@@ -121,7 +85,7 @@ public final class WidgetRefresher {
                 && cached.rangeFrom.compareTo(from) <= 0 && cached.rangeTo.compareTo(to) >= 0;
     }
 
-    /** 백그라운드에서 필요한 기간을 확보한 뒤 4종 위젯을 모두 캐시로 다시 그린다. */
+    /** Redraw the installed widgets from the device snapshot. */
     public static void refreshAllAsync(Context context, boolean force) {
         Context appContext = context.getApplicationContext();
         // 설치된 위젯이 하나도 없으면 읽을 이유가 없다 (홈에 위젯이 없는데 매번 Firestore 를 읽던 것 방지).
