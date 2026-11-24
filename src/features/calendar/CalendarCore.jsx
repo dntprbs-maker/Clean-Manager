@@ -650,6 +650,7 @@ export function CalendarView() {
     setDetEv, drawer,
     currentUser, reports, setFieldReportEv,
     cals,
+    syncCalendarNow,
   } = useC();
   // calById()는 모듈 전역 CALS 미러를 읽는데, 이 미러는 useEffect로 렌더 이후에 갱신돼서
   // Firestore cals 스냅샷이 막 도착한 렌더에서는 한 박자 늦은(기본값) 색을 반환한다.
@@ -723,7 +724,10 @@ export function CalendarView() {
     onLeft:  goNextMonth,
     onRight: goPrevMonth,
     onUp:    () => setSheetMode(m => m < 2 ? m + 1 : m),
-    onDown:  () => setSheetMode(m => m > 0 ? m - 1 : m),
+    onDown:  () => {
+      if (sheetMode === 0) syncCalendarNow?.();
+      else setSheetMode(m => m - 1);
+    },
     hThreshold: 30,
     vThreshold: 30,
   });
