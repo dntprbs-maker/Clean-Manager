@@ -136,10 +136,16 @@ test("update_event: 잘못된 시각 형식은 거부하고 원본을 유지한�
 
 test("update_event: 시각과 무관한 수정은 기존 시간·장소를 그대로 둔다", async () => {
   const { call } = await connect();
+  const original = "기존 메모\n기존 수정 기록";
+  assert.equal((await call("update_event", { eventId: "ev1", patch: { description: original } })).isError, false);
   const r = await call("update_event", { eventId: "ev1", patch: { title: "정기청소(수정)" } });
   assert.equal(r.isError, false, r.text);
   const s = stored("ev1");
   assert.equal(s.title, "정기청소(수정)");
+  assert.ok(s.description.startsWith(original + "\n"));
+  assert.match(s.description.slice(original.length + 1), /^\[[^\r\n]+\] 제목 [^\r\n]+ → 정기청소\(수정\)$/);
+  assert.equal((await call("update_event", { eventId: "ev1", patch: { title: s.title } })).isError, false);
+  assert.equal(stored("ev1").description, s.description);
   assert.equal(s.start, "2026-10-22");
   assert.equal(s.end, "2026-10-22");
   assert.equal(s.startTime, "10:00");
