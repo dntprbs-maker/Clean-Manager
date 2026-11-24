@@ -11,7 +11,7 @@ import {
   collection, doc, setDoc, updateDoc, onSnapshot,
   query, where, getDocs, getDocsFromServer, getDocFromServer, deleteDoc, arrayUnion,
 } from "firebase/firestore";
-import { invalidateWidgetData, supportsWidgetSharing, beginWidgetRead, commitWidgetRead, cancelWidgetRead, optionalWidgetOperation } from "../lib/appAuth";
+import { invalidateWidgetData, supportsWidgetSharing, supportsScheduledCalendarSync, beginWidgetRead, commitWidgetRead, cancelWidgetRead, optionalWidgetOperation } from "../lib/appAuth";
 import { Capacitor } from '@capacitor/core';
 import { calendarRange, calendarWindows, expandEventsInWindows, findEventSource, subscribeGroup } from "../lib/scopedData";
 import { DataSyncBanner } from "../components/shared/DataSyncBanner";
@@ -33,7 +33,7 @@ export function Provider({ children, loginUser, onLogout }) {
   const companyRef = doc(db, "companies", loginUser.companyId);
   const [currentUser, setCurrentUser] = useState(loginUser);
   const [retryGeneration, setRetryGeneration] = useState(0);
-  const webCalendarSync = !Capacitor.isNativePlatform();
+  const webCalendarSync = !Capacitor.isNativePlatform() || supportsScheduledCalendarSync();
   const syncCalendarRef = useRef(null);
   const syncCalendarNow = useCallback(() => syncCalendarRef.current?.(), []);
   const outboxKey = JSON.stringify(['calendar-outbox-v1', loginUser.companyId, auth.currentUser?.uid]);
@@ -763,7 +763,7 @@ const [selDate,setSelDate]   = useState(() => widgetDate?.raw || seoulToday());
     const resume=()=>{if(document.visibilityState==='visible')load();};
     document.addEventListener('visibilitychange',resume);window.addEventListener('online',resume);
     return ()=>{active=false;clearInterval(timer);unsub();document.removeEventListener('visibilitychange',resume);window.removeEventListener('online',resume);};
-  },[serverRead,principalKey,loginUser.companyId,fullEvents,currentScreen,range.start,range.end,windows,pinnedIds,retryGeneration,nativeSharing,reminderLink]);
+  },[webCalendarSync,serverRead,principalKey,loginUser.companyId,fullEvents,currentScreen,range.start,range.end,windows,pinnedIds,retryGeneration,nativeSharing,reminderLink]);
   useEffect(()=>{
     if(!serverRead)return;
     const rows=[...serverReportRows].sort((a,b)=>(b.date||'').localeCompare(a.date||'')||b.id.localeCompare(a.id));
