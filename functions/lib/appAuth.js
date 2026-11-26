@@ -7,6 +7,7 @@ import { getApps, initializeApp } from 'firebase-admin/app';
 import { createAppAuthService, AppAuthError, verifyAppPrincipal, publicProfile, canViewWidgetEvent, projectCalendar } from './appAuthCore.js';
 import { recordAppReadChange, readAppChanges, getSourceIds } from './appReadChanges.js';
 import { expandRecurring } from './appRecurrence.js';
+import { isOccurrenceDate, OccurrenceError, readEventTarget, standaloneEvent, writeEventTarget } from './detachOccurrence.js';
 import { handleSharedSchedule } from './sharedSchedule.js';
 import { getMemberships, isAdminStaff, isLeaderOf } from './membership.js';
 import { prepareScopedRead, readScopeKey, normalizeReadScope, loadScopedEventSnapshots, loadScopedReportSnapshots, ScopedReadError, widgetErrorStatus, widgetEvent, projectWidgetRange, mayReadFullReportLedger } from './appScopedReads.js';
@@ -91,7 +92,7 @@ export const appReadData = onCall({ region: 'asia-northeast3', maxInstances: 5 }
     if (event.status === 'deleted') continue;
     if (mayRead(event)) {
       const exceptions = Object.fromEntries(Object.entries(event.exceptions || {}).map(([date, exception]) => [date,
-        !exception ? exception : exception._deleted ? { _deleted: true } : mayRead({ ...event, ...exception }) ? exception : { _deleted: true }]));
+        !exception ? exception : exception._deleted ? { _deleted: true, ...(exception.detachedEventId || exception._detached ? { _detached: true } : {}) } : mayRead({ ...event, ...exception }) ? exception : { _deleted: true }]));
       allowed.push({ ...event, ...(event.exceptions ? { exceptions } : {}) });
     } else if (event.repeat && event.repeat !== 'none') {
       for (const [date, exception] of Object.entries(event.exceptions || {})) {
@@ -153,7 +154,7 @@ export const appReadData = onCall({ region: 'asia-northeast3', maxInstances: 5 }
 
 export const appWriteData = onCall({ region: 'asia-northeast3', maxInstances: 5 }, async request => {
   const principal = await verifyLiveAppSession(request);
-  const { kind, id, value = {}, merge = false, remove = false, expectedVersion, arrayUnionFields = {} } = request.data || {};
+  const { kind, id, value = {}, merge = false, remove = false, expectedVersion, arrayUnionFields = {}, detachOccurrenceDate } = request.data || {};
   if (!['events', 'reports'].includes(kind) || (id !== undefined && (typeof id !== 'string' || !id || id.includes('/')))
     || !value || typeof value !== 'object' || Array.isArray(value)) throw new HttpsError('invalid-argument', '저장할 자료를 확인해주세요.');
   const db = getFirestore();
@@ -183,6 +184,36 @@ export const appWriteData = onCall({ region: 'asia-northeast3', maxInstances: 5 
     const fields = getMemberships(principal.user).map(m => m.team).filter(t => !['관리팀', '영업팀'].includes(t));
     return fields.length === 0 || fields.includes(label(e));
   };
+  if (detachOccurrenceDate !== undefined) {
+    if (kind !== 'events' || !id || remove || !isOccurrenceDate(detachOccurrenceDate)
+      || Object.keys(clean).some(key => key === 'exceptions' || key.startsWith('exceptions.') || key.startsWith('repeat'))) {
+      throw new HttpsError('invalid-argument', '분리할 회차와 저장할 내용을 확인해주세요.');
+    }
+    let detached;
+    try {
+      detached = await db.runTransaction(async tx => {
+        const target = await readEventTarget(tx, ref, detachOccurrenceDate);
+        if (target.seriesRef && expectedVersion !== undefined && target.version?.toDate().toISOString() !== expectedVersion) {
+          throw new HttpsError('aborted', '다른 사용자가 수정했습니다. 새로 확인해주세요.');
+        }
+        const next = target.seriesRef ? standaloneEvent(target, clean) : { ...target.current, ...clean };
+        if (!mayEditEvent(target.current) || !mayEditEvent(next)) {
+          throw new HttpsError('permission-denied', '일정을 수정할 권한이 없습니다.');
+        }
+        await writeEventTarget(tx, target, clean);
+        return target.ref;
+      });
+    } catch (error) {
+      if (error instanceof OccurrenceError) throw new HttpsError('not-found', error.message);
+      throw error;
+    }
+    const [source, event] = await Promise.all([ref.get(), detached.get()]);
+    return {
+      id: event.id, version: event.updateTime?.toDate().toISOString() || null,
+      sourceVersion: source.updateTime?.toDate().toISOString() || null,
+    };
+  }
+
   await db.runTransaction(async tx => {
     const current = await tx.get(ref);
     const old = current.data();

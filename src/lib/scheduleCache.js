@@ -18,7 +18,9 @@ export function applySavedEntity(rows,id,patch,remove=false,version) {
     }
     return next;
   };
-  return rows.some(row=>row.id===id)?rows.map(row=>row.id===id?update(row):row):[...rows,update({})];
+  return rows.some(row=>row.id===id)
+    ? rows.map(row=>row.id===id?update(row):row).filter(row=>!(row.id===id&&row.__occurrenceOnly&&row._deleted))
+    : [...rows,update({})];
 }
 let opened;
 function database() {

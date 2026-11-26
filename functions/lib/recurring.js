@@ -23,7 +23,11 @@ export function expandRecurringForFeed(events, window = {}) {
   const defaultUntil = fmtDate(new Date(now.getFullYear(), now.getMonth() + 6, now.getDate()));
   const out = [];
   for (const ev of events) {
-    if (!ev.repeat || ev.repeat === "none") { out.push(ev); continue; }
+    if (!ev.repeat || ev.repeat === "none") {
+      const exception = ev.exceptions?.[ev.start];
+      if (!exception?.detachedEventId && !exception?._detached) out.push(ev);
+      continue;
+    }
     const dur      = diffDays(ev.start, ev.end || ev.start);
     const until    = window.end && (!ev.repeatUntil || window.end < ev.repeatUntil) ? window.end : (ev.repeatUntil || defaultUntil);
     const untilD   = parseDate(until);

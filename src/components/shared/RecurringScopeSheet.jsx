@@ -19,7 +19,7 @@ export function RecurringScopeSheet() {
   const finish = (v) => { setState(null); resolve(v); };
   const verb = action === "delete" ? "삭제" : "수정";
   const OPTS = [
-    { v: "instance",  l: `이 일정만 ${verb}`,        d: `${ev.start} 회차만` },
+    { v: "instance",  l: `이 일정만 ${verb}`,        d: action === "edit" ? "단건으로 분리되어 이후 전체 수정에서 제외됩니다." : `${ev.start} 회차만` },
     { v: "following", l: `이후 모든 일정 ${verb}`,    d: `${ev.start}부터 이후 전체` },
     { v: "all",       l: `전체 반복일정 ${verb}`,      d: "시리즈 전체" },
   ];

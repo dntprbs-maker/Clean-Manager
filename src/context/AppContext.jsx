@@ -445,7 +445,8 @@ export function Provider({ children, loginUser, onLogout }) {
   }, [addLog, companyRef]);
 
   const updateEvent = useCallback(ev => {
-    const saved=writeEntity("events",ev.id,ev);
+    const { exceptions, detachedFrom, ...fields } = ev;
+    const saved=writeEntity("events",ev.id,fields,"update");
     addLog("수정", `'${ev.title}' 일정을 수정했습니다.`);
     return saved;
   }, [addLog, companyRef, events]);
@@ -471,7 +472,7 @@ export function Provider({ children, loginUser, onLogout }) {
 
   // 반복일정 수정 — scope: "instance"(이 일정만) | "following"(이후 전체) | "all"(전체)
   // clickedEv 는 캘린더에 실제로 표시된(펼쳐진) 인스턴스 — .id=원본 시리즈 id, .start=이 회차 날짜
-  const updateEventScoped = useCallback((clickedEv, scope, patch) => {
+  const updateEventScoped = useCallback(async (clickedEv, scope, patch) => {
     const seriesId = clickedEv.id;
     if (!clickedEv._recurring || scope === "all") {
       return updateEvent({ ...patch, id: seriesId });
@@ -481,19 +482,28 @@ export function Provider({ children, loginUser, onLogout }) {
     if (!original) return;
 
     if (scope === "instance") {
-      const { id, exceptions, _recurring, _hasException, _origDate,
-        repeat, repeatInterval, repeatUntil, repeatWeekdays,
-        repeatMonthlyType, repeatMonthlyDay, repeatMonthlyOrdinal, repeatMonthlyWeekday,
-        repeatYearlyType, repeatYearlyMonth, repeatYearlyDay, repeatYearlyOrdinal, repeatYearlyWeekday,
-        ...rest } = patch;
-      return writeEntity("events",seriesId,{ [`exceptions.${dateStr}`]: rest },"update").then(()=>addLog("수정", `'${patch.title}' 반복일정 중 ${dateStr} 1회만 수정했습니다.`));
+      const editableFields = [
+        "title", "description", "start", "end", "startTime", "endTime", "allDay", "calId", "place",
+        "url", "contact", "photos", "reminderModes", "finance", "completed", "status", "team",
+      ];
+      const value = Object.fromEntries(editableFields
+        .filter(key => patch[key] !== undefined).map(key => [key, patch[key]]));
+      const { data } = await httpsCallable(functions, "appWriteData")({
+        kind: "events", id: seriesId, detachOccurrenceDate: dateStr, value,
+        ...(original.__readVersion ? { expectedVersion: original.__readVersion } : {}),
+      });
+      publishSavedEntity("events", seriesId, { [`exceptions.${dateStr}`]: { _deleted: true, _detached: true } }, false, data.sourceVersion);
+      publishSavedEntity("events", data.id, { ...value, repeat: "none" }, false, data.version);
+      await invalidateWidgetData();
+      addLog("수정", `'${patch.title}' 반복일정 중 ${dateStr} 회차를 단건 일정으로 분리했습니다.`);
     }
 
     if (scope === "following") {
       if (dateStr <= original.start) return updateEvent({ ...patch, id: seriesId });
       const saved=writeEntity("events",seriesId,{ repeatUntil: add(dateStr, -1) },"update");
       const { id, _recurring, _hasException, _origDate, ...rest } = patch;
-      return saved.then(()=>addEvent({ ...rest, start: dateStr, repeatUntil: original.repeatUntil || "" }));
+      const exceptions = Object.fromEntries(Object.entries(original.exceptions || {}).filter(([date]) => date >= dateStr));
+      return saved.then(()=>addEvent({ ...rest, exceptions, start: dateStr, repeatUntil: original.repeatUntil || "" }));
     }
   }, [events, addLog, companyRef, updateEvent, addEvent]);
 

@@ -234,17 +234,29 @@ test("반복 회차의 메모·사진·날짜 수정이 원본과 다른 회차�
   const initial = await call("list_events", { start: "2026-11-25", end: "2026-11-25" });
   assert.equal(initial.data[0].occurrenceDate, key.occurrenceDate);
 
+  const report = db.doc(`companies/${CO}/reports/current`);
+  const nextReport = db.doc(`companies/${CO}/reports/next`);
+  await report.set({ eventId: "ev1", date: "2026-11-25", memo: "작업 보고" });
+  await nextReport.set({ eventId: "ev1", date: "2026-12-25" });
+
   const memo = await call("update_event", { ...key, patch: { description: "이체 메모" } });
   assert.equal(memo.isError, false, memo.text);
+  const id = memo.data.id;
+  assert.notEqual(id, "ev1");
+  assert.deepEqual((await report.get()).data(), { eventId: id, date: "2026-11-25", memo: "작업 보고" });
+  assert.equal((await nextReport.get()).data().eventId, "ev1");
   const attached = await call("attach_event_photos", { ...key, photos: [receipt] });
   assert.equal(attached.isError, false, attached.text);
+  assert.equal(attached.data.eventId, id);
   const moved = await call("update_event", { ...key, patch: { start: "2026-11-26", title: "이체 확인" } });
   assert.equal(moved.isError, false, moved.text);
 
   const read = await call("get_event", key);
   assert.equal(read.data.start, "2026-11-26");
   assert.equal(read.data.end, "2026-11-26");
-  assert.equal(read.data.occurrenceDate, key.occurrenceDate);
+  assert.equal(read.data.id, id);
+  assert.equal(read.data.occurrenceDate, undefined);
+  assert.equal(read.data.repeat, undefined);
   assert.match(read.data.description, /^이체 메모\n.*시작일 2026-11-25 → 2026-11-26/);
   assert.deepEqual(read.data.photos.map(photo => photo.name), ["shared.jpg", "receipt.jpg"]);
   assert.equal(read.data.photos[0].path, undefined);
@@ -262,7 +274,26 @@ test("반복 회차의 메모·사진·날짜 수정이 원본과 다른 회차�
   assert.equal(stored.description, "공통 메모");
   assert.deepEqual(stored.photos, [sharedPhoto]);
   assert.equal(stored.mcpUpdatedBy, undefined);
+  assert.deepEqual(stored.exceptions["2026-11-25"], { _deleted: true, detachedEventId: id });
   assert.deepEqual(stored.exceptions["2026-12-25"], { title: "다음 달 예외" });
+  const child = db.doc(`companies/${CO}/events/${id}`);
+  const standalone = (await child.get()).data();
+  assert.equal(standalone.repeat, "none");
+  assert.equal(standalone.exceptions, undefined);
+  assert.equal(standalone.repeatUntil, undefined);
+  assert.equal(standalone.repeatMonthlyDay, undefined);
+
+  const all = await call("update_event", { eventId: "ev1", patch: {
+    title: "전체 제목", description: "전체 메모", startTime: "14:00", repeatUntil: "2026-11-01",
+  } });
+  assert.equal(all.isError, false, all.text);
+  assert.deepEqual((await child.get()).data(), standalone);
+  const after = await call("list_events", { start: "2026-11-25", end: "2026-11-26" });
+  assert.deepEqual(after.data, [read.data]);
+  const stop = await call("update_event", { eventId: "ev1", patch: { repeat: "none", start: "2026-11-25", end: "2026-11-25" } });
+  assert.equal(stop.isError, false, stop.text);
+  const stopped = await call("list_events", { start: "2026-11-25", end: "2026-11-26" });
+  assert.deepEqual(stopped.data, [read.data]);
 });
 
 test("유효하지 않은 날짜·취소된 회차·단건 일정은 회차 쓰기 및 업로드를 거부한다", async () => {
