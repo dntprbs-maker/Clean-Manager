@@ -24,6 +24,7 @@
 
 - **삭제:** AI는 `request_event_deletion`(요청 등록)만 가능합니다. 일정은 그대로 남고, 관리자가 `node scripts/mcp-agent.mjs approve <요청ID>`를 직접 실행해야 실제 삭제됩니다. 기존 `delete_event` 도구는 없앴습니다.
 - **시험 일정:** `create_event`에 `test: true` → 제목 앞에 `[MCP시험]`, `mcpTest: true` 저장, **직원 푸시 알림 안 보냄**. `search_events`의 `onlyTest: true`로 시험 일정만 찾을 수 있습니다.
+- **반복 일정 한 회차 수정:** `list_events` 또는 `search_events` 결과의 `id`와 `occurrenceDate`를 `update_event` 또는 `attach_event_photos`에 전달합니다. `get_event`에도 같은 값을 전달하여 해당 회차를 확인합니다. 회차가 다른 날짜로 이동했어도 `occurrenceDate`는 원래 날짜입니다. 생략하면 기존처럼 원본에 적용됩니다.
 - 등록·수정 시 `mcpCreatedBy` / `mcpUpdatedBy`(AI 이름·시각)를 일정 문서에 남깁니다.
 - 권한 없는 도구는 그 AI의 도구 목록에 아예 안 보입니다. AI를 끄면(`disable`) 이미 발급된 토큰도 즉시 막힙니다.
 

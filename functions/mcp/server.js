@@ -28,7 +28,7 @@ export const TOOL_SCOPES = {
 // 여러 개/휘발성이라 세션을 유지하지 않는 편이 단순하고 안전함).
 // agent: 인증 단계에서 확인된 AI(누구인지·권한). 권한 없는 도구는 목록에서도 숨긴다.
 export function createMcpServer(companyId, agent) {
-  const server = new McpServer({ name: "clean-manager", version: "1.2.0" }, { capabilities: {} });
+  const server = new McpServer({ name: "clean-manager", version: "1.3.0" }, { capabilities: {} });
   const register = server.registerTool.bind(server);
   server.registerTool = (name, config, handler) => {
     const need = TOOL_SCOPES[name] || SCOPES.ADMIN;

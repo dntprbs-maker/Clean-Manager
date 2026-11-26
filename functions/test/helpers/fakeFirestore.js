@@ -6,15 +6,24 @@ export function createFakeDb() {
   const store = new Map(); // fullPath → data
   let failNextBatch = 0;
 
+  const update = (path, fields) => {
+    if (!store.has(path)) throw new Error(`NOT_FOUND: ${path}`);
+    const data = clone(store.get(path));
+    for (const [field, value] of Object.entries(fields)) {
+      const segments = field.split(".");
+      const key = segments.pop();
+      const parent = segments.reduce((node, part) => (node[part] ??= {}), data);
+      parent[key] = clone(value);
+    }
+    store.set(path, data);
+  };
+
   const docRef = (path) => ({
     id: path.split("/").pop(),
     path,
     async get() { return snap(path); },
     async set(data, opts) { write(path, data, opts?.merge); },
-    async update(data) {
-      if (!store.has(path)) throw new Error(`NOT_FOUND: ${path}`);
-      write(path, data, true);
-    },
+    async update(data) { update(path, data); },
     async delete() { store.delete(path); },
   });
   const snap = (path) => {
@@ -57,6 +66,7 @@ export function createFakeDb() {
       const tx = {
         get: (ref) => ref.get(),
         set: (ref, data, opts) => write(ref.path, data, opts?.merge),
+        update: (ref, data) => update(ref.path, data),
         delete: (ref) => store.delete(ref.path),
       };
       return fn(tx);
