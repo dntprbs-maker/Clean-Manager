@@ -219,3 +219,69 @@ test('ChatGPT 첨부 도구 메타데이터 및 클라우드 추가·교체 종�
   assert.deepEqual(Object.values(bucket._files)[0].buffer,png);
  } finally {globalThis.fetch=oldFetch; await client.close(); await server.close();}
 });
+
+test("반복 회차의 메모·사진·날짜 수정이 원본과 다른 회차에 전파되지 않는다", async () => {
+  const ref = db.doc(`companies/${CO}/events/ev1`);
+  const sharedPhoto = { name: "shared.jpg", url: "https://example.com/shared.jpg", path: "shared" };
+  const receipt = { name: "receipt.jpg", url: "https://example.com/receipt.jpg" };
+  await ref.update({
+    start: "2020-01-25", end: "2020-01-25", repeat: "monthly", repeatUntil: "2026-12-31",
+    description: "공통 메모", photos: [sharedPhoto],
+    exceptions: { "2026-12-25": { title: "다음 달 예외" } },
+  });
+  const { call } = await connect();
+  const key = { eventId: "ev1", occurrenceDate: "2026-11-25" };
+  const initial = await call("list_events", { start: "2026-11-25", end: "2026-11-25" });
+  assert.equal(initial.data[0].occurrenceDate, key.occurrenceDate);
+
+  const memo = await call("update_event", { ...key, patch: { description: "이체 메모" } });
+  assert.equal(memo.isError, false, memo.text);
+  const attached = await call("attach_event_photos", { ...key, photos: [receipt] });
+  assert.equal(attached.isError, false, attached.text);
+  const moved = await call("update_event", { ...key, patch: { start: "2026-11-26", title: "이체 확인" } });
+  assert.equal(moved.isError, false, moved.text);
+
+  const read = await call("get_event", key);
+  assert.equal(read.data.start, "2026-11-26");
+  assert.equal(read.data.end, "2026-11-26");
+  assert.equal(read.data.occurrenceDate, key.occurrenceDate);
+  assert.match(read.data.description, /^이체 메모\n.*시작일 2026-11-25 → 2026-11-26/);
+  assert.deepEqual(read.data.photos.map(photo => photo.name), ["shared.jpg", "receipt.jpg"]);
+  assert.equal(read.data.photos[0].path, undefined);
+
+  const oldDate = await call("list_events", { start: "2026-11-25", end: "2026-11-25" });
+  assert.deepEqual(oldDate.data, []);
+  const newDate = await call("list_events", { start: "2026-11-26", end: "2026-11-26" });
+  assert.deepEqual(newDate.data, [read.data]);
+  const next = await call("get_event", { eventId: "ev1", occurrenceDate: "2026-12-25" });
+  assert.equal(next.data.title, "다음 달 예외");
+  assert.equal(next.data.description, "공통 메모");
+  assert.equal(next.data.photos.length, 1);
+  const stored = (await ref.get()).data();
+  assert.equal(stored.start, "2020-01-25");
+  assert.equal(stored.description, "공통 메모");
+  assert.deepEqual(stored.photos, [sharedPhoto]);
+  assert.equal(stored.mcpUpdatedBy, undefined);
+  assert.deepEqual(stored.exceptions["2026-12-25"], { title: "다음 달 예외" });
+});
+
+test("유효하지 않은 날짜·취소된 회차·단건 일정은 회차 쓰기 및 업로드를 거부한다", async () => {
+  const { call } = await connect();
+  const ref = db.doc(`companies/${CO}/events/ev1`);
+  const patch = { description: "잘못된 대상" };
+  assert.equal((await call("update_event", { eventId: "ev1", occurrenceDate: "2026-11-30", patch })).isError, true);
+  await ref.update({ repeat: "monthly", repeatUntil: "2026-12-31", exceptions: { "2026-11-30": { _deleted: true } } });
+  for (const occurrenceDate of ["2026-11-29", "2026-11-30", "2026-02-30"]) {
+    const key = { eventId: "ev1", occurrenceDate };
+    assert.equal((await call("get_event", key)).isError, true);
+    assert.equal((await call("update_event", { ...key, patch })).isError, true);
+    assert.equal((await call("attach_event_photos", {
+      ...key, photos: [{ name: "receipt.jpg", dataBase64: Buffer.from("test").toString("base64") }],
+    })).isError, true);
+  }
+  const key = { eventId: "ev1", occurrenceDate: "2026-12-30" };
+  assert.equal((await call("update_event", { ...key, patch: { repeat: "none" } })).isError, true);
+  assert.equal((await call("update_event", { ...key, patch: { start: "2026-02-30" } })).isError, true);
+  assert.equal(Object.keys(bucket._files).length, 0);
+  assert.deepEqual((await ref.get()).data().exceptions, { "2026-11-30": { _deleted: true } });
+});
