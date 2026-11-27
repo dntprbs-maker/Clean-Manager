@@ -3,6 +3,7 @@ import { CHAT_FILE, downloadChatPhotos } from '../lib/chatFiles.js';
 import { randomUUID } from "node:crypto";
 import { getDb, getBucket } from "../lib/db.js";
 import { expandRecurring } from "../../lib/appRecurrence.js";
+import { isOccurrenceDate, readEventTarget, writeEventTarget } from "../../lib/detachOccurrence.js";
 import { buildHubFeed } from "../../lib/hubFeed.js";
 import { exportHubChanges } from "../../lib/hubChanges.js";
 import { ok, err } from "../lib/toolResult.js";
@@ -87,39 +88,12 @@ function toView(ev, teamByCal, agent) {
   };
 }
 
-const isDate = date => /^\d{4}-\d{2}-\d{2}$/.test(date) && addDays(date, 0) === date;
 const OCCURRENCE_DATE = z.string().refine(
-  isDate,
+  isOccurrenceDate,
   "occurrenceDate는 유효한 YYYY-MM-DD 날짜여야 합니다.",
-).optional().describe("이 회차만 대상으로 할 때 list_events의 occurrenceDate (이동 전 원래 날짜). 생략하면 원본 일정 전체를 대상으로 합니다.");
+).optional().describe("한 회차의 원래 날짜. 회차만 수정하면 단건으로 분리됩니다. 생략하면 입력한 일정 ID에 적용됩니다.");
 
-function eventTarget(snap, eventId, occurrenceDate) {
-  const series = snap.data();
-  if (!snap.exists || series.status === "deleted") throw Error(`일정 ${eventId}을 찾을 수 없습니다.`);
-  if (!occurrenceDate) return { current: series };
-
-  const exception = series.exceptions?.[occurrenceDate] || {};
-  const [base] = expandRecurring([{ ...series, id: eventId, exceptions: {} }], {
-    start: occurrenceDate, end: occurrenceDate,
-  }).filter(event => event._origDate === occurrenceDate);
-  if (!base || exception._deleted) throw Error(`반복 일정의 ${occurrenceDate} 회차를 찾을 수 없습니다.`);
-
-  const start = exception.start || base.start;
-  const duration = (Date.parse(base.end) - Date.parse(base.start)) / 86400000;
-  const current = {
-    ...base, ...exception, id: eventId, _origDate: occurrenceDate,
-    start, end: exception.end || addDays(start, duration),
-  };
-  return { current, exception };
-}
-
-function saveTarget(transaction, ref, occurrenceDate, target, patch) {
-  if (occurrenceDate) {
-    transaction.update(ref, { [`exceptions.${occurrenceDate}`]: { ...target.exception, ...patch } });
-  } else {
-    transaction.set(ref, patch, { merge: true });
-  }
-}
+const readTarget = (ref, occurrenceDate) => readEventTarget(null, ref, occurrenceDate);
 
 // 사진 입력 — 이미 업로드된 것은 url로, 새로 올릴 것은 base64(dataBase64)로 받는다.
 // 앱 화면(CalendarCore.jsx)이 올릴 때 쓰는 것과 같은 경로 규칙(companies/{cid}/events/{eid}/...)
@@ -250,11 +224,10 @@ export function registerEventTools(server, companyId) {
       inputSchema: { eventId: z.string().describe("일정 id"), occurrenceDate: OCCURRENCE_DATE },
     },
     async ({ eventId, occurrenceDate }, extra) => {
-      const snap = await eventsCol().doc(eventId).get();
       try {
-        const { current } = eventTarget(snap, eventId, occurrenceDate);
+        const { current, ref } = await readTarget(eventsCol().doc(eventId), occurrenceDate);
         const teamByCal = await loadTeamNameByCalId(companyId);
-        return ok(toView({ ...current, id: eventId }, teamByCal, extra?.agent));
+        return ok(toView({ ...current, id: current._recurring ? eventId : ref.id }, teamByCal, extra?.agent));
       } catch (error) {
         return err(error.message);
       }
@@ -338,7 +311,7 @@ export function registerEventTools(server, companyId) {
     "update_event",
     {
       title: "일정 수정",
-      description: "기존 일정을 부분 수정한다. occurrenceDate를 지정하면 해당 회차만 변경한다. 제목·날짜·시간을 바꿀 때 메모를 생략하면 기존 메모 끝에 수정 이력 한 줄을 자동으로 추가한다.",
+      description: "기존 일정을 부분 수정한다. occurrenceDate를 지정하면 해당 회차를 단건으로 분리해 수정한다. 이후에는 응답 id로 단건을 수정할 수 있다. 제목·날짜·시간을 바꿀 때 메모를 생략하면 기존 메모 끝에 수정 이력 한 줄을 자동으로 추가한다.",
       inputSchema: {
         eventId: z.string().describe("수정할 일정 id (list_events로 조회한 id)"),
         occurrenceDate: OCCURRENCE_DATE,
@@ -352,7 +325,7 @@ export function registerEventTools(server, companyId) {
       },
     },
     async ({ eventId, occurrenceDate, patch }, extra) => {
-      if (occurrenceDate && [patch.start, patch.end].some(date => date !== undefined && !isDate(date))) {
+      if (occurrenceDate && [patch.start, patch.end].some(date => date !== undefined && !isOccurrenceDate(date))) {
         return err("start와 end는 유효한 YYYY-MM-DD 날짜여야 합니다.");
       }
       if (occurrenceDate && Object.keys(REPEAT_FIELDS).some(key => patch[key] !== undefined)) {
@@ -394,14 +367,14 @@ export function registerEventTools(server, companyId) {
         return patchCopy;
       }
       try {
-        const { current } = eventTarget(await docRef.get(), eventId, occurrenceDate);
-        schedulePatch(current);
+        const initial = await readTarget(docRef, occurrenceDate);
+        schedulePatch(initial.current);
         const calId = await resolveCalId(companyId, patch.team);
         if (patch.team && !calId) return err(`팀 "${patch.team}"을 찾을 수 없습니다.`);
-        const photos = patch.photos === undefined ? undefined : await uploadPhotos(companyId, eventId, patch.photos) || [];
+        const photos = patch.photos === undefined ? undefined : await uploadPhotos(companyId, initial.ref.id, patch.photos) || [];
         const updatedBy = audit(extra?.agent);
-        const next = await getDb().runTransaction(async transaction => {
-          const target = eventTarget(await transaction.get(docRef), eventId, occurrenceDate);
+        const saved = await getDb().runTransaction(async transaction => {
+          const target = await readEventTarget(transaction, docRef, occurrenceDate);
           const current = target.current;
           const next = { ...schedulePatch(current), mcpUpdatedBy: updatedBy };
           if (patch.team !== undefined) next.calId = calId || "";
@@ -424,11 +397,12 @@ export function registerEventTools(server, companyId) {
               next.description = current.description ? `${current.description}\n${line}` : line;
             }
           }
-          saveTarget(transaction, docRef, occurrenceDate, target, next);
-          return next;
+          await writeEventTarget(transaction, target, next);
+          return { id: target.ref.id, next };
         });
+        const { id, next } = saved;
         return ok({
-          id: eventId, occurrenceDate,
+          id, occurrenceDate,
           updated: { ...next, ...(next.photos ? { photos: publicPhotos(next.photos) } : {}) },
         });
       } catch (error) {
@@ -438,27 +412,28 @@ export function registerEventTools(server, companyId) {
   );
 
   server.registerTool('attach_event_photos', {
-    title: '현장 일정에 사진 추가', description: 'ChatGPT 대화 첨부 사진은 files로 전달한다. 서버가 파일을 다운로드하여 영구 저장한다. 일정 생성 후에도 이 도구로 첨부한다. 기존 사진은 보존한다. occurrenceDate를 지정하면 해당 회차에만 추가한다. 로컬 업로드는 photos의 base64 또는 기존 HTTPS URL도 지원한다. 이후 get_event로 확인한다.',
+    title: '현장 일정에 사진 추가', description: 'ChatGPT 대화 첨부 사진은 files로 전달한다. 서버가 파일을 다운로드하여 영구 저장한다. 일정 생성 후에도 이 도구로 첨부한다. 기존 사진은 보존한다. occurrenceDate를 지정하면 해당 회차를 단건으로 분리해 사진을 붙인다. 이후에는 응답 eventId를 사용한다. 로컬 업로드는 photos의 base64 또는 기존 HTTPS URL도 지원한다. 이후 get_event로 확인한다.',
     _meta: { 'openai/fileParams': ['files'] },
     inputSchema: { eventId: z.string().min(1), occurrenceDate: OCCURRENCE_DATE, photos: z.array(PHOTO_SHAPE).min(1).max(20).optional(), files: z.array(CHAT_FILE).min(1).max(20).optional() },
   }, async ({ eventId, occurrenceDate, photos, files }, extra) => {
     if (!!photos === !!files) return err("photos 또는 ChatGPT 첨부 files 중 하나만 전달해주세요.");
     const ref = eventsCol().doc(eventId);
     try {
-      const { current } = eventTarget(await ref.get(), eventId, occurrenceDate);
+      const initial = await readTarget(ref, occurrenceDate);
+      const { current } = initial;
       if ((current.photos || []).length + (photos || files).length > 100) {
         return err("일정당 사진은 100장까지 첨부할 수 있습니다.");
       }
-      const uploaded = await uploadPhotos(companyId, eventId, files ? await downloadChatPhotos(files) : photos);
-      const merged = await getDb().runTransaction(async transaction => {
-        const target = eventTarget(await transaction.get(ref), eventId, occurrenceDate);
+      const uploaded = await uploadPhotos(companyId, initial.ref.id, files ? await downloadChatPhotos(files) : photos);
+      const saved = await getDb().runTransaction(async transaction => {
+        const target = await readEventTarget(transaction, ref, occurrenceDate);
         const all = [...(target.current.photos || [])];
         for (const photo of uploaded) if (!all.some(old => old.url === photo.url)) all.push(photo);
         if (all.length > 100) throw Error("일정당 사진은 100장까지 첨부할 수 있습니다.");
-        saveTarget(transaction, ref, occurrenceDate, target, { photos: all, mcpUpdatedBy: audit(extra?.agent) });
-        return all;
+        await writeEventTarget(transaction, target, { photos: all, mcpUpdatedBy: audit(extra?.agent) });
+        return { id: target.ref.id, photos: all };
       });
-      return ok({ eventId, occurrenceDate, photos: publicPhotos(merged), added: uploaded.length });
+      return ok({ eventId: saved.id, occurrenceDate, photos: publicPhotos(saved.photos), added: uploaded.length });
     } catch (error) {
       return err(`사진 첨부 실패: ${error.message}`);
     }

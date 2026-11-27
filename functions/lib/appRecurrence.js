@@ -36,7 +36,8 @@ export function expandRecurring(events, window = {}) {
   const overlaps = (start, end) => (!window.start || end >= window.start) && (!window.end || start <= window.end);
   for (const ev of events) {
     if (!ev.repeat || ev.repeat === "none" || !["daily", "weekly", "monthly", "yearly"].includes(ev.repeat)) {
-      if (overlaps(ev.start, ev.end || ev.start)) out.push(ev);
+      const exception = ev.exceptions?.[ev.start];
+      if (!exception?.detachedEventId && !exception?._detached && overlaps(ev.start, ev.end || ev.start)) out.push(ev);
       continue;
     }
     if (!validDate(ev.start)) throw new RangeError("Invalid recurrence start");

@@ -367,7 +367,7 @@ export const sendNoticeNotification = onDocumentCreated(
 export const sendEventNotification = onDocumentCreated(
   { region: REGION, document: DOC },
   async (event) => {
-    if (!event.data) return;
+    if (!event.data || event.data.data().detachedFrom) return;
     await notifyTeam(event.params.companyId, event.params.eventId, event.data.data(), "created");
   }
 );

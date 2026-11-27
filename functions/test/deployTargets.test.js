@@ -26,3 +26,17 @@ test('scoped read helper stays within app functions',()=>{
   assert.ok(plan.includes('functions:appWidgetData'));
   assert.ok(!plan.split(',').includes('functions'));
 });
+
+test('calendar detachment deploys its consumers without deploying unrelated functions', () => {
+  const files = ['functions/index.js', 'functions/lib/appAuth.js', 'functions/lib/detachOccurrence.js',
+    'functions/lib/appRecurrence.js', 'functions/lib/recurring.js', 'functions/mcp/tools/events.js'];
+  const diff = '@@ -370 +370 @@ export const sendEventNotification = onDocumentCreated(\n'
+    + '-    if (!event.data) return;\n'
+    + '+    if (!event.data || event.data.data().detachedFrom) return;';
+  const plan = deploymentTargets(files, diff).split(',');
+  for (const target of ['mcp', 'appWriteData', 'sendEventNotification', 'syncEventReminders', 'dailyScheduleDigest']) {
+    assert.ok(plan.includes('functions:' + target));
+  }
+  assert.ok(!plan.includes('functions'));
+  assert.ok(deploymentTargets(files, diff + '\n+anotherChange();').startsWith('functions,'));
+});

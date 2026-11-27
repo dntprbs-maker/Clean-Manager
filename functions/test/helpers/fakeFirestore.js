@@ -21,6 +21,8 @@ export function createFakeDb() {
   const docRef = (path) => ({
     id: path.split("/").pop(),
     path,
+    get parent() { return collectionRef(path.slice(0, path.lastIndexOf("/"))); },
+    collection: name => collectionRef(`${path}/${name}`),
     async get() { return snap(path); },
     async set(data, opts) { write(path, data, opts?.merge); },
     async update(data) { update(path, data); },
@@ -55,12 +57,16 @@ export function createFakeDb() {
     },
   });
 
+  const collectionRef = path => ({
+    ...query(path),
+    doc: id => docRef(`${path}/${id}`),
+    get parent() { return docRef(path.slice(0, path.lastIndexOf("/"))); },
+  });
+
   const db = {
     _store: store,
     failNextBatchCommit(n = 1) { failNextBatch = n; },
-    collection(path) {
-      return { ...query(path), doc: (id) => docRef(`${path}/${id}`) };
-    },
+    collection: collectionRef,
     doc: (path) => docRef(path),
     async runTransaction(fn) {
       const tx = {

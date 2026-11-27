@@ -7,6 +7,21 @@ export function deploymentTargets(files, indexDiff = '', configUnchanged = true)
   if(configUnchanged && runtime.length && runtime.every(f=>f.startsWith('functions/mcp/')||f==='functions/lib/moneyExpression.js')) {
     return ['functions:mcp',...(files.includes('firestore.rules')?['firestore:rules']:[]),...(files.includes('firestore.indexes.json')?['firestore:indexes']:[])].join(',');
   }
+  const lines = indexDiff.split("\n").filter(line =>
+    (line.startsWith("+") || line.startsWith("-")) && !line.startsWith("+++") && !line.startsWith("---"));
+  const onlyDetachNotification = indexDiff.includes("export const sendEventNotification") && lines.length === 2
+    && lines.includes("-    if (!event.data) return;")
+    && lines.includes("+    if (!event.data || event.data.data().detachedFrom) return;");
+  if (configUnchanged && onlyDetachNotification && runtime.includes("functions/lib/detachOccurrence.js")
+    && runtime.every(file => file.startsWith("functions/mcp/") || [
+      "functions/index.js", "functions/lib/appAuth.js", "functions/lib/detachOccurrence.js",
+      "functions/lib/appRecurrence.js", "functions/lib/recurring.js",
+    ].includes(file))) {
+    return ["functions:mcp", "functions:sendEventNotification", "functions:syncEventReminders", "functions:dailyScheduleDigest", ...APP_FUNCTIONS.map(name => "functions:" + name),
+      ...(files.includes("firestore.rules") ? ["firestore:rules"] : []),
+      ...(files.includes("firestore.indexes.json") ? ["firestore:indexes"] : []),
+    ].join(",");
+  }
   const allowed = new Set(['functions/index.js','functions/lib/appAuth.js','functions/lib/sharedSchedule.js','functions/lib/appAuthCore.js','functions/lib/appRecurrence.js','functions/lib/appScopedReads.js','functions/lib/appReadChanges.js','functions/lib/widgetPush.js','functions/lib/settlement.js','functions/lib/settlementApi.js']);
   const oldFeed='    const visible = expanded.filter(ev => ev.start >= cutoff && ev.start <= horizon);';
   const newFeed='    const visible = expanded.filter(ev => ev.calId === cal && ev.start >= cutoff && ev.start <= horizon);';
